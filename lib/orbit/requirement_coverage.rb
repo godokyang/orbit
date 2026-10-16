@@ -37,7 +37,6 @@ module Orbit
     ITEM_SCOPES = %w[delivery lifecycle].freeze
     MAX_BYTES = 2 * 1024 * 1024
     MAX_RECORDS = 256
-    MAX_ITEMS = 64
     MAX_TEXT = 1000
     # The item-text bound is a representation bound: a long requirement sentence
     # must survive verbatim. It is not a relaxation of acceptance - missing,
@@ -132,8 +131,8 @@ module Orbit
       raise Error, "coverage.complete must be a boolean" unless [true, false].include?(coverage["complete"])
 
       items = coverage["items"]
-      unless items.is_a?(Array) && items.length.between?(1, MAX_ITEMS)
-        raise Error, "coverage items must be 1..#{MAX_ITEMS} entries"
+      unless items.is_a?(Array) && !items.empty?
+        raise Error, "coverage items must contain at least one entry"
       end
 
       seen = {}

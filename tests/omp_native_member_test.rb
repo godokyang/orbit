@@ -85,7 +85,7 @@ class BridgedHost < NativeHost
   def member_state(id)
     lifecycle = @accepted_at ? { "acceptedAt" => @accepted_at } : nil
     { "id" => id, "model" => "zhipu-coding-plan/glm-5.2", "registry_status" => @registry_status || "idle",
-      "output_path" => @output_path, "lifecycle" => lifecycle }
+      "output_path" => @output_path, "lifecycle" => lifecycle }.merge(@member_state_extra || {})
   end
 
   def member_result(id)
@@ -98,7 +98,7 @@ class BridgedHost < NativeHost
 
   attr_writer :hub_events
 
-  attr_accessor :fail_send
+  attr_accessor :fail_send, :member_state_extra
 
   def send_member(id, text)
     raise Orbit::Connection::Error, "delivery rejected" if @fail_send
@@ -372,7 +372,7 @@ module OmpNativeMemberTest
     FileUtils.remove_entry(root) if root
   end
 
-  def delivered_amendment_clears_and_terminal_member_needs_user
+  def delivered_amendment_clears_and_ended_member_is_reported
     root, record, host, runtime = open_task(BridgedHost)
     host.fail_send = true
     register(record, "orbit-active")
@@ -389,8 +389,79 @@ module OmpNativeMemberTest
     host.instance_variable_set(:@registry_status, "idle")
     runtime.tick(now: Time.now.to_f + 2)
     final = record.state
-    assert(final["status"] == "needs_user", "a finished member with an undelivered amendment needs the user: #{final['error']}")
-    assert(Array(final["amendment_delivery_queue"]).any? { |item| item["source_id"] == "m3" }, "the pending amendment evidence is kept")
+    member = final["members"].first
+    # The member's execution ended before the amendment could reach it. That
+    # is a delivery fact for Root, not a user decision: supervised work keeps
+    # running and the undeliverable amendment stays visible instead of being
+    # assumed applied or turned into a needs_user stop.
+    assert(final["status"] != "needs_user", "an ended member does not stop the task as needing the user: #{final['status']}")
+    assert(Array(final["amendment_delivery_queue"]).empty?, "a delivery that can never happen leaves the retry queue")
+    assert(member["amendment_delivery"] == "undeliverable", "the member records the undeliverable amendment")
+    undeliverable = Array(final["amendment_undeliverable"]).find { |item| item["source_id"] == "m3" }
+    assert(undeliverable && undeliverable["member_status"] == "completed",
+           "the pending amendment keeps the member's real terminal state")
+    assert(host.messages.any? { |text| text.include?("m3") && text.include?("orbit-active") },
+           "Root is told which amendment could not be delivered")
+    assert(events(record).any? { |event| event["type"] == "member_amendment_undeliverable" },
+           "the undeliverable delivery is recorded")
+  ensure
+    FileUtils.remove_entry(root) if root
+  end
+
+  def removed_registration_does_not_keep_the_cached_running
+    root, record, host, runtime = open_task(BridgedHost)
+    host.instance_variable_set(:@registry_status, "running")
+    register(record, "orbit-removed")
+    runtime.tick(now: Time.now.to_f)
+    assert(record.state["members"].first["registry_status"] == "running", "precondition: the member was observed running")
+    # OMP emits status_changed and then removed. The bridge serves the removal
+    # plus an explicit UNKNOWN final status instead of repeating `running`.
+    host.member_state_extra = { "registry_status" => nil, "streaming" => nil, "active_tools" => nil,
+                                "session_attached" => false, "retained_snapshot" => true,
+                                "registration_removed" => true, "registration_removed_at" => "2026-10-16T00:00:00Z" }
+    runtime.tick(now: Time.now.to_f + 1)
+    removed = record.state["members"].first
+    assert(removed["registry_status"].nil?,
+           "a removed registration never keeps the cached running: #{removed['registry_status'].inspect}")
+    assert(removed["registration_removed_at"] == "2026-10-16T00:00:00Z", "the removal fact is persisted")
+    assert(events(record).any? { |event| event["type"] == "member_registry_removed" && event["thread_id"] == "orbit-removed" },
+           "the removal is recorded")
+    assert(host.messages.any? { |text| text.include?("orbit-removed") },
+           "Root is told the member's registration disappeared")
+    reported = host.messages.length
+    runtime.tick(now: Time.now.to_f + 2)
+    assert(host.messages.length == reported, "the same removal is not reported again")
+  ensure
+    FileUtils.remove_entry(root) if root
+  end
+
+  def retries_root_notice_after_removed_registration_send_fails
+    root, record, host, runtime = open_task(BridgedHost)
+    register(record, "orbit-removal-retry")
+    host.member_state_extra = { "registry_status" => nil, "streaming" => nil, "active_tools" => nil,
+                                "session_attached" => false, "retained_snapshot" => true,
+                                "registration_removed" => true, "registration_removed_at" => "2026-10-16T00:00:00Z" }
+    attempts = 0
+    host.define_singleton_method(:send_message) do |text, integration_check: nil|
+      attempts += 1
+      raise Orbit::Connection::Error, "temporary host failure" if attempts == 1
+
+      @messages << text
+      { "id" => "sent-#{@messages.length}" }
+    end
+    runtime.tick(now: Time.now.to_f)
+    member = record.state["members"].first
+    assert(member["registration_removal_report"] == "failed",
+           "the failed Root notice is recorded for retry")
+    host.instance_variable_set(:@accepted_at, (Time.now.to_f * 1000).to_i)
+    runtime.tick(now: Time.now.to_f + 1)
+    member = record.state["members"].first
+    assert(member["registration_removal_report"] == "sent" && host.messages.any? { |text| text.include?("orbit-removal-retry") },
+           "a later observation retries the same removal notice")
+    assert(member["status"] == "completed" && host.messages.last.include?("当前成员终态为 completed"),
+           "a retry after settlement reports the current result instead of stale triage instructions")
+    assert(events(record).count { |event| event["type"] == "member_registry_removed" } == 1,
+           "retry does not duplicate the removal fact")
   ensure
     FileUtils.remove_entry(root) if root
   end
@@ -459,7 +530,9 @@ module OmpNativeMemberTest
     corrupt_roster_still_stops_known_ids_as_unconfirmed
     unknown_status_is_not_treated_as_registered
     amendment_delivery_failure_stays_visible
-    delivered_amendment_clears_and_terminal_member_needs_user
+    delivered_amendment_clears_and_ended_member_is_reported
+    removed_registration_does_not_keep_the_cached_running
+       retries_root_notice_after_removed_registration_send_fails
     persists_task_scoped_hub_events_once
     native_collaboration_gap_follows_per_task_seq
     puts "PASS omp native member reconciliation"

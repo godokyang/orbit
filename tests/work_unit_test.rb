@@ -89,6 +89,12 @@ begin
   assert(delegate_unit["execution"] == "delegate" &&
          Orbit::WorkUnitStore.execution_role(delegate_unit) == "pending_dispatch",
          "delegate execution must be stored and classified")
+  FileUtils.mkdir_p(File.join(@project, "docs"))
+  File.write(File.join(@project, "docs", "README.md"), "task input material\n")
+  autonomous_files = store.declare(SPEC.merge("allowed_paths" => [], "allowed_tools" => %w[read write edit grep glob],
+                                               "allowed_commands" => [], "input_materials" => ["docs/README.md"]))
+  assert(autonomous_files["scope"]["allowed_paths"].empty?,
+         "native file access does not require Root to predeclare member paths")
 
   # 2. declare validation: objective/requirements/acceptance/escalation, scope, dependencies.
   record = new_record
@@ -108,6 +114,9 @@ begin
   raises_error("protected path") { store.declare(SPEC.merge("allowed_paths" => [".orbit"])) }
   raises_error("escaping path") { store.declare(SPEC.merge("allowed_paths" => ["../outside"])) }
   raises_error("bash without commands") { store.declare(SPEC.merge("allowed_commands" => [])) }
+  raises_error("bash without a path sandbox") do
+    store.declare(SPEC.merge("allowed_paths" => [], "allowed_tools" => ["bash"], "allowed_commands" => ["ruby tests/"]))
+  end
   raises_error("missing input material") { store.declare(SPEC.merge("input_materials" => ["lib/orbit/missing.md"])) }
   assert(store.list.empty?, "failed declares must not persist anything")
 

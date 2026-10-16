@@ -287,8 +287,9 @@ async function safeSearchBase(base) {
     const directory = pending.pop();
     for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
       if (++visited > 10000) throw new Error('search base is too broad to verify; choose a smaller scoped directory');
-      if (entry.name === '.git' || entry.name === '.orbit' || entry.isSymbolicLink())
-        throw new Error('native search could traverse protected data or a symlink; choose a narrower base or use scoped read');
+      if (entry.name === '.git' || entry.name === '.orbit') continue;
+      if (entry.isSymbolicLink())
+        throw new Error('native search could traverse a symlink; choose a narrower base or use scoped read');
       if (entry.isDirectory()) pending.push(path.join(directory, entry.name));
     }
   }
@@ -518,8 +519,13 @@ export async function validateMemberTool(unit, { toolName, input, rootAgentId, e
     if (!supported.has(toolName) || !unit.scope?.allowed_tools?.includes(toolName))
       throw new Error(`tool ${toolName} has no allowed work-unit entrance`);
     const { root, allowed } = await resolveUnitScope(unit);
-    if (!allowed.length) throw new Error('work unit allows no filesystem path');
+    // File selection belongs to the member inside the task's artifact root.
+    // The path declaration remains an execution boundary for shell commands;
+    // it does not gate native file tools. Protected metadata and symlink/root
+    // escape checks still apply to every native target.
+    const fileAccess = [root];
     if (toolName === 'bash') {
+      if (!allowed.length) throw new Error('bash requires declared allowed_paths for its filesystem sandbox');
       if (typeof input.command !== 'string' || !unit.scope.allowed_commands?.includes(input.command))
         throw new Error('command is absent from the declared work-unit commands');
       if (input.pty || input.env || input.name || input.ready) throw new Error('PTY, injected environment and services have no bounded command entrance');
@@ -546,7 +552,7 @@ export async function validateMemberTool(unit, { toolName, input, rootAgentId, e
         // the payload itself is passed through unchanged.
         const execBase = await canonical(cwd || root);
         if (!within(root, execBase)) throw new Error('member execution cwd is outside the work-unit artifact root');
-        for (const target of targets) await scopedPath(target, root, allowed, execBase);
+        for (const target of targets) await scopedPath(target, root, fileAccess, execBase);
         return { input };
       }
       // Fallback when the host SDK exposes no projection: only the verified
@@ -554,16 +560,16 @@ export async function validateMemberTool(unit, { toolName, input, rootAgentId, e
       if (typeof input.path !== 'string') throw new Error('this edit form exposes no complete target paths; use a scoped write or report to Root');
       if (Object.keys(input).some(key => !['path', 'old_string', 'new_string', 'replace_all', 'edits'].includes(key)))
         throw new Error('edit contains an unprojected input form');
-      result.path = await scopedPath(input.path, root, allowed);
+      result.path = await scopedPath(input.path, root, fileAccess);
       if (input.edits !== undefined) {
         if (!Array.isArray(input.edits)) throw new Error('invalid native edit list');
         result.edits = await Promise.all(input.edits.map(async edit => {
           if (!edit || typeof edit !== 'object') throw new Error('invalid native edit');
-          return { ...edit, ...(edit.rename === undefined ? {} : { rename: await scopedPath(edit.rename, root, allowed) }) };
+          return { ...edit, ...(edit.rename === undefined ? {} : { rename: await scopedPath(edit.rename, root, fileAccess) }) };
         }));
       }
     } else if (toolName === 'read') {
-      result.path = await scopedReadTarget(input.path, root, allowed);
+      result.path = await scopedReadTarget(input.path, root, fileAccess);
     } else if (toolName === 'grep' || toolName === 'glob') {
       // Non-schema keys keep the conservative escape guard; the native glob
       // tool takes no `pattern`/`glob` parameter (the find pattern is embedded
@@ -573,12 +579,12 @@ export async function validateMemberTool(unit, { toolName, input, rootAgentId, e
           (typeof input.glob === 'string' && (path.isAbsolute(input.glob) || input.glob.split(/[\\/]/).includes('..'))))
         throw new Error('search pattern escapes its scoped base');
       const scoped = toolName === 'grep'
-        ? await scopedGrepTarget(input.path, root, allowed, cwd)
-        : await scopedFindTarget(input.path, root, allowed);
+        ? await scopedGrepTarget(input.path, root, fileAccess, cwd)
+        : await scopedFindTarget(input.path, root, fileAccess);
       result.path = scoped.path;
       for (const base of scoped.bases) await safeSearchBase(base);
     } else {
-      result.path = await scopedPath(input.path || '.', root, allowed);
+      result.path = await scopedPath(input.path || '.', root, fileAccess);
     }
     return { input: result };
   } catch (error) { return { block: true, reason: `Orbit work-unit scope: ${error.message}` }; }
@@ -590,9 +596,9 @@ export async function validateMemberTool(unit, { toolName, input, rootAgentId, e
 // first-hop blocker was found; it is not proof of complete command/dependency
 // feasibility. Otherwise returns { block: true, reason } for Root to repair.
 // options.materials: task input material paths the Root plans to hand the
-// member; each must already exist inside the artifact root, outside
-// .git/.orbit, and inside the member's allowed paths (members read nothing
-// else — Root must place materials under an allowed path first). options.cwd
+// member; each must already exist inside the artifact root and outside
+// .git/.orbit. Native file access is rooted at the artifact root; shell
+// commands retain their separately declared path sandbox. options.cwd
 // is the caller-verified workspace, used only when unit.artifact_root is absent.
 export async function validateWorkUnitPreflight(unit, { materials = unit?.input_materials ?? [], cwd, availableTools } = {}) {
   try {
@@ -604,12 +610,12 @@ export async function validateWorkUnitPreflight(unit, { materials = unit?.input_
     const unknown = tools.filter(name => !supported.has(name) && name !== 'hub' && name !== 'yield');
     if (unknown.length)
       throw new Error(`declared tools have no member entrance: ${unknown.join(', ')}; the member gate exposes read/write/edit/grep/glob/bash plus the native hub/yield lifecycle`);
-    if (!allowed.length)
-      throw new Error('the unit declares no allowed_paths; the member gate refuses every tool and command call without at least one allowed path');
     if (commands.length && !tools.includes('bash'))
       throw new Error('allowed_commands are declared without the bash tool entrance; add bash to allowed_tools or drop the commands');
     if (tools.includes('bash') && !commands.length)
       throw new Error('bash has no allowed_commands and cannot execute; declare complete commands or remove bash before dispatch');
+    if (tools.includes('bash') && !allowed.length)
+      throw new Error('bash requires declared allowed_paths for its filesystem sandbox');
     if (tools.includes('bash') && !availableSandbox())
       throw new Error('the bounded command sandbox is unavailable; Root must run commands instead of dispatching an unexecutable unit');
     if (tools.includes('bash')) {
@@ -630,8 +636,6 @@ export async function validateWorkUnitPreflight(unit, { materials = unit?.input_
       catch { throw new Error(`material ${material} does not exist; prepare it in the project before dispatch instead of re-dispatching`); }
       if (!within(root, lexical) || !within(root, real) || protectedPath(lexical) || protectedPath(real))
         throw new Error(`material ${material} is outside the artifact root or under a protected path`);
-      if (!allowed.some(entry => within(entry, lexical) && within(entry, real)))
-        throw new Error(`material ${material} is outside the member's allowed paths; place it under an allowed path or extend allowed_paths before dispatch`);
     }
     return { ok: true, root, allowed };
   } catch (error) { return { block: true, reason: `Orbit work-unit preflight: ${error.message}` }; }

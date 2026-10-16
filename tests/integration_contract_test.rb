@@ -381,11 +381,12 @@ module IntegrationContractTest
       state = record.state
       state.merge!("status" => "needs_user", "stop_confirmation" => { "confirmed" => true })
       record.save(state)
-      code, _out, err = orbit("start", "--provider", "omp", "--project", project, "--thread", "root-session",
-                              "--socket", File.join(project, "unused.sock"), "--message-id", "m2", "--review-model", CHOSEN,
-                              "--resume-from", record.path, "--foreground")
-      assert(code == 1 && err.include?("confirmed stopped task"), "a needs_user task is not resumable while the declared from_status is only paused")
-      assert(CONTRACT.dig("capabilities", "resume_from", "from_status") == ["paused"], "the declaration says so")
+      resumed = start(project, "m2", "--resume-from", record.path)
+      resumed_state = Orbit::TaskRecord.new(resumed.fetch("task_directory")).state
+      assert(resumed_state.dig("continuation", "previous_task") == state["id"],
+             "a legacy needs_user record is resumed through a new task boundary")
+      assert(CONTRACT.dig("capabilities", "resume_from", "from_status").include?("needs_user"),
+             "the capability declares the additive legacy needs_user source")
 
       before = Dir.glob(File.join(project, ".orbit/tasks/*")).length
       too_many = (1..17).flat_map { |index| ["--external-ref", "r#{index}"] }

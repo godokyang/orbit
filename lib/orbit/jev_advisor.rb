@@ -65,6 +65,11 @@ module Orbit
       end
     end
 
+    # The task runtime uses this to persist the exact request and the
+    # normalized result for each actual call. It is deliberately separate
+    # from status projections, which keep only a compact latest summary.
+    attr_reader :last_trace
+
     AMENDMENT_BUDGET = 8000
     AMENDMENT_TEXT_LIMIT = 1200
     BASIS_BUDGET = 4000
@@ -144,11 +149,26 @@ module Orbit
     # fail-closed callers keep their behavior. Checker question changes use a
     # distinct version while retaining the same validated wire shape.
     def post_questions(state:, questions:, question_set_version:)
+      @last_trace = nil
       request = JudgmentRequest.new(
         state: state, questions: self.class.model_questions(questions),
         question_set_version: question_set_version, provider: TypeSafeJudgment::PROVIDER, model: @model
       )
-      result = judgment_provider.judge(request)
+      @last_trace = {
+        "metadata" => { "provider" => request.provider,
+                        "question_set_version" => request.question_set_version },
+        "request" => {
+          "model" => @model, "state" => request.state,
+          "questions" => request.questions.transform_values do |question|
+            { "type" => "noul", "instructions" => question.fetch("instruction"),
+              "criteria" => { "true" => question.fetch("true_criterion"),
+                              "false" => question.fetch("false_criterion") } }
+          end
+        }
+      }
+      provider = judgment_provider
+      result = provider.judge(request)
+      @last_trace["provider_response"] = provider.last_response if provider.respond_to?(:last_response) && provider.last_response
       unless result.complete_for?(request)
         failure = if result.unavailable?
                     result
@@ -159,9 +179,12 @@ module Orbit
                     )
                   end
         failure = failure.with_call_id(result.call_id) if result.call_id && !failure.call_id
+        @last_trace["result"] = failure.to_h
         receipt = failure.to_h.merge("question_set_version" => question_set_version, "requested_model" => @model)
         raise Error.new(failure.error, receipt: receipt)
       end
+
+      @last_trace["result"] = result.to_h
 
       {
         "provider" => result.provider, "model" => result.actual_model,
@@ -170,11 +193,17 @@ module Orbit
         "usage" => result.usage, "call_id" => result.call_id, "requested_model" => @model, "status" => result.status,
         "input_version" => state.is_a?(Hash) ? state["input_version"] : nil
       }
-    rescue Error
+    rescue Error => error
+      @last_trace["provider_response"] = provider.last_response if @last_trace.is_a?(Hash) && provider && provider.respond_to?(:last_response) && provider.last_response
+      @last_trace["result"] ||= error.receipt if error.receipt
       raise
     rescue JudgmentRequest::Error, JudgmentResult::Error, TypeSafeJudgment::Error => error
+      @last_trace["provider_response"] = provider.last_response if @last_trace.is_a?(Hash) && provider && provider.respond_to?(:last_response) && provider.last_response
+      @last_trace["result"] ||= { "status" => "unavailable", "error" => error.message }
       raise Error, error.message
     rescue StandardError => error
+      @last_trace["provider_response"] = provider.last_response if @last_trace.is_a?(Hash) && provider && provider.respond_to?(:last_response) && provider.last_response
+      @last_trace["result"] ||= { "status" => "unavailable", "error" => "TypeSafe assessment failed: #{error.class}" }
       raise Error, "TypeSafe assessment failed: #{error.class}"
     end
 
@@ -199,6 +228,11 @@ module Orbit
         "basis_omitted" => basis_omitted,
         "amendments" => amendments,
         "amendments_omitted" => omitted,
+        # Newly observed native user text is sent verbatim, with its task
+        # relation made explicit. Seeing a message does not amend the task.
+        "new_user_messages" => Array(inputs["jev_user_messages"]).map do |message|
+          message.slice("id", "text", "task_relation", "observed_at")
+        end,
         "member_options" => member_options,
         "member_blocks" => member_blocks_projection(member_blocks),
         "host" => host.slice("status", "turn_id", "last_turn_id", "last_turn_status", "active_tools"),

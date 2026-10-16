@@ -93,6 +93,7 @@ module JevAdvisorTest
     check_checker_quality_request_and_parsing
     check_checker_overview_prior_has_no_time_verdict
     check_stage_two_rejects_invalid_probabilities
+    check_observation_includes_user_messages_verbatim
     check_git_excerpt_utf8_boundary
     check_error_boundaries
     puts "JEV_ADVISOR_TEST_PASS (deterministic, local fixture only)"
@@ -174,7 +175,8 @@ module JevAdvisorTest
 
   def check_stage_one_request_and_parsing
     with_fixture([payload(STAGE_ONE_ANSWERS)]) do |endpoint, requests|
-      result = Orbit::JevAdvisor.new(api_key: "test-key", endpoint: endpoint).assess(state: { "instruction" => "stage one" })
+      advisor = Orbit::JevAdvisor.new(api_key: "test-key", endpoint: endpoint)
+      result = advisor.assess(state: { "instruction" => "stage one" })
       sent = requests.first
       check(sent["questions"].keys.sort == %w[artifact_ready off_track stuck],
             "stage one sends only its three scheduling questions")
@@ -185,6 +187,11 @@ module JevAdvisorTest
       check(result["scores"] == { "stuck" => 0.1, "off_track" => 0.2, "artifact_ready" => 0.3 },
             "stage one parses exactly its own answers and ignores a delegatable answer")
       check(result["model"] == "jev-test" && result["usage"] == { "input_tokens" => 12 }, "model and usage are returned")
+      check(advisor.last_trace.dig("request", "state") == sent["state"] &&
+            advisor.last_trace.dig("request", "questions") == sent["questions"] &&
+            advisor.last_trace.dig("result", "call_id") == result["call_id"] &&
+            Base64.decode64(advisor.last_trace.dig("provider_response", "body_base64")) == payload(STAGE_ONE_ANSWERS),
+            "the call trace captures the complete wire request, raw response and linked parsed result")
     end
   end
 
@@ -257,6 +264,21 @@ module JevAdvisorTest
       expect_error("stage two rejects a missing answer") do
         Orbit::JevAdvisor.new(api_key: "test-key", endpoint: endpoint).assess_delegation(state: { "instruction" => "x" })
       end
+    end
+  end
+
+  def check_observation_includes_user_messages_verbatim
+    Dir.mktmpdir("orbit-jev-user-message-") do |root|
+      message = { "id" => "native-2", "text" => "Is the deployment note part of this task?",
+                  "task_relation" => "unassigned", "observed_at" => "2026-10-16T00:00:00Z" }
+      observation = Orbit::JevAdvisor.observation(
+        inputs: { "instruction" => "Implement the requested change", "basis" => [], "amendments" => [],
+                  "jev_user_messages" => [message] },
+        host: { "status" => "active", "observations" => [] }, members: [],
+        project_root: root, artifact_digest: "digest", elapsed_seconds: 1
+      )
+      check(observation.fetch("new_user_messages") == [message],
+            "new user text reaches Jev verbatim with its relation labeled")
     end
   end
 

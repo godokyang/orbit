@@ -16,7 +16,6 @@ require_relative "model_evidence_cache"
 require_relative "model_candidate_pool"
 require_relative "checker_model_selector"
 require_relative "check_runner"
-require_relative "git_remote_evidence"
 require_relative "task_git_evidence"
 require_relative "observation_key"
 require_relative "resource_call_ledger"
@@ -743,6 +742,7 @@ module Orbit
       signature = Digest::SHA256.hexdigest(JSON.generate([
         host.slice("status", "turn_id", "last_turn_id", "last_turn_status", "active_tools"),
         artifact_digest, @record.input_digest(@state), @state["members"].map { |member| member.slice("thread_id", "status") },
+        Array(@state["jev_user_messages"]).map { |message| [message["id"], message["text"]] },
         blocks_fingerprint
       ]))
       # Time and noisy progress counters do not constitute a new observation.
@@ -750,7 +750,8 @@ module Orbit
       # unchanged observation (including after an unavailable judgment).
       return nil if now < @jev_next_at || signature == @jev_signature
       observation = JevAdvisor.observation(
-        inputs: @record.inputs(@state), host: host, members: @state["members"],
+        inputs: @record.inputs(@state).merge("jev_user_messages" => Array(@state["jev_user_messages"])),
+        host: host, members: @state["members"],
         project_root: artifact_root, artifact_digest: artifact_digest,
         elapsed_seconds: now - Time.parse(@state.fetch("created_at")).to_f,
         member_options: delegation_options, member_blocks: member_block_summary
@@ -771,15 +772,19 @@ module Orbit
 
       process_score = [scores.fetch("stuck"), scores.fetch("off_track")].max
       @jev_process_streak = process_score >= 0.65 ? @jev_process_streak + 1 : 0
+      decision = nil
+      decision_reason = "scores did not meet a check trigger"
       if scores.fetch("artifact_ready") >= 0.8 && artifact_digest != @initial_digest &&
          artifact_digest != @last_full_check_digest
-        return :artifact
-      end
-      if (process_score >= 0.85 || @jev_process_streak >= 2) && signature != @jev_last_process_trigger
+        decision = :artifact
+        decision_reason = "artifact_ready met the existing threshold for a changed, unchecked artifact"
+      elsif (process_score >= 0.85 || @jev_process_streak >= 2) && signature != @jev_last_process_trigger
         @jev_last_process_trigger = signature
-        return :process
+        decision = :process
+        decision_reason = "stuck/off_track met the existing process-check threshold"
       end
-      nil
+      persist_jev_call(result, decision: decision, reason: decision_reason)
+      decision
     rescue JevAdvisor::Error => error
       @jev_unavailable = true
       @jev_last_at = now
@@ -787,12 +792,28 @@ module Orbit
       @jev_signature = signature
       @jev_process_streak = 0
       judgment = consume_jev_failure(error, "jev_stage1")
+      persist_jev_call(nil, decision: :unavailable, reason: error.message)
       @record.event("jev_unavailable", judgment.merge("reason" => error.message))
       @state["jev"] = (@state["jev"].is_a?(Hash) ? @state["jev"] : {}).merge(
         judgment.merge("status" => "unavailable", "unavailable" => error.message, "at" => Time.at(now).utc.iso8601)
       )
       save
       :unavailable
+    end
+
+    # Keep a call-scoped copy of the actual payload and normalized provider
+    # result. The event points to the private task-local file and records the
+    # scheduler's decision separately from the model's scores.
+    def persist_jev_call(result, decision:, reason:, trace: nil, details: nil)
+      trace ||= @advisor.last_trace if @advisor.respond_to?(:last_trace)
+      return unless trace.is_a?(Hash)
+
+      trace = trace.merge("result" => result) if trace["result"].nil? && result.is_a?(Hash)
+      @record.record_jev_call(trace, decision: decision&.to_s || "no_check", reason: reason, details: details)
+    rescue StandardError => error
+      @record.event("jev_call_record_failed", "call_id" => trace&.dig("result", "call_id"),
+                    "reason" => "#{error.class}: #{error.message}",
+                    "decision" => decision&.to_s, "decision_reason" => reason)
     end
 
     def save
@@ -1026,6 +1047,7 @@ module Orbit
                    when "rebind_workspace" then %w[path]
                    when "takeover_scope" then %w[prior_scope]
                    when "dispute" then %w[reason]
+                   when "ruling" then %w[decision check]
                    when "review_model" then %w[model]
                    when "member_selection" then %w[request_id work_unit_id]
                    else []
@@ -1082,6 +1104,8 @@ module Orbit
         when "dispute"
           @state["dispute"] = command.fetch("reason")
           schedule_check(0, "用户请求的裁定", trigger: "manual_dispute", manual: true)
+        when "ruling"
+          apply_root_ruling(command)
         else
           @record.event("command_rejected", "reason" => "Unknown command #{command['type']}")
         end
@@ -1096,6 +1120,10 @@ module Orbit
       relative = "amendments/#{@state.fetch('amendments').length + 1}.txt"
       @record.write(relative, text)
       @state["amendments"] << { "path" => relative, "source" => source, "at" => Time.now.utc.iso8601 }
+      if source.is_a?(Hash) && source["kind"] == "native_user_message" && source["id"]
+        message = Array(@state["jev_user_messages"]).find { |entry| entry["id"] == source["id"] }
+        message["task_relation"] = "registered_amendment" if message
+      end
       @record.event("instruction_amended", "source" => source)
       @state["completion_readiness"] = { "status" => "invalidated", "reason" => "任务要求已显式修订" }
       @state["members"].each do |member|
@@ -1317,11 +1345,56 @@ module Orbit
         return if TERMINAL.include?(@state["status"])
         member = @state["members"].find { |entry| entry["thread_id"] == item["thread_id"] }
         unless member && %w[registered working starting].include?(member["status"])
-          stop("member #{item['thread_id']} ended before receiving amendment #{item['source_id']}", status: "needs_user")
-          return
+          # The amendment can no longer reach THIS member: its execution ended.
+          # That is a delivery fact for Root, not a user decision and not a
+          # reason to stop supervised work: Root can continue, re-dispatch or
+          # settle the path, and the current input (which already carries the
+          # amendment) is what any later dispatch binds. Record the
+          # undeliverable delivery, tell Root once, and stop retrying it.
+          record_undeliverable_amendment(member, item)
+          next
         end
         send_queued_amendment(member, item)
       end
+    end
+
+    # An amendment whose member execution already ended cannot be delivered.
+    # The fact is kept (member, source, that member's terminal state and the
+    # last delivery error) and Root is told once through the existing channel;
+    # the item leaves the retry queue because repeated sends to a finished
+    # member prove nothing. An unmentioned amendment is never silently
+    # dropped -- it stays visible in `amendment_undeliverable` and in the
+    # member record.
+    def record_undeliverable_amendment(member, item)
+      queue = @state["amendment_delivery_queue"]
+      queue.delete(item) if queue.is_a?(Array)
+      member_status = member.is_a?(Hash) ? member["status"].to_s : "unknown"
+      member_status = "unknown" if member_status.empty?
+      (@state["amendment_undeliverable"] ||= []) << {
+        "thread_id" => item["thread_id"], "source_id" => item["source_id"],
+        "member_status" => member_status, "at" => Time.now.utc.iso8601, "error" => item["error"]
+      }
+      if member.is_a?(Hash)
+        member["amendment_delivery"] = "undeliverable"
+        member["amendment_error"] = "member #{item['thread_id']} ended (#{member_status}) " \
+                                    "before receiving amendment #{item['source_id']}"
+      end
+      @record.event("member_amendment_undeliverable", "thread_id" => item["thread_id"],
+                    "source_id" => item["source_id"], "member_status" => member_status)
+      return unless @connection.respond_to?(:send_message)
+
+      text = "Orbit：用户修订 #{item['source_id']} 无法送达成员 #{item['thread_id']}（该成员执行已结束：#{member_status}）。" \
+             "该修订已计入当前任务输入，后续重新派发会带上它；程序不再重试这条递送，也没有因此停止任务。" \
+             "请判断：重新派发、在现有结果上收尾，或按需要向用户提问。"
+      sent = @connection.send_message(text)
+      @state["sent_message_ids"] << sent.fetch("id")
+      @record.event("member_amendment_undeliverable_reported", "thread_id" => item["thread_id"],
+                    "message_id" => sent.fetch("id"))
+      save
+    rescue StandardError => error
+      @record.event("member_amendment_undeliverable_notify_failed", "thread_id" => item["thread_id"],
+                    "error" => error.message)
+      save
     end
 
     def send_queued_amendment(member, item)
@@ -1514,6 +1587,12 @@ module Orbit
         state: member_selection_state(artifact_digest, host, unit: unit), work_unit: unit,
         previous: @state["member_selections"][id]
       )
+      Array(selection["jev_traces"]).each_with_index do |trace, index|
+        persist_jev_call(nil, trace: trace, decision: selection["decision"] || "member_selection",
+                         reason: selection["reason"] || "member selection returned a judgment",
+                         details: { "work_unit_id" => id, "judgment_index" => index + 1 })
+      end
+      selection = selection.reject { |key, _| key == "jev_traces" }
       if selection["reused"] != true
         Array(selection["judgments"]).each do |receipt|
           accumulate_jev_usage("jev_member_#{receipt['phase']}", receipt["usage"], receipt: receipt)
@@ -1832,10 +1911,28 @@ module Orbit
 
       previous = member.slice("model", "result", "output_path", "session_file",
                               "registry_status", "accepted_at", "status", "result_delivery",
-                              "last_turn_error", "settlement_basis", "settlement_history", "error")
+                              "last_turn_error", "settlement_basis", "settlement_history", "error",
+                              "registration_removed_at", "registration_removal_report")
       previous_status = member["status"]
       previous_accepted = member["accepted_at"]
-      member["registry_status"] = registry_status if registry_status.is_a?(String) && !registry_status.empty?
+      if observed.is_a?(Hash) && observed["registration_removed"] == true
+        # The bridge proved the native registration is gone (OMP `removed`).
+        # It serves the last saved status only when that status is a real
+        # non-running observation; a saved `running` cannot be the current
+        # state of a removed ref and arrives as an explicit unknown. A cached
+        # `running` must never survive here: it would keep an exited member
+        # looking like work in flight, and the unknown value becomes nil
+        # instead of repeating the stale status.
+        member["registry_status"] = registry_status.is_a?(String) && !registry_status.empty? ? registry_status : nil
+        unless member["registration_removed_at"]
+          stamp = observed["registration_removed_at"]
+          member["registration_removed_at"] = stamp.is_a?(String) && !stamp.empty? ? stamp : Time.now.utc.iso8601
+          @record.event("member_registry_removed", "thread_id" => member["thread_id"],
+                        "reported_status" => registry_status, "observed_at" => member["registration_removed_at"])
+        end
+      elsif registry_status.is_a?(String) && !registry_status.empty?
+        member["registry_status"] = registry_status
+      end
       accepted_at = native_accepted_at(observed) || native_accepted_at(result)
       member["accepted_at"] = accepted_at if accepted_at
       if result.is_a?(Hash)
@@ -1866,6 +1963,7 @@ module Orbit
       else
         settle_member_from_current_dispatch(member, observed, result)
       end
+      report_member_removal(member, registry_status) if observed.is_a?(Hash) && observed["registration_removed"] == true
       accepted_changed = member["accepted_at"] != previous_accepted
       became_completed = member["status"] == "completed" && previous_status != "completed"
       if became_completed || (member["status"] == "completed" && accepted_changed)
@@ -1875,7 +1973,45 @@ module Orbit
                       "accepted_at" => member["accepted_at"])
       end
       %w[model result output_path session_file registry_status accepted_at status result_delivery
-         last_turn_error settlement_basis settlement_history error].any? { |key| member[key] != previous[key] }
+         last_turn_error settlement_basis settlement_history error registration_removed_at
+         registration_removal_report].any? { |key| member[key] != previous[key] }
+    end
+
+    # An observed native removal is material to Root's own call (接管、重派、
+    # 要求补查或询问用户) and used to be invisible: the member simply kept its
+    # cached `running`. Report it ONCE through the existing Root message
+    # channel while a member is not already settled. The notice never writes
+    # the finding-correction channel (`pending_correction`): a real correction
+    # awaiting delivery must not be overwritten or dropped by this report. A
+    # A failed send is retried on later observations, including after the
+    # member settles. The retry reports the current outcome instead of stale
+    # triage instructions. Success is remembered so it is not repeated.
+    def report_member_removal(member, reported_status)
+      return if member["registration_removal_report"] == "sent"
+      return unless @connection.respond_to?(:send_message)
+
+      final = reported_status.is_a?(String) && !reported_status.empty? ? reported_status : "未知（未观察到 aborted／idle 等终态）"
+      if MEMBER_SETTLED.include?(member["status"])
+        text = "Orbit：执行成员 #{member['thread_id']} 的原生登记已消失（registry removed）；移除时观察状态：#{final}。" \
+               "当前成员终态为 #{member['status']}；程序已停止沿用旧的 running。请从任务记录核对该成员的结果与证据。"
+      else
+        text = "Orbit：执行成员 #{member['thread_id']} 的原生登记已消失（registry removed）。最终状态：#{final}。" \
+               "程序已停止沿用旧的 running，不再把它当作仍在执行；该成员目前没有可证明的交付或失败结论。" \
+               "请按现有事实判断后续动作：接手、重派、要求补查或向用户提问。"
+      end
+      begin
+        sent = @connection.send_message(text)
+        @state["sent_message_ids"] << sent.fetch("id")
+        member["registration_removal_report"] = "sent"
+        member.delete("registration_removal_report_error")
+        @record.event("member_registry_removal_reported", "thread_id" => member["thread_id"],
+                      "message_id" => sent.fetch("id"), "reported_status" => reported_status)
+      rescue StandardError => error
+        member["registration_removal_report"] = "failed"
+        member["registration_removal_report_error"] = error.message
+        @record.event("member_registry_removal_report_failed", "thread_id" => member["thread_id"],
+                      "error" => error.message)
+      end
     end
 
     # acceptedAt is stamped only when the driver accepts the run. A later
@@ -2489,14 +2625,38 @@ module Orbit
       return if legacy.empty? || TERMINAL.include?(@state["status"])
 
       ids = legacy.map { |member| member["thread_id"] }
+      detail = "legacy member records have no migration path: #{ids.join(', ')}"
+      # These records come from a removed member path: this runtime has no
+      # bridge to observe or stop them, so BOTH supervision and control over
+      # them are genuinely unavailable. Never present that as a confirmed user
+      # stop (`needs_user` means an already confirmed stop): attempt the
+      # ordinary stop, which records the truth -- stop_unconfirmed with this
+      # exact reason -- while the fault is kept and delivered to Root.
       @record.event("legacy_member_rejected", "thread_ids" => ids, "reason" => "no migration path")
-      stop("legacy member records have no migration path: #{ids.join(', ')}", status: "needs_user")
+      @state["error"] = detail
+      report_supervision_fault("本任务成员记录来自已移除的执行路径，当前程序无法监督或停止它们（#{ids.join(', ')}）；" \
+                               "程序按未确认停止处理并保留该故障，不把它当作需要用户作决定的状态。")
+      stop(detail)
     end
 
     def members_settled?
       return false if Array(@state["amendment_delivery_queue"]).any?
 
       @state["members"].all? { |member| MEMBER_SETTLED.include?(member["status"]) }
+    end
+
+    # Best effort delivery of a supervision/control fault to Root through the
+    # existing message channel, BEFORE the stop tears the session down. A
+    # failed send is recorded, never silently swallowed: the fault is also kept
+    # in `error`, in the event log and in the stop diagnostics.
+    def report_supervision_fault(text)
+      return unless @connection.respond_to?(:send_message)
+
+      sent = @connection.send_message(text)
+      @state["sent_message_ids"] << sent.fetch("id")
+      @record.event("supervision_fault_reported", "message_id" => sent.fetch("id"))
+    rescue StandardError => error
+      @record.event("supervision_fault_report_failed", "error" => error.message)
     end
 
     def collect_amendments
@@ -2509,7 +2669,19 @@ module Orbit
         save
         return false if gap["reason"] == "pending_delivery"
 
-        stop("Cannot observe user changes: #{gap['detail']}", status: "needs_user")
+        # The bridge cannot place the task's user-message boundary in the
+        # native history any more, so Orbit can no longer see the user's
+        # instructions relative to this task: user-instruction supervision is
+        # genuinely unavailable. That is a runtime failure, not a user
+        # decision, so the task stops as `failed` with the exact fault kept
+        # (never a `needs_user` terminal state, which means a CONFIRMED stop).
+        detail = "Cannot observe user changes: #{gap['detail']}"
+        @state["error"] = detail
+        @record.event("user_observation_unavailable", "reason" => gap["reason"], "detail" => gap["detail"])
+        report_supervision_fault("Orbit 无法继续观察本任务的用户指令：#{gap['detail']}。" \
+                                 "已登记的原始要求与有效修订继续有效；程序按运行错误停止本任务并保留该故障，" \
+                                 "不把它当作需要用户作决定的状态。")
+        stop(detail, status: "failed")
         return false
       end
       messages.each do |message|
@@ -2521,19 +2693,32 @@ module Orbit
         # skipped again, so no separate scan cursor is needed.
         internal = message["internal"] || @state["sent_message_ids"].include?(message.fetch("id"))
         next if internal
+        text = message["text"].to_s
         if @state.fetch("amendments").any? { |item| item.dig("source", "id") == message.fetch("id") }
+          remember_jev_user_message(message, text, "registered_amendment")
           @state["last_user_message_id"] = message.fetch("id")
           next
         end
         # A new question is not an amendment. Only the explicit amend
         # command changes the checked input; leave the native message in
         # the Root session for it to assign to this task or handle separately.
+        remember_jev_user_message(message, text, "unassigned")
         @state["unassigned_user_message_id"] = message.fetch("id")
         @record.event("user_message_unassigned", "message_id" => message.fetch("id"))
         @state["last_user_message_id"] = message.fetch("id")
       end
       save unless messages.empty?
       true
+    end
+
+    def remember_jev_user_message(message, text, task_relation)
+      messages = (@state["jev_user_messages"] ||= [])
+      return if messages.any? { |item| item["id"] == message.fetch("id") }
+
+      messages << { "id" => message.fetch("id"), "text" => text,
+                    "task_relation" => task_relation, "observed_at" => Time.now.utc.iso8601 }
+      @record.event("jev_user_message_observed", "message_id" => message.fetch("id"),
+                    "task_relation" => task_relation, "text_sha256" => Digest::SHA256.hexdigest(text))
     end
 
     # A native reply to another user question does not become this task's
@@ -2620,8 +2805,200 @@ module Orbit
       delivery.slice("turn_id", "text", "prior_turns", "input_digest", "artifact_digest")
     end
 
+    # How the program describes, to Root, what it actually observed changing
+    # while an adjudication ran. These are the same stale_reasons the check
+    # record carries; naming them keeps Root's accept/recheck call factual
+    # instead of a guess about why a ruling might be outdated.
+    RULING_CHANGE_FACTS = {
+      "workspace" => "产物工作区已重新绑定（旧快照不再代表当前目录）",
+      "artifact" => "产物内容已变化",
+      "input" => "任务要求或已登记修订已变化",
+      "host" => "Root 会话观察已变化（当前回合或状态不同）",
+      "dispute" => "申诉文本已变化"
+    }.freeze
+
+    # Records the adjudicator's result as a pending ruling for Root. It binds
+    # the versions the ruling actually judged, carries the changes observed
+    # during the check, and reports the result through the existing Root
+    # message channel. It changes no finding, decision or dispute: only Root's
+    # decision does that.
+    def record_pending_ruling(scope, result, stale_reasons, now)
+      # A ruling speaks for the dispute it actually judged. If the appeal text
+      # changed while the check ran, the ruling is STILL recorded and shown to
+      # Root with that change listed among its stale reasons -- dropping it
+      # would silently discard a paid adjudication. Root's accept binds the
+      # judged appeal text and cannot end a newer, restated appeal (see
+      # accept_ruling!).
+      return nil unless scope["dispute"].is_a?(String) && !scope["dispute"].empty?
+
+      ruling = {
+        "dispute" => scope["dispute"], "check" => scope["number"], "kind" => scope["kind"],
+        "verdict" => result.fetch("verdict"), "reason" => result.fetch("reason"),
+        "resolved_ids" => result.fetch("resolved_ids"),
+        "finding_ids" => result.fetch("findings").map { |finding| finding.fetch("id") },
+        "stale" => !stale_reasons.empty?, "stale_reasons" => stale_reasons,
+        "judged" => { "artifact_root" => scope["artifact_root"],
+                      "input_digest" => scope["input_digest"],
+                      "artifact_digest" => scope.dig("snapshot", "digest") },
+        "recheck_request" => @state["ruling_recheck"],
+        "recorded_at" => Time.at(now).utc.iso8601, "result" => result
+      }
+      @state["pending_ruling"] = ruling
+      @record.event("adjudication_ruling_recorded", "check" => scope["number"], "stale" => ruling["stale"],
+                    "stale_reasons" => stale_reasons, "verdict" => ruling["verdict"],
+                    "resolved_ids" => ruling["resolved_ids"], "finding_ids" => ruling["finding_ids"])
+      deliver_correction_text(ruling_message_text(ruling), "check" => scope["number"],
+                              "attention" => "adjudication_ruling")
+      save
+      ruling
+    end
+
+    def ruling_message_text(ruling)
+      changes = Array(ruling["stale_reasons"]).map { |reason| RULING_CHANGE_FACTS.fetch(reason, reason.to_s) }
+      recheck = ruling["recheck_request"]
+      lines = ["Orbit 独立裁定已返回，等待 Root 处理（检查 ##{ruling['check']}）。这是程序转达的裁定结果，不是用户新要求。",
+               "申诉：#{ruling['dispute']}",
+               "裁定结论：#{ruling['verdict']}",
+               "裁定依据：#{ruling['reason']}"]
+      resolved = Array(ruling["resolved_ids"])
+      findings = Array(ruling["finding_ids"])
+      lines << "裁定撤销的问题：#{resolved.empty? ? '无' : resolved.join('、')}"
+      lines << "裁定提出的问题：#{findings.empty? ? '无' : findings.join('、')}"
+      lines << "上次要求补查的说明：#{recheck['reason']}" if recheck.is_a?(Hash) && !recheck["reason"].to_s.strip.empty?
+      lines << "检查期间的观察变化：#{changes.empty? ? '无（裁定版本与当前一致）' : changes.join('；')}"
+      lines << "程序不会因这些变化自动作废裁定；在你决定前不会再启动新的裁定，其他检查与工作继续。"
+      lines << "处理方式：Orbit 工具 action=ruling（等价 CLI：orbit ruling <task_directory> --check #{ruling['check']} " \
+               "--decision accept|recheck [--reason TEXT]）。accept 采纳该裁定：按结论更新相关问题并结束这条申诉；" \
+               "recheck 说明缺失证据与原因：程序保留原结果、本次理由与新证据，并按你的说明重新裁定。"
+      lines.join("\n")
+    end
+
+    # Root's explicit decision on a pending ruling. accept applies the ruling's
+    # conclusion; recheck keeps the original result and Root's reason as new
+    # evidence and lets the appeal be adjudicated again. Anything else (no
+    # pending ruling, or a different check number) is recorded and changes
+    # nothing.
+    def apply_root_ruling(command)
+      pending = @state["pending_ruling"]
+      decision = command["decision"].to_s
+      reason = command["reason"].to_s.strip
+      unless %w[accept recheck].include?(decision)
+        @record.event("root_ruling_rejected", "check" => command["check"], "decision" => decision,
+                      "reason" => "the decision must be accept or recheck")
+        save
+        return false
+      end
+      # A recheck must say what is missing and why; without that the program
+      # would re-adjudicate the same appeal for no stated reason.
+      if decision == "recheck" && reason.empty?
+        @record.event("root_ruling_rejected", "check" => command["check"], "decision" => decision,
+                      "reason" => "recheck requires a reason describing the missing evidence")
+        save
+        return false
+      end
+      unless pending.is_a?(Hash)
+        @record.event("root_ruling_rejected", "check" => command["check"], "decision" => decision,
+                      "reason" => "no adjudication ruling awaits a Root decision")
+        save
+        return false
+      end
+      unless pending["check"].to_s == command["check"].to_s
+        @record.event("root_ruling_rejected", "check" => command["check"], "decision" => decision,
+                      "reason" => "the pending ruling is check ##{pending['check']}")
+        save
+        return false
+      end
+
+      decided_at = Time.now.utc.iso8601
+      (@state["rulings"] ||= []) << pending.merge(
+        "root_decision" => decision, "root_decided_at" => decided_at,
+        "root_reason" => reason.empty? ? nil : reason
+      )
+      @state.delete("pending_ruling")
+      @state.delete("ruling_recheck")
+      if decision == "accept"
+        accept_ruling!(pending, reason, decided_at)
+      else
+        @state["ruling_recheck"] = { "check" => pending["check"], "reason" => reason,
+                                     "requested_at" => decided_at, "dispute" => pending["dispute"] }
+        @record.event("adjudication_recheck_requested", "check" => pending["check"], "reason" => reason)
+        schedule_check(0, "Root 要求补查申诉裁定", trigger: "root_recheck")
+      end
+      save
+      true
+    end
+
+    # Root accepted the ruling: the disputed problems it overturned are closed
+    # and the problems it raised are recorded as open work, both bound to the
+    # versions the ruling actually judged (never the current ones), the
+    # decision is recorded with Root's own reason, and the appeal ends. The
+    # correction for newly opened problems reaches Root through the existing
+    # channel. The task is not declared complete here: the final independent
+    # check and the real stop gates are untouched.
+    def accept_ruling!(pending, reason, decided_at)
+      judged = pending["judged"].is_a?(Hash) ? pending["judged"] : {}
+      result = pending["result"].is_a?(Hash) ? pending["result"] : {}
+      scope = { "number" => pending["check"], "role" => "adjudicator",
+                "kind" => pending["kind"] || "artifact",
+                "artifact_root" => judged["artifact_root"], "artifact_digest" => judged["artifact_digest"],
+                "input_digest" => judged["input_digest"] }
+      resolved = Array(pending["resolved_ids"])
+      resolved.each do |id|
+        finding = @state["findings"][id]
+        next unless finding
+
+        finding["status"] = "resolved"
+        finding["resolution"] = pending["reason"]
+        finding["resolution_role"] = "adjudicator"
+        finding["resolution_check"] = pending["check"]
+        finding["resolution_root"] = judged["artifact_root"]
+        finding["resolution_version"] = judged["artifact_digest"]
+        finding["resolution_input"] = judged["input_digest"]
+        finding["resolution_source"] = "root_accepted_ruling"
+        @record.event("finding_resolved", "id" => id, "check" => pending["check"],
+                      "reason" => pending["reason"], "artifact_digest" => judged["artifact_digest"],
+                      "input_digest" => judged["input_digest"], "source" => "root_accepted_ruling")
+      end
+      accepted = record_proposed_findings(scope, Array(result["findings"]), judged["artifact_digest"],
+                                          Time.now.to_f)
+      # An accepted ruling that inspected the current versions and reported the
+      # deliverable ready retires a stale not_ready conclusion -- exactly as the
+      # ordinary adjudicator path did, but only now that Root accepted it. A
+      # ruling judged against an older artifact cannot retire the current
+      # version's readiness (the digest comparison in the helper).
+      @state["decisions"] << {
+        "dispute" => pending["dispute"], "check" => pending["check"], "result" => pending["result"],
+        "input_digest" => judged["input_digest"], "artifact_root" => judged["artifact_root"],
+        "artifact_digest" => judged["artifact_digest"],
+        "resolved_ids" => resolved, "finding_ids" => pending["finding_ids"],
+        "opened_finding_ids" => accepted.map { |finding| finding.fetch("id") },
+        "reason" => pending["reason"],
+        "decision" => "accepted", "decided_by" => "root", "decided_at" => decided_at,
+        "root_reason" => reason.empty? ? nil : reason,
+        "change_during_check" => pending["stale_reasons"]
+      }
+      # A dispute restated after this ruling was recorded stays pending: the
+      # accepted ruling spoke for the appeal text it judged.
+      @state.delete("dispute") if @state["dispute"] == pending["dispute"]
+      retire_overturned_readiness(scope, result, fingerprint_artifact) if result.fetch("delivery", nil).is_a?(Hash)
+      @record.event("adjudication_ruling_accepted", "check" => pending["check"], "resolved_ids" => resolved,
+                    "opened_finding_ids" => accepted.map { |finding| finding.fetch("id") },
+                    "root_reason" => reason.empty? ? nil : reason)
+      send_correction(result.merge("findings" => accepted), scope: scope,
+                      current_digest: judged["artifact_digest"]) unless accepted.empty?
+    end
+
     def start_check(host, now, kind: "artifact", trigger:, manual: false)
-      role = @state["dispute"] ? "adjudicator" : kind == "process" ? "process_reviewer" : "reviewer"
+      # EXP-12: an adjudicator result is a RULING addressed to Root, never an
+      # automatic decision. The program records it with its own basis and with
+      # whatever changed during the check, hands it to Root, and waits for
+      # Root's explicit decision through the `ruling` command. A change during
+      # the check neither voids the ruling nor silences it, and no new
+      # adjudication starts while a ruling awaits Root's decision -- that one
+      # pending slot is never overwritten or dropped, so an appeal restated
+      # meanwhile waits, visibly, for the same decision. Ordinary artifact and
+      # process checks keep their normal roles.
+      role = @state["dispute"] && !@state["pending_ruling"] ? "adjudicator" : kind == "process" ? "process_reviewer" : "reviewer"
       digest = fingerprint_artifact
       input_digest = @record.input_digest(@state)
       failed = @state.dig("review", "failed_models")
@@ -2720,13 +3097,12 @@ module Orbit
           "member_blocks" => member_block_summary,
           "takeover" => takeover_context_projection,
           "decisions" => @state.fetch("decisions"), "dispute" => @state["dispute"],
+          "ruling_recheck" => @state["ruling_recheck"],
           "model_selection" => @state.dig("jev", "delegation"),
           "work_units" => work_units.list,
           "estimate" => @state.fetch("estimate"), "hard_deadline" => @state["hard_deadline"],
           "elapsed_seconds" => now - Time.parse(@state.fetch("created_at")).to_f,
           "project_rules" => snapshot.fetch("project_rules"),
-          "git_remote" => GitRemoteEvidence.capture(workspace: artifact_root,
-                                                      instruction: effective_checker_instruction),
           "review_focus" => review_focus(snapshot.fetch("manifest")),
           "uncopied_entries" => snapshot.fetch("manifest").select do |entry|
             %w[gitlink other].include?(entry["kind"]) || entry["materialized"] == false
@@ -2804,6 +3180,11 @@ module Orbit
         excluded: (Array(@state.dig("review", "failed_models", "models")) +
                    Array(@state.dig("review", "auth_or_quota_models"))).uniq
       )
+      persist_jev_call(nil, trace: checker_selector.last_jev_trace,
+                       decision: "checker_model_selection",
+                       reason: selection["notice"] || "checker model selected from available task candidates",
+                       details: { "selected_model" => model, "selected_for" => role,
+                                  "selection_source" => selection["source"] })
       # A fresh judgment can select the same model with the same facts. Its
       # invocation is still possible consumption; accounting uses the call id,
       # independently of whether the visible selection changed.
@@ -3183,6 +3564,11 @@ module Orbit
         # authorization, and the recheck clues above remain intact for the
         # next applicable independent check.
         deliver_historical_process_notice(result, scope, stale_reasons, host, now)
+        # An adjudicator result is a ruling for Root, not an automatic
+        # decision: record and report it even though its own versions moved,
+        # and let Root decide. Neither the change nor the staleness voids it,
+        # and the appeal is not adjudicated again until Root decides.
+        record_pending_ruling(scope, result, stale_reasons, now) if scope["role"] == "adjudicator"
         # Only a workspace rebind rechecks immediately: the old snapshot cannot
         # answer for the new root. Any other stale line waits for the normal
         # timer, the next delivery or an explicit manual check.
@@ -3208,6 +3594,18 @@ module Orbit
                         "ids" => remaining.map { |clue| clue["id"] })
         end
       end
+      # EXP-12: Root decides on a returned adjudication. Until Root accepts the
+      # ruling, neither its overturned ids nor the new findings it proposes
+      # change a finding, a correction, a completion gate or any other task
+      # state -- the check record and its coverage above are evidence and stay.
+      # Root's explicit accept applies the ruling (accept_ruling!); a recheck
+      # keeps this original result and Root's reason and lets the appeal be
+      # adjudicated again.
+      if scope["role"] == "adjudicator"
+        record_pending_ruling(scope, result, stale_reasons, now)
+        save
+        return
+      end
       (scope["kind"] == "process" ? [] : result.fetch("resolved_ids")).each do |id|
         finding = @state["findings"][id]
         next unless finding
@@ -3223,64 +3621,10 @@ module Orbit
                       "reason" => result.fetch("reason"), "artifact_digest" => current_digest,
                       "input_digest" => scope["input_digest"])
       end
-      accepted_findings = []
-      result.fetch("findings").each do |finding|
-        previous = @state["findings"][finding.fetch("id")]
-        if previous && previous["status"] == "open" &&
-           previous["observed_root"] == scope["artifact_root"] &&
-           previous["observed_version"] == current_digest &&
-           previous["observed_input"] == scope["input_digest"] &&
-           %w[requirement evidence action].all? { |field| previous[field] == finding[field] }
-          reports = previous["current_reports"].to_i + 1
-          previous["current_reports"] = reports
-          @record.event("finding_repeat_ignored", "id" => finding.fetch("id"),
-                        "reason" => "Already open on the same root, artifact, input, and finding text")
-          escalate_repeated_finding(previous, reports, scope, now) if reports >= REPEAT_FINDING_ESCALATION_REPORTS
-          next
-        end
-        # A resolved finding may only be reopened by new evidence: the task
-        # inputs, the artifact root, the artifact bytes, or the finding's own
-        # requirement/evidence/action text must actually differ. Same versions
-        # re-raised (including as recheck clues confirmed again) are the same
-        # decision, not a new one.
-        if previous && previous["status"] == "resolved" &&
-           previous["resolution_root"] == artifact_root &&
-           previous["resolution_version"] == current_digest &&
-           previous["resolution_input"] == scope["input_digest"] &&
-           %w[requirement evidence action].all? { |field| previous[field] == finding[field] }
-          @record.event("finding_reopen_ignored", "id" => finding.fetch("id"),
-                        "reason" => "No changed root, artifact, input, or finding text")
-          next
-        end
-        @state["findings"][finding.fetch("id")] = finding.merge(
-          "status" => "open", "check" => scope["number"],
-          "observed_root" => scope["artifact_root"], "observed_version" => current_digest,
-          "observed_input" => scope["input_digest"],
-          # A changed binding is a new report cycle: the correction is
-          # re-delivered and the repeat counter starts over, so an escalation
-          # may only follow after the changed evidence again fails to move.
-          "current_reports" => 1
-        )
-        accepted_findings << finding
-        @record.event("finding_recorded", "check" => scope["number"], "finding" => finding,
-                      "artifact_digest" => current_digest, "input_digest" => scope["input_digest"])
-      end
+      accepted_findings = record_proposed_findings(scope, result.fetch("findings"), current_digest, now)
       notify_finalization_ready(scope, result, host, current_digest, now)
       remind_manual_final_check(scope, result, host, current_digest, now)
       retire_overturned_readiness(scope, result, current_digest)
-      if scope["role"] == "adjudicator"
-        # The decision binds the exact versions it judged so later checks can
-        # tell reopened evidence from re-raised wording; `result` stays for
-        # existing consumers.
-        @state["decisions"] << {
-          "dispute" => @state.delete("dispute"), "check" => scope["number"], "result" => result,
-          "input_digest" => scope["input_digest"], "artifact_root" => scope["artifact_root"],
-          "artifact_digest" => scope.dig("snapshot", "digest"),
-          "resolved_ids" => result.fetch("resolved_ids"),
-          "finding_ids" => result.fetch("findings").map { |finding| finding.fetch("id") },
-          "reason" => result.fetch("reason"), "decided_at" => Time.at(now).utc.iso8601
-        }
-      end
       case result.fetch("verdict")
       when "complete"
         # A checker verdict is not completion. Process and automatic checks
@@ -3304,12 +3648,22 @@ module Orbit
       when "pause"
         stop(result.fetch("reason"))
       when "needs_user"
-        stop(result.fetch("reason"), status: "needs_user")
+        request_root_decision(result, scope)
       when "continue"
         send_correction(result.merge("findings" => accepted_findings), scope: scope, current_digest: current_digest) if host["status"] == "idle" && !accepted_findings.empty?
         continue_unfinished_task(scope, result, current_digest, now) if accepted_findings.empty?
       end
       save
+    end
+
+    def request_root_decision(result, scope)
+      reason = result.fetch("reason")
+      text = "Orbit 独立检查需要 Root 判断下一步：#{reason}\n" \
+             "这是一条检查意见，不会自动停止任务或要求用户作决定。请按原始要求核实缺口；可以自行查明后继续，" \
+             "也可以通过现有 ask 能力向用户提问。用户明确停止仍立即生效。"
+      @record.event("root_decision_requested", "check" => scope["number"],
+                    "reason" => reason, "source" => "independent_check")
+      deliver_correction_text(text, "check" => scope["number"], "attention" => "root_decision")
     end
 
     # A clean review is not a reason to leave authorized work idle. Wake only
@@ -3378,6 +3732,7 @@ module Orbit
       return if ready["check"] == scope["number"]
       return unless scope["kind"] == "artifact" && ready["input_digest"] == scope["input_digest"] &&
                     ready["artifact_root"] == scope["artifact_root"] &&
+                    scope["artifact_digest"] == current_digest &&
                     ready["artifact_digest"] == current_digest
       return unless %w[complete continue].include?(result.fetch("verdict")) &&
                     result.fetch("delivery").fetch("ready") && result.fetch("findings").empty? &&
@@ -4289,6 +4644,62 @@ module Orbit
         entry["cleared_at"] = at
         entry["cleared_by"] = "task_terminal"
       end
+    end
+
+    # Records the findings a check proposes as OPEN work under the shared
+    # idempotence rules, and returns the ones that must be delivered as a
+    # correction. Both the ordinary reviewer path and a Root-accepted
+    # adjudication use this one rule set: the same open report on the same
+    # root/artifact/input with identical text is a repeat (never a new report),
+    # and a resolved finding is only reopened by real new evidence.
+    def record_proposed_findings(scope, findings, current_digest, now)
+      accepted = []
+      Array(findings).each do |finding|
+        previous = @state["findings"][finding.fetch("id")]
+        if previous && previous["status"] == "open" &&
+           previous["observed_root"] == scope["artifact_root"] &&
+           previous["observed_version"] == current_digest &&
+           previous["observed_input"] == scope["input_digest"] &&
+           %w[requirement evidence action].all? { |field| previous[field] == finding[field] }
+          reports = previous["current_reports"].to_i + 1
+          previous["current_reports"] = reports
+          @record.event("finding_repeat_ignored", "id" => finding.fetch("id"),
+                        "reason" => "Already open on the same root, artifact, input, and finding text")
+          escalate_repeated_finding(previous, reports, scope, now) if reports >= REPEAT_FINDING_ESCALATION_REPORTS
+          next
+        end
+        # A resolved finding may only be reopened by new evidence: the task
+        # inputs, the artifact root, the artifact bytes, or the finding's own
+        # requirement/evidence/action text must actually differ. Same versions
+        # re-raised (including as recheck clues confirmed again) are the same
+        # decision, not a new one. The comparison uses the ROOT THE CHECK BOUND
+        # (scope), never the runtime's current root: an accepted stale ruling
+        # judged the old workspace, and the current root must not make that
+        # verdict look like a report about a different one. (For an ordinary
+        # non-stale check the two are the same by definition of staleness.)
+        if previous && previous["status"] == "resolved" &&
+           previous["resolution_root"] == scope["artifact_root"] &&
+           previous["resolution_version"] == current_digest &&
+           previous["resolution_input"] == scope["input_digest"] &&
+           %w[requirement evidence action].all? { |field| previous[field] == finding[field] }
+          @record.event("finding_reopen_ignored", "id" => finding.fetch("id"),
+                        "reason" => "No changed root, artifact, input, or finding text")
+          next
+        end
+        @state["findings"][finding.fetch("id")] = finding.merge(
+          "status" => "open", "check" => scope["number"],
+          "observed_root" => scope["artifact_root"], "observed_version" => current_digest,
+          "observed_input" => scope["input_digest"],
+          # A changed binding is a new report cycle: the correction is
+          # re-delivered and the repeat counter starts over, so an escalation
+          # may only follow after the changed evidence again fails to move.
+          "current_reports" => 1
+        )
+        accepted << finding
+        @record.event("finding_recorded", "check" => scope["number"], "finding" => finding,
+                      "artifact_digest" => current_digest, "input_digest" => scope["input_digest"])
+      end
+      accepted
     end
 
     # Two effective, current-input checks reported the same open finding

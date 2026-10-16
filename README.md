@@ -53,7 +53,7 @@ flowchart LR
 | **独立检查者** | 在单独的只读 OMP 会话中，按用户要求自主查证，核对成果与相关记录 |
 | **Orbit** | 准确保存要求与事实，安排检查、传递完整反馈，执行决定并确认实际停止 |
 
-上表是[已确认的职责调整](docs/adr/011-agent-autonomy-and-runtime-responsibility.md)，尚未全部实现。当前代码仍有成员文件范围、检查者读取范围及程序自动处置等限制；具体改动与进度见[方案入口](docs/reference/orbit-experience-review-20261015/agreed-change-plan.md)。这次文档调整不表示运行能力已经改变。
+上表对应[已确认的职责调整](docs/adr/011-agent-autonomy-and-runtime-responsibility.md)，Orbit 阶段一已实施。当前未完成事项见[总待办](docs/plan/agent-autonomy-implementation.md)和[限制清单](docs/plan/debt-ledger.md)。Loom 协同等待用户另行通知。
 
 你无需预先组建团队，也无需在几个 Agent 之间转述要求。分工建议由主 Agent 决定是否采纳；成员不能继续派发成员。
 
@@ -159,7 +159,7 @@ orbit status
 | 已打开的普通 OMP 能直接接入吗？ | 退出后用 `orbit omp --resume SESSION_ID` 恢复，扩展在启动时加载。 |
 | Agent 没有建立 Orbit 任务？ | 先确认用 `orbit omp` 启动，再查看入口提示和 `orbit doctor`。需要受控执行时明确说“请使用 Orbit”。 |
 | 没发现问题就算完成吗？ | 仍需当前版本的有效终检和实际停止确认；以最终 `complete` 状态为准。 |
-| 能保证所有任务都可靠、都省额度吗？ | 本项目已有有界真实验收；效果与未测范围见验收记录（Git 历史：`aa089bb:docs/reference/long-task-optimization-acceptance-20261009.md`）和[当前限制](docs/plan/debt-ledger.md)。 |
+| 能保证所有任务都可靠、都省额度吗？ | 不能。效果依赖任务、模型和宿主；当前未测范围见[限制清单](docs/plan/debt-ledger.md)。 |
 
 ## 深入了解
 
@@ -167,9 +167,9 @@ orbit status
 | --- | --- |
 | 安装选项、配置与完整 CLI | [进阶使用参考](docs/reference/usage-reference.md) |
 | 当前源码、交付与安装事实 | [交接](docs/plan/handoff.md) · [源码版本](package.json) |
-| 实现与真实验收证据 | 长任务优化验收（Git 历史：`aa089bb:docs/reference/long-task-optimization-acceptance-20261009.md`） |
+| 当前实现与待办 | [唯一总待办](docs/plan/agent-autonomy-implementation.md) |
 | 权限、角色、检查与停止规则 | [任务运行合同](contracts/task-runtime.md) · [ADR-008](docs/adr/008-omp-native-collaboration-base.md) · [ADR-009](docs/adr/009-user-selected-model-pool.md) |
-| 产品方向与其他文档 | 混合模型交付方案（Git 历史：`aa089bb:docs/plan/mixed-model-delivery-proposal.md`） · [文档索引](docs/README.md) |
+| 当前产品规则与其他文档 | [任务运行合同](contracts/task-runtime.md) · [文档索引](docs/README.md) |
 
 ## 引用
 

@@ -88,7 +88,7 @@ module Orbit
     ].freeze
     CONTEXT_KEYS = %w[
       root root_verifications task_delivery task_git review_focus findings recent_events check_history recheck execution_members work_units decisions dispute
-      estimate hard_deadline elapsed_seconds project_rules uncopied_entries
+      estimate hard_deadline elapsed_seconds project_rules uncopied_entries review_sources
     ].freeze
     # Declared authorization and requirement lists inside a work unit. A silent
     # tail cut would turn a complete declaration into an apparently narrower
@@ -176,7 +176,9 @@ module Orbit
           coverage_statuses: item_properties.dig("status", "enum"),
           coverage_scopes: item_properties.dig("scope", "enum")
         }
-        missing = structure.filter_map { |key, value| key if value.nil? }
+        # maxItems is optional JSON Schema metadata. Its absence means the
+        # array has no schema-level upper bound; only minItems is required.
+        missing = structure.filter_map { |key, value| key if value.nil? && key != :coverage_items_max }
         raise Error, "check-result schema is missing structural facts: #{missing.join(', ')}" unless missing.empty?
 
         structure.freeze
@@ -276,7 +278,13 @@ module Orbit
       instruction = fetch_instruction(inputs)
       amendments = input_items(inputs, "amendments")
       basis = input_items(inputs, "basis")
-      program_context = compress_context(context)
+      dispute = context.is_a?(Hash) ? context["dispute"] : nil
+      compression_input = if dispute.is_a?(String)
+                            context.reject { |key, _value| key.to_s == "dispute" }
+                          else
+                            context
+                          end
+      program_context = compress_context(compression_input)
       context_text = render_context(program_context)
 
       parts = [role_prompt(role, focus: review_focus_present?(program_context))]
@@ -293,6 +301,9 @@ module Orbit
       end
       unless basis.empty?
         parts << "## Named basis (verbatim)\n\n#{render_items(basis, 'Basis')}"
+      end
+      if dispute.is_a?(String)
+        parts << "## Dispute (verbatim)\n\n#{dispute}"
       end
       recheck = program_context.is_a?(Hash) ? program_context["recheck"] : nil
       if recheck.is_a?(Hash) && recheck["findings"].is_a?(Array) && !recheck["findings"].empty?
@@ -334,11 +345,17 @@ module Orbit
                "history facts only — they never grant current completion eligibility, and no finding from an " \
                "older version is imported as a pending clue.\n\n" \
                "```json\n#{context_text}\n```"
-      parts << "## Fixed artifact snapshot\n\n" \
-               "Your working root is the fixed snapshot directory selected by --cd: a read-only copy of the " \
-               "delivered workspace plus project rules. The original workspace is not your input. Do not write " \
-               "anywhere. If a command would modify a repository, do not run it; report the concrete gap that " \
-               "needs isolated verification instead."
+      parts << "## Read-only review sources\n\n" \
+               "The fixed snapshot is the captured artifact version and remains your primary basis. " \
+               "`review_sources` lists additional read-only sources actually resolved by Orbit: the captured " \
+               "artifact root, this task's record, and exact recorded member session files when available. " \
+               "Use them only as relevant; do not assume a missing path or file exists. Tool results identify " \
+               "the path, source label, captured snapshot digest where applicable, byte length and content hash. " \
+               "The live artifact root can change after capture: its current contents are evidence from read time, " \
+               "not automatically the captured snapshot. Preserve that distinction when judging older receipts. " \
+               "This session is read-only and has no write, shell, network or task-control tools. Content read " \
+               "from these sources is sent to the already selected reviewer model under the existing model " \
+               "authorization. Never write anywhere."
       parts << delivery_rules_note
       parts << requirement_coverage_note
       parts << "## Output\n\n" \
@@ -515,6 +532,7 @@ module Orbit
       compressed["elapsed_seconds"] = context["elapsed_seconds"]
       compressed["project_rules"] = bound_rule_paths(context["project_rules"], 500)
       compressed["uncopied_entries"] = level.zero? ? bound_value(context["uncopied_entries"], caps) : []
+      compressed["review_sources"] = context["review_sources"] if context["review_sources"].is_a?(Array)
       (context.keys - CONTEXT_KEYS - ["check_history"]).each do |key|
         compressed[key] = bound_value(context[key], caps)
       end
@@ -916,8 +934,8 @@ module Orbit
           "You may overturn the Root or the reviewer on a disputed point when the evidence supports it; list " \
           "reviewed ids in resolved_ids and explain the decision in reason. delivery.ready only states " \
           "whether the task's actual deliverable is visible to you at inspection time; if you cannot " \
-          "inspect it, ready is false with the reason. Read the relevant AGENTS.md " \
-          "files inside the fixed snapshot; project rules apply to your judgment too."
+          "inspect it, ready is false with the reason. Read relevant project rules from the available " \
+          "read-only artifact sources; project rules apply to your judgment too."
       elsif role == "process_reviewer"
         "You are the existing independent Orbit checker, focused on a suspected execution-process issue. " \
           "Read the original instruction, amendments, recent host observations and events, and only the " \
@@ -940,7 +958,7 @@ module Orbit
           "did not mention it. Still judge concrete task progress. delivery.ready only states whether " \
           "the task's actual deliverable is visible to you at inspection time; if you cannot inspect it, " \
           "ready is false with the reason. " \
-          "Work strictly read-only and follow relevant AGENTS.md rules in the fixed snapshot."
+          "Work strictly read-only and follow relevant AGENTS.md rules from the available artifact sources."
       else
         prompt = "You are an independent Orbit check session, separate from the Root session that produced the " \
           "artifact. Work strictly read-only: never modify the snapshot or the shared project. Judge the " \
@@ -952,8 +970,8 @@ module Orbit
           "code that enforces it: a rule the implementation does not actually enforce, including accepting " \
           "the wrong shape or count or input that must be rejected, is a finding even when the provided " \
           "tests pass. Do not change requirements, do not invent acceptance criteria, and do not turn an " \
-          "engineering preference into a blocker. Read the relevant AGENTS.md files inside the fixed " \
-          "snapshot; project rules apply to your judgment too. Only reuse a history finding id when it is " \
+          "engineering preference into a blocker. Read relevant AGENTS.md files from the available " \
+          "read-only artifact sources; project rules apply to your judgment too. Only reuse a history finding id when it is " \
           "the same real problem. The program record is your decision memory: it carries prior decisions and " \
           "settled findings. Reuse the existing finding id for the same problem, and do not re-raise a point " \
           "that a decision, a resolution or an earlier withdrawal already settled unless the fixed artifact, " \
@@ -1016,37 +1034,34 @@ module Orbit
     # Structured delivery-readiness guidance, separate from the verdict rules
     # in role_prompt. Kept as its own prompt section because the program's
     # completion gate consumes result.delivery independently of the verdict.
-    # The git_remote facts note only applies when the program record carries
-    # them; nothing here invents remote evidence.
+    # Keep the delivery judgment tied to the user's requested actions and
+    # whatever independently inspectable execution evidence is available.
     def requirement_coverage_note
       "## Requirement coverage\n\n" \
-        "Return coverage with exactly complete (boolean) and items (1..64 entries). Each item has " \
+        "Return coverage with exactly complete (boolean) and items (one or more entries). Each item has " \
         "requirement (distinct non-empty text, at most 1000 characters), scope (delivery or lifecycle), status (verified or unverified), " \
         "and evidence (at most 1000 characters; verified needs concrete non-empty evidence), plus an optional " \
         "ref (at most 200 characters). Set ref only when the instruction, amendments or named basis already " \
         "label that requirement with an identifier (for example a standard number the requester assigned): copy " \
         "it exactly as written and never invent, normalize or infer one; omit the ref key when there is no such label (never write an empty string). Enumerate each " \
         "requirement from the original instruction, effective amendments and named basis, including referenced " \
-        "specification files in the fixed snapshot. complete=true means you have enumerated them all; do not " \
+        "specification files that are available in the read-only artifact sources. complete=true means you have enumerated them all; do not " \
         "silently omit requirements. Mark unread, untested or otherwise unsupported requirements unverified " \
         "and explain the gap. delivery covers artifacts, integration, requested test execution and answer content. " \
         "lifecycle covers only this final review, the subsequent completion/confirmed stop and the subsequent " \
         "closing report; keep those obligations listed, but do not claim future events already happened. " \
         "The runtime separately verifies its manual finalization notice, closing turn and actual stop. " \
         "Only delivery items must be verified before that sequence can start. Test execution is never lifecycle. " \
-        "Empty findings, Root claims and Jev calibration are not coverage. Identify " \
-        "the file facts you actually read and distinguish them from attributed verification receipts: your " \
-        "read-only session cannot run tests. A visual or UI requirement is verified only by an image you " \
-        "actually read: reading an image file in the fixed snapshot returns the picture itself and states the " \
-        "snapshot path, byte count and sha256 that were read. A screenshot name, path or description written " \
-        "by the Root, a member or a report is not independent visual evidence, and neither is a promise to " \
-        "provide one. If the read did not deliver the picture (the tool reports that, or you never read the " \
-        "image), that requirement stays unverified and you must not report complete or a ready delivery for " \
-        "it. The program's root_verifications, when present, are actual native " \
+        "Empty findings, Root claims and Jev calibration are not coverage. Use evidence relevant to each " \
+        "requirement and distinguish inspected material from attributed verification receipts; your " \
+        "read-only session cannot run tests. Images show pixels for a particular captured image; they do not " \
+        "by themselves establish interaction, state transitions or behavior elsewhere. Code, text or execution " \
+        "records may be more relevant to those claims. The program's root_verifications, when present, are actual native " \
         "tool receipts: retain their original identities and bindings, inspect artifact_matches and input_matches, " \
-        "and assess whether the command and reported exit/output support this requirement. Missing, failed, " \
-        "truncated or artifact-mismatched receipts cannot prove an executed successful test. An input mismatch " \
-        "is historical evidence: compare the changed requirements, never relabel it as a current-input run. " \
+        "and assess whether the recorded command, exit and captured output support this requirement. Truncated " \
+        "receipts keep their recorded identity, result and omission facts; decide what they support. A mismatch " \
+        "or older binding is historical evidence, not a current-version run; compare relevant requirements and " \
+        "files before deciding whether it remains useful. Never rewrite its identity or binding. " \
         "Do not trust a Root-written log or basis statement as program-attested execution. " \
         "Local unit evidence does not replace whole-task integration. " \
         "Process checks and adjudication may report their limited scope but cannot grant delivery coverage. " \
@@ -1072,13 +1087,9 @@ module Orbit
         "completed; a bounded prefix (…[length:sha256]) is verbatim evidence of " \
         "what was delivered, but unseen text cannot be confirmed. If the deliverable is not visible — " \
         "Root still executing, no task-related answer, or only an interim message — ready must be false " \
-        "and reason must state exactly what is missing. For a requirement that work be pushed to a remote, " \
-        "the program record's git_remote facts are captured read-only by the program: status verified " \
-        "means the local HEAD equals the remote reference, mismatch means the remote reference differs, " \
-        "unknown means it could not be verified (network, configuration, or the instruction does not " \
-        "require remote delivery). Those are the only remote facts you may use: a Root report of a push " \
-        "is never verification. With such a requirement, ready requires git_remote.status to be " \
-        "verified; on mismatch or unknown, ready must be false and reason must cite the actual status."
+        "and reason must state exactly what is missing. Judge requested delivery actions from the available " \
+        "execution records and relevant current or historical evidence; do not infer completion from command " \
+        "success alone or add a scenario-specific requirement beyond the user's instruction."
     end
 
     def write_run_record(run)
@@ -1265,8 +1276,11 @@ module Orbit
         problems << "coverage.complete must be a boolean"
       end
       items = value["items"]
-      unless items.is_a?(Array) && items.length.between?(rules[:coverage_items_min], rules[:coverage_items_max])
-        return problems + ["coverage.items must contain #{rules[:coverage_items_min]}..#{rules[:coverage_items_max]} entries"]
+      max_items = rules[:coverage_items_max]
+      unless items.is_a?(Array) && items.length >= rules[:coverage_items_min] &&
+             (max_items.nil? || items.length <= max_items)
+        upper = max_items || "more"
+        return problems + ["coverage.items must contain #{rules[:coverage_items_min]}..#{upper} entries"]
       end
       requirements = []
       items.each_with_index do |item, index|

@@ -96,6 +96,18 @@ class RuntimeBoundaryHost < RuntimeHost
   end
 end
 
+# A bridge that cannot place the task's user-message boundary in the native
+# history: Orbit loses its view of the user's instructions (EXP-09).
+class RuntimeGapHost < RuntimeHost
+  def user_messages(after_id:)
+    @gap = { "reason" => "boundary_not_visible",
+             "detail" => "Original message boundary is absent from native session history" }
+    []
+  end
+
+  def observation_gap = @gap
+end
+
 class RuntimeAskHost < RuntimeHost
   attr_accessor :ask_events
 
@@ -391,9 +403,196 @@ fixture do |root, record, host, checker, runtime|
   runtime.tick(now: now + 7)
   final = record.state
   assert(final["status"] != "complete", "an adjudicator verdict cannot complete the task")
-  assert(final.dig("findings", "preference", "status") == "resolved", "retraction is retained")
-  assert(final["decisions"].length == 1, "adjudication reason is retained")
+  assert(final.dig("findings", "preference", "status") == "open",
+         "a ruling changes no finding before Root decides")
+  assert(final["decisions"].empty?, "no decision is recorded before Root decides")
+  assert(final["dispute"], "the appeal stays pending for Root's decision")
+  ruling = final["pending_ruling"]
+  assert(ruling.is_a?(Hash) && ruling["check"] == final["checks"].last["number"],
+         "the returned ruling awaits Root with its check number")
+  assert(ruling["resolved_ids"] == ["preference"], "the ruling keeps the ids it would overturn")
+  assert(host.messages.last.to_s.include?("action=ruling") && host.messages.last.include?("preference"),
+         "Root receives the ruling, its basis and how to decide it")
+
+  record.submit("ruling", "decision" => "accept", "check" => ruling["check"], "reason" => "evidence confirms the retraction")
+  runtime.tick(now: now + 8)
+  accepted = record.state
+  assert(accepted.dig("findings", "preference", "status") == "resolved", "Root's acceptance closes the overturned problem")
+  assert(accepted["findings"]["preference"]["resolution_check"] == ruling["check"],
+         "the closure is bound to the ruling's check")
+  assert(accepted["decisions"].length == 1, "the accepted ruling is recorded as a decision")
+  assert(accepted["decisions"].first["decided_by"] == "root" && accepted["decisions"].first["root_reason"] == "evidence confirms the retraction",
+         "the decision records who decided and why")
+  assert(accepted["dispute"].nil? && accepted["pending_ruling"].nil?, "the appeal ends only after Root's decision")
+  assert(accepted["rulings"].length == 1 && accepted["rulings"].first["root_decision"] == "accept",
+         "the original ruling result is kept in history")
   assert(File.read(File.join(record.path, "instruction.txt")) == "Provide first and second behaviors.\n", "original text is preserved")
+end
+
+# The challenged finding every ruling fixture disputes: open work the
+# adjudicator is asked to overturn.
+def preference_finding
+  { "id" => "preference", "requirement" => "invented layout preference",
+    "evidence" => "plain text artifact", "action" => "add unwanted layout" }
+end
+
+# Drives one adjudication to a returned ruling that still awaits Root's
+# decision. Returns that ruling; the task is left with the appeal pending and
+# no finding, decision or gate changed by it.
+def returned_ruling!(record, host, checker, runtime, resolved: ["preference"])
+  now = Time.now.to_f
+  runtime.tick(now: now)
+  checker.result = answer("correct", findings: [preference_finding])
+  runtime.tick(now: now + 1)
+  assert(record.state.dig("findings", "preference", "status") == "open",
+         "precondition: the challenged finding is open")
+  record.submit("dispute", "reason" => "The layout preference is not a user requirement")
+  host.finish("disputed")
+  runtime.tick(now: now + 2)
+  assert(checker.calls.last.fetch(:role) == "adjudicator", "precondition: the appeal is adjudicated")
+  checker.result = answer("complete", resolved: resolved)
+  runtime.tick(now: now + 3)
+  ruling = record.state["pending_ruling"]
+  assert(ruling.is_a?(Hash), "precondition: a ruling awaits Root's decision")
+  ruling
+end
+
+# The same returned-ruling path, but the artifact moves while the adjudication
+# runs: the ruling is recorded with what changed instead of being voided.
+def returned_ruling_stale!(root, record, host, checker, runtime)
+  now = Time.now.to_f
+  runtime.tick(now: now)
+  checker.result = answer("correct", findings: [preference_finding])
+  runtime.tick(now: now + 1)
+  record.submit("dispute", "reason" => "The layout preference is not a user requirement")
+  host.finish("disputed")
+  checker.result = nil
+  runtime.tick(now: now + 2)
+  assert(checker.calls.last.fetch(:role) == "adjudicator", "precondition: the appeal is adjudicated")
+  File.write(File.join(root, "artifact.txt"), "first behavior and a later edit")
+  checker.result = answer("complete", resolved: ["preference"])
+  runtime.tick(now: now + 3)
+  last = record.state.fetch("checks").last
+  assert(last["stale"] && last["stale_reasons"] == ["artifact"],
+         "precondition: the artifact moved under the adjudication")
+  ruling = record.state["pending_ruling"]
+  assert(ruling.is_a?(Hash) && ruling["stale"] && ruling["stale_reasons"] == ["artifact"],
+         "the ruling is still recorded and names what changed")
+  ruling
+end
+
+# A ruling nobody decided is not re-adjudicated: ordinary checks keep their
+# normal roles, and an invalid or mismatched decision changes nothing.
+fixture do |root, record, host, checker, runtime|
+  ruling = returned_ruling!(record, host, checker, runtime, resolved: ["preference"])
+  calls = checker.calls.length
+
+  # Nothing decided: the timer reaches a normal check, not another adjudication
+  # of the same appeal.
+  host.finish("ruling reviewed")
+  record.submit("check")
+  runtime.tick(now: Time.now.to_f + 200)
+  assert(checker.calls.length == calls + 1, "the requested check runs once")
+  assert(checker.calls.last.fetch(:role) == "reviewer",
+         "ordinary checks are not turned into another adjudication of a pending appeal")
+  assert(record.state["pending_ruling"]["check"] == ruling["check"], "the undecided ruling is untouched")
+
+  # A rejected decision leaves the same ruling pending.
+  record.submit("ruling", "decision" => "maybe", "check" => ruling["check"])
+  runtime.tick(now: Time.now.to_f + 210)
+  assert(record.state["pending_ruling"]["check"] == ruling["check"], "an unknown decision changes nothing")
+  record.submit("ruling", "decision" => "accept", "check" => ruling["check"] + 5)
+  runtime.tick(now: Time.now.to_f + 220)
+  assert(record.state["pending_ruling"]["check"] == ruling["check"], "a mismatched check number changes nothing")
+  record.submit("ruling", "decision" => "recheck", "check" => ruling["check"])
+  runtime.tick(now: Time.now.to_f + 230)
+  assert(record.state["pending_ruling"]["check"] == ruling["check"], "a recheck without a reason is rejected")
+  reasons = events(record).select { |event| event["type"] == "root_ruling_rejected" }.map { |event| event["reason"] }
+  assert(reasons.any? { |reason| reason.to_s.include?("accept or recheck") } &&
+         reasons.any? { |reason| reason.to_s.include?("pending ruling is check") } &&
+         reasons.any? { |reason| reason.to_s.include?("recheck requires a reason") },
+         "each rejection names its own reason: #{reasons.inspect}")
+  assert(record.state["decisions"].empty? && record.state["dispute"], "rejected commands decide nothing")
+end
+
+# Recheck keeps the original result and Root's reason as the new evidence and
+# lets the appeal be adjudicated again.
+fixture do |root, record, host, checker, runtime|
+  ruling = returned_ruling!(record, host, checker, runtime, resolved: ["preference"])
+  record.submit("ruling", "decision" => "recheck", "check" => ruling["check"],
+                "reason" => "The retraction cites a file the ruling did not open")
+  runtime.tick(now: Time.now.to_f + 10)
+  state = record.state
+  assert(state["pending_ruling"].nil?, "the original ruling is no longer pending after Root requests a recheck")
+  assert(state["dispute"], "the appeal continues after a recheck request")
+  assert(state.dig("ruling_recheck", "reason") == "The retraction cites a file the ruling did not open",
+         "Root's stated reason is kept as the recheck evidence")
+  assert(Array(state["rulings"]).last["root_decision"] == "recheck" &&
+         Array(state["rulings"]).last["result"].is_a?(Hash),
+         "the original ruling result is preserved, not overwritten")
+
+  checker.result = nil
+  runtime.tick(now: Time.now.to_f + 11)
+  assert(checker.calls.last.fetch(:role) == "adjudicator", "the appeal is adjudicated again after Root's request")
+  assert(checker.calls.last[:context].dig("ruling_recheck", "reason") == "The retraction cites a file the ruling did not open",
+         "the next adjudication receives Root's recheck reason")
+  checker.result = answer("correct", findings: [{ "id" => "late", "requirement" => "second behavior",
+                                                 "evidence" => "absent in artifact", "action" => "implement it" }])
+  runtime.tick(now: Time.now.to_f + 12)
+  assert(record.state.dig("findings", "late").nil?, "new adjudicator findings wait for Root's acceptance")
+  record.submit("ruling", "decision" => "accept", "check" => record.state["pending_ruling"]["check"])
+  runtime.tick(now: Time.now.to_f + 13)
+  final = record.state
+  assert(final.dig("findings", "late", "status") == "open", "accepting a ruling records its new findings as open work")
+  assert(final.dig("findings", "late", "check") == final.dig("rulings").last["check"],
+         "the opened finding is bound to the ruling's check")
+  assert(host.messages.last.to_s.include?("late"), "the accepted ruling's new finding reaches Root as a correction")
+end
+
+# A ruling whose own versions moved during the check is still delivered: the
+# change neither voids it nor hides it, and Root's accept binds the judged
+# versions.
+fixture do |root, record, host, checker, runtime|
+  ruling = returned_ruling_stale!(root, record, host, checker, runtime)
+  assert(record.state["dispute"], "a change during the check does not void the ruling or the appeal")
+  assert(host.messages.last.to_s.include?("产物内容已变化"), "Root is told which facts changed during the check")
+  record.submit("ruling", "decision" => "accept", "check" => ruling["check"])
+  runtime.tick(now: Time.now.to_f + 10)
+  state = record.state
+  finding = state.dig("findings", "preference")
+  assert(finding["status"] == "resolved" && finding["resolution_version"] == ruling.dig("judged", "artifact_digest"),
+         "the closure binds the version the ruling judged, not the current one")
+  assert(state["dispute"].nil?, "Root's acceptance ends the appeal")
+end
+
+# An appeal restated while its adjudication ran is still recorded and shown:
+# the paid ruling is never dropped, and Root's accept cannot end the newer
+# appeal text.
+fixture do |root, record, host, checker, runtime|
+  now = Time.now.to_f
+  runtime.tick(now: now)
+  checker.result = answer("correct", findings: [preference_finding])
+  runtime.tick(now: now + 1)
+  record.submit("dispute", "reason" => "The layout preference is not a user requirement")
+  host.finish("disputed")
+  checker.result = nil
+  runtime.tick(now: now + 2)
+  assert(checker.calls.last.fetch(:role) == "adjudicator", "precondition: the appeal is adjudicated")
+  record.submit("dispute", "reason" => "The layout preference is not a user requirement, and the header too")
+  checker.result = answer("complete", resolved: ["preference"])
+  runtime.tick(now: now + 3)
+  last = record.state.fetch("checks").last
+  assert(last["stale"] && last["stale_reasons"] == ["dispute"], "precondition: the appeal changed under the check")
+  ruling = record.state["pending_ruling"]
+  assert(ruling.is_a?(Hash) && ruling["dispute"] == "The layout preference is not a user requirement",
+         "the ruling is still recorded, for the appeal text it judged")
+  assert(host.messages.last.to_s.include?("申诉文本已变化"), "Root is told the appeal changed during the check")
+  record.submit("ruling", "decision" => "accept", "check" => ruling["check"])
+  runtime.tick(now: now + 4)
+  final = record.state
+  assert(final["dispute"] == "The layout preference is not a user requirement, and the header too",
+         "Root's acceptance cannot end a newer appeal")
+  assert(final.dig("findings", "preference", "status") == "resolved", "the judged ruling still applies its conclusion")
 end
 
 # A stale correction is not applied to the old version and is not dropped:
@@ -469,6 +668,23 @@ fixture do |_root, record, host, checker, runtime|
   runtime.send(:save)
   assert(record.state.dig("usage", "jev_stage1", "incomplete") == true,
          "a JEV call without measured usage makes the stage total unknown")
+end
+
+# Each actual JEV request has one task-local payload file and one compact
+# event index that records the program's separate decision.
+fixture do |_root, record, _host, _checker, _runtime|
+  trace = { "request" => { "model" => "jev-test", "state" => { "instruction" => "full request" },
+                           "questions" => { "stuck" => { "instructions" => "question" } } },
+            "result" => { "call_id" => "orbit-judgment-00000000-0000-4000-8000-000000000001",
+                          "status" => "answered", "answers" => { "stuck" => 0.1 } } }
+  path = record.record_jev_call(trace, decision: "no_check", reason: "scores below trigger")
+  saved = JSON.parse(File.read(File.join(record.path, path)))
+  assert(saved.dig("request", "state", "instruction") == "full request" &&
+         saved.dig("result", "call_id") == trace.dig("result", "call_id") &&
+         saved.dig("program_decision", "reason") == "scores below trigger",
+         "the actual request, result and program decision can be read together by call id")
+  assert(events(record).any? { |event| event["type"] == "jev_call_recorded" && event["call_id"] == trace.dig("result", "call_id") },
+         "events.jsonl links to the task-local call record")
 end
 
 class RuntimePoolHost < RuntimeTeamHost
@@ -830,13 +1046,14 @@ end
 
 class StubCheckerSelector
   attr_accessor :model, :error, :signature, :snapshot_value
-  attr_reader :calls
+  attr_reader :calls, :last_jev_trace
 
   def initialize(model, signature = "sig-1")
     @model = model
     @signature = signature
     @snapshot_value = "snap-1"
     @calls = []
+    @last_jev_trace = nil
   end
 
   def snapshot(instruction:)
@@ -1490,6 +1707,63 @@ fixture(host_class: RuntimeBoundaryHost) do |_root, record, host, checker, runti
     "independent questions do not amend or replace task delivery")
 end
 
+# New native user messages reach JEV with their original text but do not
+# silently become task amendments or alter the checked input.
+fixture(host_class: RuntimeBoundaryHost) do |_root, record, host, checker, _runtime|
+  state = record.state
+  state["last_user_message_id"] = "original"
+  record.save(state)
+  host.instance_variable_get(:@state)["status"] = "active"
+  message = host.post_user_message("Is the rollout note also expected?")
+  advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1, "artifact_ready" => 0.1)
+  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor)
+  runtime.tick(now: Time.now.to_f + 10)
+  seen = advisor.calls.last.fetch("new_user_messages")
+  assert(seen.any? { |entry| entry["id"] == message["id"] && entry["text"] == message["text"] && entry["task_relation"] == "unassigned" },
+         "JEV receives the unassigned native user message verbatim with its relationship labeled")
+  assert(record.state["amendments"].empty?, "observing a message for JEV does not amend the task")
+end
+
+# A checker asking for user input is a fact for Root to assess. It neither
+# stops the active task nor makes the runtime itself ask the user.
+fixture do |_root, record, host, checker, runtime|
+  now = Time.now.to_f
+  # The fixture drives ticks directly; the real attach transition that
+  # publishes `running` lives in TaskRuntime#run, so state it on the runtime's
+  # OWN state (a disk-only write would be overwritten by its in-memory copy).
+  # The assertion below is about an ACTIVE task never being stopped by a
+  # checker's needs_user result.
+  runtime.instance_variable_get(:@state)["status"] = "running"
+  record.submit("check")
+  runtime.tick(now: now)
+  checker.result = answer("needs_user").merge("reason" => "The source of the expected rollout date is unclear")
+  runtime.tick(now: now + 1)
+  assert(record.state["status"] == "running" && host.stop_calls.zero?,
+         "a needs_user check result does not automatically stop the task (state=#{record.state['status']} stops=#{host.stop_calls})")
+  assert(host.messages.last.include?("Root 判断下一步") && host.messages.last.include?("source of the expected rollout date"),
+         "the checker's reason is delivered to Root with the existing ask path identified")
+end
+
+# A durable failure to place the task's user-message boundary means Orbit can
+# no longer observe the user's instructions. That is a runtime fault: it is
+# recorded as `failed` with the exact reason, the real stop still runs and is
+# confirmed, and Root is told -- never a `needs_user` terminal state, which
+# means an already confirmed stop the user is expected to act on.
+fixture(host_class: RuntimeGapHost) do |_root, record, host, checker, runtime|
+  state = runtime.instance_variable_get(:@state)
+  state["status"] = "running"
+  state["last_user_message_id"] = "original"
+  runtime.tick(now: Time.now.to_f)
+  failed = record.state
+  assert(failed["status"] == "failed", "an unobservable user boundary is a runtime fault: #{failed['status']}")
+  assert(failed["error"].to_s.include?("absent from native session history"), "the exact fault is kept")
+  assert(failed.dig("stop_confirmation", "confirmed") == true, "the real stop still runs and is confirmed")
+  assert(host.messages.any? { |text| text.include?("无法继续观察本任务的用户指令") },
+         "the observation fault is delivered to Root")
+  assert(events(record).any? { |event| event["type"] == "user_observation_unavailable" }, "the fault is recorded")
+  assert(checker.calls.empty?, "no check is presented for an input Orbit cannot observe")
+end
+
 # A clean unfinished review wakes an idle Root once, and only native work
 # counts as progress. Busy tools, pauses and independent questions cannot wake.
 fixture do |_root, record, host, checker, runtime|
@@ -1517,6 +1791,26 @@ fixture do |_root, record, host, checker, runtime|
   checker.result = answer("continue", delivery_ready: false)
   runtime.tick(now: now + 4)
   assert(events(record).count { |e| e["type"] == "unfinished_task_continuation_sent" } == 1, "manual not-ready does not repeat automatic wake")
+end
+
+# Accepting a ruling for an older snapshot cannot retire a not_ready result
+# that belongs to a newer artifact version.
+fixture do |root, record, host, checker, runtime|
+  ruling = returned_ruling!(record, host, checker, runtime)
+  File.write(File.join(root, "artifact.txt"), "a newer artifact version")
+  current_digest = runtime.send(:fingerprint_artifact)
+  state = runtime.instance_variable_get(:@state)
+  state["completion_readiness"] = {
+    "status" => "not_ready", "reason" => "The newer version has no accepted delivery",
+    "check" => ruling["check"] + 1, "artifact_root" => File.realpath(root),
+    "artifact_digest" => current_digest, "input_digest" => ruling.dig("judged", "input_digest")
+  }
+  runtime.send(:save)
+  record.submit("ruling", "decision" => "accept", "check" => ruling["check"])
+  runtime.tick(now: Time.now.to_f + 10)
+  assert(record.state.dig("completion_readiness", "status") == "not_ready" &&
+         record.state.dig("completion_readiness", "artifact_digest") == current_digest,
+         "an older accepted ruling cannot retire the newer version's not_ready result")
 end
 
 fixture do |_root, record, host, checker, runtime|
@@ -2213,6 +2507,10 @@ fixture do |_root, record, host, checker, runtime|
   assert(record.state["error"].to_s.include?("no migration path"), record.state["error"].to_s)
   assert(record.state["members"].first["status"] == "working", "the old record is not relabeled completed")
   assert(Array(host.member_stops).empty?, "the removed host path is not called")
+  assert(host.messages.any? { |text| text.include?("无法监督或停止") },
+         "the unavailable control over those members is reported to Root")
+  assert(record.state["status"] != "needs_user",
+         "uncontrollable member records are not presented as a confirmed user stop")
 end
 
 # Checker cleanup failure must not skip the user's requested execution stop.
@@ -2651,11 +2949,26 @@ fixture(interval: 300) do |root, record, host, checker, runtime|
   assert(checker.calls.length == 1, "a stale result with a pending dispute does not immediately call again")
   assert(record.state["dispute"], "the dispute stays pending for the next applicable check")
   assert(record.state["next_check_trigger"] == "checker_interval", "the next check waits for the normal timer")
+  # EXP-12: a stale adjudication is a returned RULING for Root, not a decision.
+  # It is recorded and shown, its own findings stay unapplied, and the appeal is
+  # not adjudicated again while Root decides.
+  ruling = record.state["pending_ruling"]
+  assert(ruling.is_a?(Hash) && ruling["stale"], "the stale adjudication is still recorded as a ruling")
+  assert(record.state["decisions"].empty?, "a stale ruling decides nothing by itself")
+  assert(record.state["findings"]["clue"].nil? && events(record).none? { |event| event["type"] == "finding_recorded" },
+         "the stale finding of an adjudication is not recorded as open work")
+  assert(host.messages.last.to_s.include?("action=ruling"), "Root receives the stale ruling with its next action")
+  host.finish("ruling reviewed")
   runtime.tick(now: now + 61)
-  assert(checker.calls.length == 2 && checker.calls.last.fetch(:role) == "adjudicator",
-         "the normal timer reaches the pending dispute without a stale-triggered loop")
-  assert(events(record).none? { |event| event["type"] == "correction_sent" },
-         "the stale finding of an adjudication is not delivered")
+  assert(checker.calls.length == 2 && checker.calls.last.fetch(:role) == "reviewer",
+         "while the ruling awaits Root the normal timer runs a normal check, not another adjudication")
+  checker.result = answer("continue")
+  runtime.tick(now: now + 62)
+  record.submit("ruling", "decision" => "recheck", "check" => ruling["check"],
+                "reason" => "The stale finding needs its own review")
+  runtime.tick(now: now + 63)
+  assert(checker.calls.length == 3 && checker.calls.last.fetch(:role) == "adjudicator",
+         "Root's recheck is what runs the appeal again")
 end
 
 # A check that finished against a rebound-away workspace is binding-invalid:
@@ -2852,9 +3165,10 @@ fixture do |root, record, host, checker, runtime|
          "changed finding text reopens the finding")
 end
 
-# An adjudication decision binds the exact versions it judged: inputs, root,
-# artifact bytes, resolved and reported finding ids, reason and time, while
-# the full checker result stays available to existing consumers.
+# A ruling binds the exact versions it judged: inputs, root, artifact bytes,
+# resolved and reported finding ids, reason and time, while the full checker
+# result stays available to existing consumers. The decision records the same
+# facts once Root accepts it.
 fixture do |root, record, host, checker, runtime|
   now = Time.now.to_f
   runtime.tick(now: now)
@@ -2866,16 +3180,29 @@ fixture do |root, record, host, checker, runtime|
   runtime.tick(now: now + 2)
   checker.result = answer("complete", resolved: ["f-1"])
   runtime.tick(now: now + 3)
-  decision = record.state.fetch("decisions").last
   scope = JSON.parse(File.read(File.join(record.path, "checks", "2", "scope.json")))
+  ruling = record.state["pending_ruling"]
+  assert(ruling.dig("judged", "input_digest") == scope["input_digest"] &&
+         ruling.dig("judged", "artifact_root") == File.realpath(root) &&
+         ruling.dig("judged", "artifact_digest") == scope.dig("snapshot", "digest") &&
+         ruling["resolved_ids"] == ["f-1"] && ruling["finding_ids"] == [] &&
+         ruling["reason"] == "Concrete fixture evidence" && ruling["recorded_at"].is_a?(String) &&
+         ruling.dig("result", "verdict") == "complete" &&
+         ruling["dispute"] == "The requirement is not a user requirement",
+         "the returned ruling records versions, finding ids, reason, time and keeps the result")
+  record.submit("ruling", "decision" => "accept", "check" => ruling["check"], "reason" => "The requirement stands")
+  runtime.tick(now: now + 4)
+  decision = record.state.fetch("decisions").last
   assert(decision["input_digest"] == scope["input_digest"] &&
          decision["artifact_root"] == File.realpath(root) &&
          decision["artifact_digest"] == scope.dig("snapshot", "digest") &&
          decision["resolved_ids"] == ["f-1"] && decision["finding_ids"] == [] &&
          decision["reason"] == "Concrete fixture evidence" && decision["decided_at"].is_a?(String) &&
          decision.dig("result", "verdict") == "complete" &&
-         decision["dispute"] == "The requirement is not a user requirement",
-         "the decision records versions, finding ids, reason, time and keeps the result")
+         decision["dispute"] == "The requirement is not a user requirement" &&
+         decision["decision"] == "accepted" && decision["decided_by"] == "root" &&
+         decision["root_reason"] == "The requirement stands",
+         "the accepted decision records versions, finding ids, and who decided")
 end
 
 # A queued manual trigger survives a runtime restart: initialize defaults the
@@ -3244,14 +3571,23 @@ fixture do |_root, record, host, checker, runtime|
                           delivery_reason: "Read the delivered artifact in the fixed snapshot")
   runtime.tick(now: now + 3)
   status = record.state
+  assert(status.dig("completion_readiness", "status") == "not_ready" &&
+         status["finalization_notices"].empty? && status["decisions"].empty?,
+         "a returned ruling changes no readiness or completion state before Root decides")
+  ruling = status["pending_ruling"]
+  assert(ruling.is_a?(Hash), "precondition: the adjudication is a ruling for Root")
+  record.submit("ruling", "decision" => "accept", "check" => ruling["check"], "reason" => "The artifact is delivered")
+  runtime.tick(now: now + 4)
+  status = record.state
   assert(status.dig("completion_readiness", "status") == "review_needed" &&
          status["finalization_notices"].empty? &&
          !Orbit::TaskView.next_action(status).include?("No deliverable"),
-         "the current adjudication retires the false reason but does not approve completion")
+         "the accepted ruling retires the false reason but does not approve completion")
+  host.finish("ruling accepted")
   record.submit("check")
-  runtime.tick(now: now + 4)
-  checker.result = answer("complete")
   runtime.tick(now: now + 5)
+  checker.result = answer("complete")
+  runtime.tick(now: now + 6)
   assert(record.state.dig("completion_readiness", "status") == "ready" &&
          record.state["finalization_notices"].length == 1,
          "only a later current manual reviewer can issue a completion hand-off")

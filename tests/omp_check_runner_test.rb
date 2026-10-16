@@ -157,6 +157,34 @@ module OmpCheckRunnerTest
     raise "fake reviewer did not exit"
   end
 
+  def reviewer_read_sources_follow_recorded_scope_and_sessions
+    root, snapshot, = fixture
+    artifact = File.join(root, "artifact-root")
+    task = File.join(root, "task-record")
+    output = File.join(task, "checks", "2")
+    session = File.join(root, "member-session.jsonl")
+    FileUtils.mkdir_p([artifact, output])
+    File.write(File.join(output, "scope.json"), JSON.generate(
+      "number" => 2, "artifact_root" => artifact,
+      "snapshot" => { "digest" => "sha256:captured" }
+    ))
+    File.write(session, "member session\n")
+    roots = runner("/not-started").reviewer_read_roots(
+      snapshot: File.realpath(snapshot), output_dir: output,
+      context: { "execution_members" => [{ "thread_id" => "m1", "status" => "completed", "session_file" => session }] }
+    )
+    assert(roots.any? { |entry| entry["path"] == File.realpath(artifact) &&
+                                 entry["label"] == "live captured artifact root" &&
+                                 entry["version"] == "capture_snapshot_digest=sha256:captured" },
+           "the artifact root comes from the persisted check scope and is labeled by captured digest")
+    assert(roots.any? { |entry| entry["path"] == File.realpath(task) && entry["label"] == "this Orbit task record" },
+           "history access is scoped to this task record")
+    assert(roots.any? { |entry| entry["path"] == File.realpath(session) && entry["exactFile"] == true },
+           "a member transcript is exposed only at its recorded exact path")
+  ensure
+    FileUtils.remove_entry(root) if root && File.exist?(root)
+  end
+
   def passes_prompt_result_usage_and_does_not_call_codex
     root, snapshot, output = fixture
     previous = ENV["OMP_PROFILE"]
@@ -208,17 +236,19 @@ module OmpCheckRunnerTest
   def assert_omp_prompt(prompt)
     assert(!prompt.include?("--cd") && !prompt.include?("attached output schema") && !prompt.include?("skills/orbit"),
            "old Codex mechanism words do not appear in the OMP prompt")
-    assert(prompt.include?("Use the SDK read/grep/glob tools on the fixed snapshot") &&
+    assert(prompt.include?("## Read-only review sources") &&
+           prompt.include?("already selected reviewer model under the existing model authorization") &&
            prompt.include?("Call yield with data containing these fields"),
-           "the prompt states the SDK tools and the JSON fields")
+           "the prompt identifies read-only sources, selected-model disclosure and the JSON fields")
     assert(prompt.include?("did it only partly") && prompt.include?("verifiable") &&
            prompt.include?("does not reopen") && prompt.include?("not the artifact"),
            "the retained check rules stay in the prompt")
     assert(prompt.include?("## Delivery readiness") &&
            prompt.include?("delivery.ready states whether the task's actual deliverable is visible") &&
-           prompt.include?("never verification") &&
+           !prompt.include?("git_remote") &&
+           !prompt.include?("status to be verified") &&
            prompt.include?("root.status is idle and root.last_turn_status is completed"),
-           "the prompt carries the structured delivery-readiness rules, including text-only answers and git facts")
+           "the prompt carries generic structured readiness rules without a Git-specific completion gate")
   end
 
   def reviewer_prompt_uses_the_same_independent_session_facts
@@ -638,6 +668,7 @@ module OmpCheckRunnerTest
   end
 
   def run
+    reviewer_read_sources_follow_recorded_scope_and_sessions
     trusted_host_completion_and_cancel_collect_lifecycle
     passes_prompt_result_usage_and_does_not_call_codex
     reviewer_prompt_uses_the_same_independent_session_facts

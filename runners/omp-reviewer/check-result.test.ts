@@ -103,12 +103,17 @@ test("check-result structure is shared and schema-derived, not hardcoded", () =>
 	const schema = structuredClone(loadCheckResultSchema());
 	schema.properties.verdict.enum = (schema.properties.verdict.enum as string[]).filter(verdict => verdict !== "pause");
 	delete schema.additionalProperties;
+	delete schema.properties.coverage.properties.items.maxItems;
 	const tampered = deriveCheckResultStructure(schema);
 	const paused = { verdict: "pause", reason: "r", findings: [], resolved_ids: [], next_check_seconds: 1, delivery: { ready: false, reason: "x" } };
 	const enumProblems = checkResultProblems(tampered, paused);
 	assert.ok(enumProblems.some(p => p.startsWith("verdict must be one of:") && !p.includes("pause")), "a removed verdict enum value is enforced from the schema");
 	const openProblems = checkResultProblems(tampered, { ...paused, extra: 1 });
 	assert.ok(!openProblems.some(p => p.includes("unexpected keys")), "an open schema object accepts extra keys instead of a hardcoded rule");
+	const wide = { ...paused, verdict: "continue", coverage: { complete: true, items: Array.from({ length: 70 }, (_, index) => ({
+		requirement: `r${index}`, status: "unverified", evidence: "",
+	})) } };
+	assert.deepEqual(checkResultProblems(tampered, wide), [], "a schema without maxItems has no fixed coverage ceiling");
 
 	// maxLength counts code points, not UTF-16 units: a 1000-code-point
 	// requirement of mostly non-BMP characters (1600 UTF-16 units) stays valid

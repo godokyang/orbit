@@ -625,6 +625,16 @@ module CheckRunnerContextTest
     check(prompt.include?("do not re-raise a point"), "the reviewer prompt forbids re-raising settled points")
     check(prompt.include?("new evidence"), "the reviewer prompt requires new evidence for a settled point")
 
+    appeal = "完整申诉原文。" + ("来源和论据应完整保留。" * 120)
+    roots = [{ "path" => "/tmp/task-record", "label" => "this Orbit task record", "version" => "task=t1; check=2" }]
+    evidence_prompt = runner.send(:build_prompt, snapshot: "/unused", inputs: { "instruction" => "review" },
+                                  context: base_context.merge("dispute" => appeal, "review_sources" => roots),
+                                  role: "adjudicator")
+    check(evidence_prompt.include?("## Dispute (verbatim)\n\n#{appeal}"),
+          "a long appeal is kept complete outside the compressible context block")
+    check(evidence_prompt.include?("/tmp/task-record") && evidence_prompt.include?("this Orbit task record"),
+          "the checker receives the actual read-only history source entry")
+
     process_prompt = runner.send(
       :build_prompt, snapshot: "/unused", inputs: { "instruction" => "do it" },
       context: base_context.merge(
@@ -697,6 +707,7 @@ module CheckRunnerContextTest
     schema = Marshal.load(Marshal.dump(Orbit::CheckRunner.check_result_schema))
     schema["properties"]["verdict"]["enum"] -= ["pause"]
     schema.delete("additionalProperties")
+    schema["properties"]["coverage"]["properties"]["items"].delete("maxItems")
     rules = Orbit::CheckRunner.derive_result_structure(schema)
     paused = { "verdict" => "pause", "reason" => "r", "findings" => [], "resolved_ids" => [],
                "next_check_seconds" => 1, "delivery" => { "ready" => false, "reason" => "x" } }
@@ -706,6 +717,13 @@ module CheckRunnerContextTest
     problems = runner.send(:result_problems, rules, Marshal.load(Marshal.dump(paused)).merge("extra" => 1))
     check(problems.none? { |problem| problem.include?("unexpected keys") },
           "an open schema object accepts extra keys instead of a hardcoded rule")
+
+    wide = Marshal.load(Marshal.dump(paused))
+    wide["verdict"] = "continue"
+    wide["coverage"] = { "complete" => true,
+                         "items" => 70.times.map { |index| { "requirement" => "r#{index}", "status" => "unverified", "evidence" => "" } } }
+    check(runner.send(:result_problems, rules, wide).empty?,
+          "a schema with no maxItems imposes no fixed coverage ceiling")
 
     # maxLength counts Unicode code points and Ruby String#length agrees with
     # it: a 1000-code-point requirement of mostly non-BMP characters (1600

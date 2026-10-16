@@ -27,6 +27,9 @@ try {
   await fs.writeFile(path.join(outside, 'secret.txt'), 'outside');
   await fs.symlink(outside, path.join(project, 'src', 'escape'));
   assert.equal((await gate('write', { path: 'src/new.js', content: 'yes' })).input.path, path.join(project, 'src/new.js'));
+  await fs.mkdir(path.join(project, 'unlisted'));
+  assert.equal((await gate('write', { path: 'unlisted/new.js', content: 'yes' })).input.path,
+    path.join(project, 'unlisted/new.js'), 'native file selection is not restricted by allowed_paths');
   for (const value of ['../elsewhere', path.join(outside, 'secret.txt'), 'src/escape/secret.txt', '.orbit/state.json', 'https://example.com'])
     assert.equal((await gate('read', { path: value })).block, true, value);
   assert.equal((await gate('edit', { path: 'src/new.js', input: 'unprojected alternate format' })).block, true);
@@ -35,14 +38,14 @@ try {
   const passed = await gate('edit', hashline, projected(['src/new.js']));
   assert.equal(passed.block, undefined);
   assert.equal(passed.input.input, hashline.input, 'a projected payload passes through unchanged');
-  assert.equal((await gate('edit', hashline, projected(['src/new.js', 'src/second.js']))).block, undefined,
-    'every section target inside the allowed paths is accepted');
+  assert.equal((await gate('edit', hashline, projected(['src/new.js', 'unlisted/second.js']))).block, undefined,
+    'every section target inside the artifact root is accepted');
   for (const targets of [['../escape.txt'], [path.join(outside, 'secret.txt')], ['src/escape/secret.txt'], ['.orbit/state.json']])
     assert.equal((await gate('edit', hashline, projected(targets))).block, true, JSON.stringify(targets));
   assert.equal((await gate('edit', hashline, projected(['src/a.js', '../b.js']))).block, true,
     'a move/rename destination outside the allowed paths is refused');
-  assert.equal((await gate('edit', hashline, projected(['src/a.js', 'src/b.js']))).block, undefined,
-    'a move/rename destination inside the allowed paths is accepted');
+  assert.equal((await gate('edit', hashline, projected(['src/a.js', 'unlisted/b.js']))).block, undefined,
+    'a move/rename destination inside the artifact root is accepted');
   assert.equal((await gate('edit', hashline, projected(undefined))).block, true,
     'an unprojected payload stays refused');
   assert.equal((await gate('edit', hashline, projected(['new.js'], path.join(project, 'src')))).block, undefined,
@@ -130,11 +133,14 @@ try {
   assert.match((await preflight({ allowed_paths: ['../x'] })).reason, /invalid work-unit scope path/, 'escaping declared path');
   assert.match((await preflight({ allowed_tools: ['read', 'fetch'] })).reason, /no member entrance: fetch/, 'unknown tool');
   assert.match((await preflight({ allowed_commands: ['ls'] })).reason, /without the bash tool entrance/, 'commands without bash');
-  assert.match((await preflight({ allowed_paths: [] })).reason, /no allowed_paths/, 'tools without paths');
+  assert.equal((await preflight({ allowed_paths: [] })).ok, true, 'native tools need no predeclared file list');
+  assert.match((await validateWorkUnitPreflight({ artifact_root: project,
+    scope: { allowed_paths: [], allowed_tools: ['bash'], allowed_commands: ['npm test'] } })).reason,
+  /bash requires declared allowed_paths/, 'shell keeps a separate filesystem sandbox');
   await fs.writeFile(path.join(project, 'note.md'), 'material\n');
-  assert.match((await preflight({}, ['note.md'])).reason, /outside the member's allowed paths/, 'unreadable material');
+  assert.equal((await preflight({}, ['note.md'])).ok, true, 'input materials are inside the native file boundary');
   assert.match((await preflight({}, ['missing.md'])).reason, /does not exist/, 'missing material');
-  assert.equal((await preflight({}, ['src/clean/a.ts'])).ok, true, 'material under an allowed path');
+  assert.equal((await preflight({}, ['src/clean/a.ts'])).ok, true, 'input material remains addressable');
   console.log('WORK_UNIT_SCOPE_TEST_PASS work_unit_preflight');
 
   // Static first hop only: an outside npm realpath is refused before any

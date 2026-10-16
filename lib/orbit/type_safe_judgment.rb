@@ -3,6 +3,7 @@
 require "json"
 require "net/http"
 require "uri"
+require "base64"
 
 require_relative "judgment"
 
@@ -30,8 +31,10 @@ module Orbit
     end
 
     attr_reader :model
+    attr_reader :last_response
 
     def judge(request)
+      @last_response = nil
       # One id per provider invocation, including failures. Retrying the same
       # semantic request is another possible charge, never the same receipt.
       id = "orbit-judgment-#{SecureRandom.uuid}"
@@ -83,6 +86,9 @@ module Orbit
                                  open_timeout: 3, read_timeout: 5, write_timeout: 3) do |http|
         http.request(request)
       end
+      @last_response = { "http_status" => response.code.to_i,
+                         "body_base64" => Base64.strict_encode64(response.body.to_s.b),
+                         "body_encoding" => "base64" }
       response
     end
 

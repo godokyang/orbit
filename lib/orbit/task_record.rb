@@ -379,6 +379,37 @@ module Orbit
       end
     end
 
+    # Persist the exact request and the provider result associated with one
+    # judgment call. Large/private payloads stay in the task's mode-0600
+    # record; events.jsonl keeps a compact index and the program decision.
+    def record_jev_call(trace, decision:, reason:, details: nil)
+      return unless trace.is_a?(Hash)
+
+      result = trace["result"]
+      call_id = result.is_a?(Hash) ? result["call_id"] : nil
+      unless call_id.is_a?(String) && call_id.match?(/\Aorbit-judgment-[a-f0-9-]{36}\z/)
+        event("jev_call_record_gap", "reason" => "call id unavailable; request and result could not be uniquely linked",
+              "decision" => decision, "decision_reason" => reason)
+        return
+      end
+
+      relative = "jev/calls/#{call_id}.json"
+      payload = trace.merge("call_id" => call_id,
+                            "program_decision" => { "action" => decision, "reason" => reason,
+                                                    "details" => details, "at" => Time.now.utc.iso8601 })
+      write(relative, JSON.pretty_generate(payload) + "\n")
+      event("jev_call_recorded", "call_id" => call_id, "path" => relative,
+            "request_sha256" => Digest::SHA256.hexdigest(JSON.generate(trace["request"])),
+            "result_status" => result["status"] || "unknown",
+            "decision" => decision, "decision_reason" => reason)
+      relative
+    rescue StandardError => error
+      event("jev_call_record_failed", "call_id" => call_id,
+            "reason" => "#{error.class}: #{error.message}", "decision" => decision,
+            "decision_reason" => reason)
+      nil
+    end
+
     def event(type, details = {})
       File.open(File.join(path, "events.jsonl"), "a", 0o600) do |file|
         file.puts(JSON.generate({ "at" => Time.now.utc.iso8601, "type" => type }.merge(details)))

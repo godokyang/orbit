@@ -63,7 +63,7 @@ module Orbit
 
       OMP 用 orbit omp 启动受控会话，普通 omp 不加载 Orbit 扩展。
       具体参数：orbit <命令> --help（omp 用 orbit help omp）；状态的机器输出：orbit status --json。
-      Agent 执行接口：start / check / amend / dispute / rebind-workspace / takeover-scope / work-unit / route-resources / model-evidence / model-candidates / model-status / review-model（各自 --help）。
+      Agent 执行接口：start / check / amend / dispute / ruling / rebind-workspace / takeover-scope / work-unit / route-resources / model-evidence / model-candidates / model-status / review-model（各自 --help）。
     TEXT
 
     COMMAND_HELP = {
@@ -83,6 +83,7 @@ module Orbit
       "check" => "orbit check TASK_DIRECTORY",
       "amend" => "orbit amend TASK_DIRECTORY --file FILE|-",
       "dispute" => "orbit dispute TASK_DIRECTORY --reason TEXT",
+      "ruling" => "orbit ruling TASK_DIRECTORY --check CHECK --decision accept|recheck [--reason TEXT]\nRoot 对已返回的独立裁定作处理决定：accept 采纳该裁定，按结论更新相关问题并结束这条申诉；recheck 说明缺失证据与原因，程序保留原裁定结果与本次理由，并按该说明重新裁定这条申诉。CHECK 是待处理裁定对应的检查序号（裁定消息与 status 中给出）。命令只入队，由任务进程记录处理对象、决定与结果；不改变原始要求、独立终检与停止门。",
       "rebind-workspace" => "orbit rebind-workspace TASK_DIRECTORY PATH [--reason TEXT]\n把产物目录改到同一 Git 仓库中的工作区。命令入队后由任务进程记录来源、原因和历史；amend / dispute 的文字不会切换路径。",
       "takeover-scope" => "orbit takeover-scope TASK_DIRECTORY --file FILE|-\n对已有 takeover 任务补交后来声明的 prior_scope（JSON：prior_scope 必填非空文本，reason 可选）。命令只入队；runtime 作为唯一写入者 append-only 记录声明文本、理由、实际声明时间与提交者来源，创建时的 prior_scope 不覆写，不追认旧执行也不授予完成。非接管任务、已终态或坏载荷拒绝；同内容重试不重复追加。",
       "model-evidence" => <<~TEXT,
@@ -108,7 +109,7 @@ module Orbit
         orbit work-unit TASK_DIRECTORY declare|read|list|finish|select --file FILE|-
         Root 持久记录可交接工作单元；read/list 只读，declare/finish 不修改原始用户要求。
         declare 输入 {"spec":{"objective":"目标","requirements":["有效要求引用"],"allowed_paths":["路径"],"allowed_tools":["工具名"],"allowed_commands":["完整命令"],"acceptance":"验收方式","escalation":"何时停止并报 Root"}}，可加 context、decisions、dependencies、execution（root|delegate，默认 delegate）和任务相关 model_requirements。select 输入 {"id":"wu-..."}，返回运行时缓存或当前依据的成员推荐；declare 的原生工具回执在派发前自动返回选型。
-        allowed_paths 是成员全部可访问路径（读写共用）：规格／测试／依赖需要访问时也必须列出，或把必要事实放入 context；它不提供自动只读保护。allowed_commands 必须是完整命令，逐字精确匹配，不是前缀。
+        原生 read/write/edit/grep/glob 工具可在产物根内自主选择文件，并按目标路径校验根目录、元数据目录和符号链接；allowed_paths 用于 bash 文件系统沙箱及命令路径预检，不限制这些原生文件工具。它不提供自动只读保护。input_materials 必须是产物根内已存在的文件；外部技能、MCP 或根外文件不会自动开放。allowed_commands 必须是完整命令，逐字精确匹配，不是前缀。
         read 输入 {"id":"wu-…"}，list 输入 {}；finish 输入 {"id":"wu-…","status":"accepted|rejected|failed","result":"实际结果","verification":"实际核验证据"}。
         单元绑定当前要求版本和实际产物工作区；修订／重新绑定使旧单元不能继续派发或登记 accepted。本命令只记录单元，不派发或登记成员。实际派发须另经原生宿主绑定，Root 不能通过本命令伪造派发。accepted 是 Root 核验记录，不替代独立最终检查或停止确认。已结束任务仅可 read/list。
       TEXT
@@ -238,7 +239,7 @@ module Orbit
         work_unit(argv)
       when "route-resources"
         route_resources(argv)
-      when "stop", "check", "amend", "dispute"
+      when "stop", "check", "amend", "dispute", "ruling"
         submit(command, argv)
       when "export"
         export(argv)
@@ -437,7 +438,7 @@ module Orbit
         old_state = old.state
         unless old_state["project_root"] == File.realpath(options[:project]) &&
                old_state["connection"].slice("provider", "thread_id") == { "provider" => options[:provider], "thread_id" => options[:thread] } &&
-               old_state["status"] == "paused" && old_state.dig("stop_confirmation", "confirmed") == true
+               %w[paused needs_user].include?(old_state["status"]) && old_state.dig("stop_confirmation", "confirmed") == true
           raise ArgumentError, "continuation requires this Root's confirmed stopped task in the same project"
         end
         allowed_models = ModelAuthorization.restrict(allowed_models, old_state.dig("model_authorization", "allowed_models"))
@@ -483,7 +484,9 @@ module Orbit
           raise ArgumentError, "OMP authorization guard is unavailable" unless catalog["authorization_guard"] == true
           ModelAuthorization.check!(connection.configured_model, allowed_models)
         end
-        options[:model], options[:selection] = select_checker_model(options[:model], connection, options[:project], selection_instruction, allowed_models: allowed_models)
+        options[:model], options[:selection], options[:jev_trace] = select_checker_model(
+          options[:model], connection, options[:project], selection_instruction, allowed_models: allowed_models
+        )
       ensure
         connection.close
       end
@@ -507,6 +510,10 @@ module Orbit
           raise ArgumentError, "the takeover boundary could not be captured (#{error.message}); no task was created"
         end
       state = record.state
+      record.record_jev_call(options[:jev_trace], decision: "checker_model_selection",
+                             reason: options[:selection]["notice"] || "checker model selected at task start",
+                             details: { "selected_model" => options[:model], "selected_for" => "start",
+                                        "selection_source" => options[:selection]["source"] }) if options[:jev_trace]
       state["model_authorization"] = { "allowed_models" => allowed_models, "auxiliary_judgments" => "disabled" } if allowed_models
       if resumed
         boundary = state.delete("takeover")
@@ -668,8 +675,9 @@ module Orbit
     # reviewed task-fit judgment and actual model facts, then isolated resolvability
     # order). See CheckerModelSelector for the full contract.
     def select_checker_model(explicit, connection, project, instruction, allowed_models: nil)
-      CheckerModelSelector.new(connection: connection, project_root: project, allowed_models: allowed_models)
-                          .select(explicit: explicit, instruction: instruction, selected_for: "start")
+      selector = CheckerModelSelector.new(connection: connection, project_root: project, allowed_models: allowed_models)
+      model, selection = selector.select(explicit: explicit, instruction: instruction, selected_for: "start")
+      [model, selection, selector.last_jev_trace]
     end
 
     # Root may choose any model in the current OMP catalog. This command
@@ -805,10 +813,13 @@ module Orbit
         connection.connect!
         raise ArgumentError, "Root session belongs to a different project" unless
           File.realpath(connection.state.fetch("cwd")) == state.fetch("project_root")
-        CheckerModelSelector.new(connection: connection, project_root: state.fetch("project_root"),
-                                 allowed_models: state.dig("model_authorization", "allowed_models"))
-                            .select(explicit: model, instruction: record.inputs(state).fetch("instruction"),
-                                    selected_for: "review_model")
+        selector = CheckerModelSelector.new(connection: connection, project_root: state.fetch("project_root"),
+                                            allowed_models: state.dig("model_authorization", "allowed_models"))
+        selector.select(explicit: model, instruction: record.inputs(state).fetch("instruction"),
+                        selected_for: "review_model")
+        record.record_jev_call(selector.last_jev_trace, decision: "checker_model_selection",
+                               reason: "Root requested a checker model for review_model",
+                               details: { "selected_model" => model, "selected_for" => "review_model" }) if selector.last_jev_trace
       ensure
         connection.close
       end
@@ -1058,6 +1069,10 @@ module Orbit
         parser.on("--reason TEXT") { |value| options["reason"] = value }
         parser.on("--file FILE") { |value| options["file"] = value }
         parser.on("--message-id ID") { |value| options["message_id"] = value } if command == "amend"
+        if command == "ruling"
+          parser.on("--decision DECISION") { |value| options["decision"] = value }
+          parser.on("--check CHECK") { |value| options["check"] = Integer(value, exception: false) }
+        end
         parser.on("--json") { options["json"] = true } if command == "stop"
         # Internal: the Orbit Root tool marks a deliberate post-finalization
         # completion hand-off. Plain CLI stops never set it.
@@ -1129,6 +1144,12 @@ module Orbit
         raise ArgumentError, "instruction is empty" if options["text"].strip.empty?
       elsif command == "dispute" && options["reason"].to_s.strip.empty?
         raise ArgumentError, "--reason is required"
+      elsif command == "ruling"
+        raise ArgumentError, "--decision must be accept or recheck" unless %w[accept recheck].include?(options["decision"].to_s)
+        raise ArgumentError, "--check CHECK is required" unless options["check"].is_a?(Integer) && options["check"].positive?
+        if options["decision"] == "recheck" && options["reason"].to_s.strip.empty?
+          raise ArgumentError, "recheck requires --reason describing the missing evidence"
+        end
       end
       id = record.submit(command, options)
       payload = { "task_directory" => record.path, "command_id" => id, "status" => "queued" }

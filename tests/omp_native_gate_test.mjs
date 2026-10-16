@@ -1670,6 +1670,61 @@ try {
     assert.equal(parkedState.session_attached, false);
     assert.equal(parkedState.lifecycle.acceptedAt, 2);
   }
+  // 10b. EXP-08: a member that aborts and is removed between two reads must
+  //      not keep serving the stale `running` snapshot taken at registration.
+  {
+    const observedCall = await emit('tool_call', { toolName: 'task', toolCallId: 'call-exp08', input: { task: 'observed member' } }, ctx);
+    const observedSession = { sessionId: 'exp08-observed', model, isStreaming: false,
+      sessionManager: memberSession.sessionManager,
+      hasPendingAsyncWork: () => false, getAsyncJobSnapshot: () => ({ running: [] }),
+      getAgentId: () => observedCall.input.name,
+      subscribe: () => () => {}, sendCustomMessage: async () => {}, abort: async () => {},
+      asyncJobManager: { cancelAll: () => {}, cancelAndReapOwnerJobs: async () => ({ settled: true }) } };
+    const observedRef = { id: observedCall.input.name, kind: 'sub', parentId: mainAgentId, status: 'running',
+      session: observedSession, sessionFile: '/tmp/exp08-observed.jsonl',
+      history: { outputPath: '/tmp/exp08-observed.md', resolvedModel: 'glm/x' }, activity: 'working' };
+    extraRefs.push(observedRef);
+    registryListener({ type: 'registered', ref: observedRef });
+    const running = await request('member_state', { id: observedRef.id });
+    assert.equal(running.registry_status, 'running', 'precondition: the member was observed running');
+    assert.equal(running.registration_removed, undefined, 'a live registration carries no removal marker');
+    // Real SDK events: setStatus emits status_changed, unregister emits removed.
+    observedRef.status = 'aborted';
+    registryListener({ type: 'status_changed', ref: observedRef });
+    registryListener({ type: 'removed', ref: observedRef });
+    extraRefs.splice(extraRefs.indexOf(observedRef), 1);
+    const removed = await request('member_state', { id: observedRef.id });
+    assert.equal(removed.registry_status, 'aborted', 'the last observed status is served after removal');
+    assert.equal(removed.registration_removed, true, 'the removal itself is explicit');
+    assert.equal(removed.session_attached, false);
+
+    // Removal with NO observed terminal status: `running` cannot be the current
+    // state of a removed ref, so it is reported as unknown instead.
+    const unknownCall = await emit('tool_call', { toolName: 'task', toolCallId: 'call-exp08-unknown', input: { task: 'unknown member' } }, ctx);
+    const unknownSession = { sessionId: 'exp08-unknown', model, isStreaming: false,
+      sessionManager: memberSession.sessionManager,
+      hasPendingAsyncWork: () => false, getAsyncJobSnapshot: () => ({ running: [] }),
+      getAgentId: () => unknownCall.input.name,
+      subscribe: () => () => {}, sendCustomMessage: async () => {}, abort: async () => {},
+      asyncJobManager: { cancelAll: () => {}, cancelAndReapOwnerJobs: async () => ({ settled: true }) } };
+    const unknownRef = { id: unknownCall.input.name, kind: 'sub', parentId: mainAgentId, status: 'running',
+      session: unknownSession, sessionFile: '/tmp/exp08-unknown.jsonl',
+      history: { outputPath: '/tmp/exp08-unknown.md', resolvedModel: 'glm/x' }, activity: 'working' };
+    extraRefs.push(unknownRef);
+    registryListener({ type: 'registered', ref: unknownRef });
+    assert.equal((await request('member_state', { id: unknownRef.id })).registry_status, 'running',
+      'precondition: the member was observed running');
+    registryListener({ type: 'removed', ref: unknownRef });
+    extraRefs.splice(extraRefs.indexOf(unknownRef), 1);
+    const unknown = await request('member_state', { id: unknownRef.id });
+    assert.equal(unknown.registry_status, null, 'a removed ref never repeats the cached running status');
+    assert.equal(unknown.registration_removed, true, 'the unprovable removal is still explicit');
+    assert.ok(typeof unknown.registration_removed_at === 'string' && unknown.registration_removed_at,
+      'the removal time is reported with the removal');
+    // The retained result surface keeps serving the last readable facts.
+    assert.equal((await request('member_result', { id: unknownRef.id })).id, unknownRef.id,
+      'member_result stays readable from the retained snapshot');
+  }
   await fs.rm(agentRoot, { recursive: true, force: true });
   delete process.env.ORBIT_CLI_BIN;
 
@@ -2108,6 +2163,11 @@ try {
       'the paused bar advises a new task instead of a re-check');
     assert.doesNotMatch(statusCalls.at(-1)?.[1], /重检|补齐/,
       'the paused bar never asks the stopped task for artifacts or another check');
+    await setState({ status: 'needs_user', stop_confirmation: { confirmed: true } });
+    const legacyContinuation = await statusTurn('legacy needs_user continuation');
+    assert.match(legacyContinuation, /resume_from/, 'legacy needs_user receives the same-task continuation entrance');
+    assert.match(legacyContinuation, /旧版 needs_user 终态/, 'the host identifies this as a legacy stopped task');
+    assert.match(statusCalls.at(-1)?.[1], /需用户处理.*已确认停止/, 'the legacy task remains visibly stopped');
     await setState({ status: 'running', stop_confirmation: null, completion_readiness: { status: 'waiting', reason: '尚无当前版本的有效终检' } });
     // A record whose control socket is not this host's is what an OMP restart
     // leaves: shown as unowned, never controlled (the tool would refuse it).

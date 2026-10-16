@@ -128,6 +128,24 @@ function captureMemberSnapshot(id, ref) {
   } catch { /* observation only */ }
 }
 
+// OMP's registry emits `status_changed` (setStatus: terminal statuses, the
+// run-scoped lifecycle) and `metadata_changed` (markResultAccepted, setHistory)
+// before it deletes a ref, then `removed` for the deletion itself
+// (agent-registry.ts). Orbit's gate used to act only on `registered`, so a
+// member that aborted and was removed between two reads kept the `running`
+// snapshot taken at registration. Record the LAST observed facts for owned
+// members, and keep the removal itself: a removed id executes nothing, so its
+// pre-removal `running` must never be served as the current state.
+const memberRegistryRemovals = new Map(); // member agent id -> { at, status }
+
+function noteMemberRemoved(id, ref) {
+  try {
+    if (!id) return;
+    captureMemberSnapshot(id, ref);
+    memberRegistryRemovals.set(id, { at: new Date().toISOString(), status: ref?.status ?? null });
+  } catch { /* observation only */ }
+}
+
 // The member's CURRENT native turn error fact, from the SDK's own session
 // objects (sessionManager branch), not from prose: the branch's LAST
 // assistant message ending in stopReason "error". Bounded and structured;
@@ -1239,8 +1257,18 @@ export function installOmpExtension(pi, sdk) {
     if (typeof registry.onChange !== 'function') return false;
     try {
       registry.onChange(ev => {
-      if (ev.type !== 'registered') return;
       const ref = ev.ref;
+      if (ev.type !== 'registered') {
+        // Last-observed facts for OUR members, kept across the ref's deletion:
+        // setStatus emits status_changed, markResultAccepted/setHistory emit
+        // metadata_changed, and unregister emits removed. Members Orbit never
+        // claimed are ignored, exactly like the registration gate below.
+        if (!ref || ref.kind !== 'sub') return;
+        if (!nativeMemberIds.has(ref.id) && !requestedNames.has(ref.id)) return;
+        if (ev.type === 'removed') noteMemberRemoved(ref.id, ref);
+        else if (ev.type === 'status_changed' || ev.type === 'metadata_changed') captureMemberSnapshot(ref.id, ref);
+        return;
+      }
       if (process.env.ORBIT_GATE_DEBUG) process.stderr.write(`Orbit gate: registered id=${ref.id} kind=${ref.kind} parent=${ref.parentId ?? 'null'} pending=${requestedNames.has(ref.id)}\n`);
       if (ref.kind !== 'sub') return;
       const pending = requestedNames.get(ref.id);
@@ -1255,6 +1283,9 @@ export function installOmpExtension(pi, sdk) {
         memberRetainedSessions.set(ref.id, ref.session);
       }
       captureMemberSnapshot(ref.id, ref);
+      // A live registration is the current fact again: a revived id must not
+      // stay marked as removed.
+      memberRegistryRemovals.delete(ref.id);
       if (drifted) {
         refuseMember(ref.id, taskDir, base, 'id_drift');
         return;
@@ -1568,9 +1599,10 @@ export function installOmpExtension(pi, sdk) {
   }
 
   function continuationBlock(bound, ctx) {
+    const legacyNeedsUser = bound.state.status === 'needs_user';
     const current = ctx?.sessionManager?.getBranch?.().filter(item => item.type === 'message' &&
       item.message?.role === 'user' && item.message.attribution !== 'agent').at(-1);
-    return `Orbit 程序来源：原任务已暂停，停止确认已通过。旧任务保留终态，已停止成员不会继续工作。\n` +
+    return `Orbit 程序来源：原任务${legacyNeedsUser ? '处于旧版 needs_user 终态' : '已暂停'}，停止确认已通过。旧任务保留终态，已停止成员不会继续工作。\n` +
       (current ? `本轮真实用户消息 ${current.id}：${textOf(current.message.content).slice(0, 2000)}\n` : '') +
       '旧 Esc 的停止事实不等于本轮仍要求暂停；本轮任务相关追问或做法纠正已经授权续接，不要求用户再说一遍继续。仅本轮明确暂停/讨论/取消或仍有效的明确暂停约束阻止执行。\n' +
       `原任务记录：${bound.taskDir}（instruction.txt 为原要求，amendments/ 为有效修订）。\n` +
@@ -2119,15 +2151,23 @@ export function installOmpExtension(pi, sdk) {
       return [];
     }).filter(m => m.text.trim());
   }
-  // Root OMP session file path from the main AgentRegistry ref, when the
-  // ref exposes one: a durable REFERENCE only (never session content), so
-  // TaskRuntime can record which native session file belongs to this task
-  // for safe task-scoped export. Lazily looked up per state() RPC; null
-  // when the registry surface or the ref has no file.
+  // Root OMP session file path for a live session id: a durable REFERENCE
+  // only (never session content), so TaskRuntime can record which native
+  // session file belongs to this task for safe task-scoped export. The
+  // registry entry's own `sessionFile` is stamped at registration/attach and
+  // OMP 18.9.0 does not refresh it when the SAME session creates or switches
+  // its transcript (newSession/switchSession move SessionManager only), so it
+  // can pair the current session id with an earlier chat's file. The matched
+  // ACTIVE session's public `sessionFile` getter always returns the current
+  // SessionManager file, so that is the value used; the registry string is
+  // only a last resort when the active session exposes no path at all.
   function sessionFileFor(sessionId) {
     try {
       const ref = sdk.AgentRegistry.global().list().find(r => r.session?.sessionId === sessionId);
-      return typeof ref?.sessionFile === 'string' && ref.sessionFile ? ref.sessionFile : null;
+      if (!ref) return null;
+      const live = ref.session?.sessionFile;
+      if (typeof live === 'string' && live) return live;
+      return typeof ref.sessionFile === 'string' && ref.sessionFile ? ref.sessionFile : null;
     } catch { return null; }
   }
   // Raw durable receipts of the Root session's own bound task; empty when
@@ -2565,7 +2605,13 @@ export function installOmpExtension(pi, sdk) {
       case 'member_state':
         if (!session) {
           const retainedSession = memberRetainedSessions.get(ref.id) ?? null;
-          const observed = { id: ref.id, registry_status: ref.status,
+          // A removed registry entry runs nothing: its saved status describes
+          // the past. A saved `running` therefore cannot be the current state,
+          // and is reported as UNKNOWN (null) with the removal made explicit,
+          // instead of being read back as an execution still in flight.
+          const removal = memberRegistryRemovals.get(ref.id) ?? null;
+          const observed = { id: ref.id,
+            registry_status: removal && ref.status === 'running' ? null : (ref.status ?? null),
             streaming: retainedSession?.isStreaming === true ? true : null,
             model: ref.history?.resolvedModel ?? null,
             activity: ref.activity ?? null, session_id: null, session_file: ref.sessionFile,
@@ -2573,6 +2619,10 @@ export function installOmpExtension(pi, sdk) {
             active_tools: null, async_jobs: null, session_attached: false,
             retained_session_seen: Boolean(retainedSession), retained_snapshot: retainedRead,
             lifecycle: ref.lifecycle ?? null };
+          if (removal) {
+            observed.registration_removed = true;
+            observed.registration_removed_at = removal.at;
+          }
           // No live session and no retained one means the turn error is
           // UNKNOWN, not absent: omit the key so the runtime keeps its last
           // observed fact instead of treating unknown as "no error".
@@ -3486,7 +3536,7 @@ export function installOmpExtension(pi, sdk) {
       }
       const priorSources = boundNow ? [boundNow.state.instruction_source?.id, boundNow.state.continuation?.source?.id,
         ...(boundNow.state.amendments || []).map(a => a.source?.id)].filter(Boolean) : [];
-      if (boundNow?.state.status === 'paused' && boundNow.state.stop_confirmation?.confirmed === true &&
+      if (['paused', 'needs_user'].includes(boundNow?.state.status) && boundNow.state.stop_confirmation?.confirmed === true &&
           branch.some(item => priorSources.includes(item.id))) {
         // Leave the semantic relationship to Root, who can read the original
         // goal and conversation. Do not auto-start a new task on a status query.
@@ -3617,7 +3667,7 @@ export function installOmpExtension(pi, sdk) {
         // A paused task projects its goal only on a branch that references a
         // prior input source — the same condition as the continuation block,
         // so an unrelated question never inherits the old goal.
-        if (!(bound.state.status === 'paused' && bound.state.stop_confirmation?.confirmed === true)) return;
+        if (!(['paused', 'needs_user'].includes(bound.state.status) && bound.state.stop_confirmation?.confirmed === true)) return;
         const priorSources = [bound.state.instruction_source?.id, bound.state.continuation?.source?.id,
           ...(bound.state.amendments || []).map(a => a.source?.id)].filter(Boolean);
         const branch = ctx.sessionManager?.getBranch?.() ?? [];
@@ -3626,7 +3676,10 @@ export function installOmpExtension(pi, sdk) {
       const projection = await goalProjectionText(bound);
       if (!projection) return;
       const prefix = bound.state.status === 'paused'
-        ? '本任务当前为已确认停止的暂停状态；以下目标投影只供判断本轮消息与原任务的关系，不构成恢复执行或续跑授权：\n' : '';
+        ? '本任务当前为已确认停止的暂停状态；以下目标投影只供判断本轮消息与原任务的关系，不构成恢复执行或续跑授权：\n'
+        : bound.state.status === 'needs_user'
+          ? '本任务当前为旧版 needs_user 已确认停止状态；以下目标投影只供判断本轮消息与原任务的关系，不构成恢复执行或续跑授权：\n'
+          : '';
       const text = prefix + projection.text;
       recordGoalProjection(bound, sessionId, ctx, text, 'context_hook');
       return { messages: [...event.messages, { role: 'user', content: text, timestamp: Date.now() }] };
@@ -4436,7 +4489,7 @@ export function installOmpExtension(pi, sdk) {
       return { systemPrompt: withStatusBlock(event?.systemPrompt, block) };
     }
     if (!activeState(bound.state)) {
-      if (bound.state.status === 'paused' && bound.state.stop_confirmation?.confirmed === true)
+      if (['paused', 'needs_user'].includes(bound.state.status) && bound.state.stop_confirmation?.confirmed === true)
         return { systemPrompt: withStatusBlock(event?.systemPrompt, continuationBlock(bound, ctx)) };
       return;
     }

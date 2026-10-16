@@ -345,7 +345,9 @@ module Orbit
       raise Error, "delegate has no tool entrance; declare allowed_tools before dispatch" if tools.empty?
       unknown = tools - %w[read write edit grep glob bash hub yield]
       raise Error, "no member entrance for #{unknown.join(', ')}; prepare needed facts in context or project materials" unless unknown.empty?
-      raise Error, "delegate has no allowed_paths; declare bounded member paths" if scope["allowed_paths"].empty?
+      if tools.include?("bash") && scope["allowed_paths"].empty?
+        raise Error, "bash requires allowed_paths for its filesystem sandbox"
+      end
       if tools.include?("bash") && commands.empty?
         raise Error, "bash cannot execute without allowed_commands; declare complete commands or remove bash"
       end
@@ -358,9 +360,6 @@ module Orbit
         real = checked_workspace_path(value, actual_root)
         lexical = File.expand_path(value, actual_root)
         raise Error, "input material #{value} does not exist; prepare it in the project before declaration" unless File.exist?(lexical)
-        unless allowed.any? { |entry| path_within?(entry, real) && path_within?(entry, lexical) }
-          raise Error, "input material #{value} is outside allowed_paths; prepare it under an allowed path or extend the scope"
-        end
       end
     rescue SystemCallError => error
       raise Error, "work-unit preflight failed: #{error.message}; repair the project paths before declaration"

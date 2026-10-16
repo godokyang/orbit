@@ -25,7 +25,7 @@ import { toolWireSchema, validateToolArguments } from "@oh-my-pi/pi-ai";
 import { providerErrorFact } from "./provider-error.ts";
 import { parseProbeModels, probeModelAvailability, type CredentialAvailability } from "./model-probe";
 import { getBaseConfigRoot, getModelDbPath, getProfileRootDir, resolveProfileEnv, postmortem } from "@oh-my-pi/pi-utils";
-import { createConfinedTools, type SnapshotImageRead } from "./confined-tools.ts";
+import { createConfinedTools, type ReviewerReadRoot, type SnapshotImageRead } from "./confined-tools.ts";
 import {
 	createCallBoundaryBinder,
 	matchAccountIdentity,
@@ -68,6 +68,7 @@ type Request = {
 	source_project_dir?: string;
 	// Actual local host version supplied by the supervisor.
 	sdk_version?: string;
+	read_roots?: ReviewerReadRoot[];
 };
 
 // A trusted factory deliberately stays pending. Only its owning parent ends
@@ -444,7 +445,8 @@ try {
 			requireYieldTool: true,
 			restrictToolNames: true,
 			allowRestrictedCustomTools: true,
-			customTools: createConfinedTools(sessionRoot, { onImageRead: fact => snapshotImageReads.push(fact),
+			customTools: createConfinedTools(sessionRoot, { readRoots: request.read_roots,
+				onImageRead: fact => snapshotImageReads.push(fact),
 				inputModalities: () => session.model?.input }),
 			enableMCP: false,
 			enableIrc: false,

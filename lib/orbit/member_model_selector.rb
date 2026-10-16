@@ -39,6 +39,8 @@ module Orbit
     MAX_CANDIDATES = 64
     MAX_TEXT = 300
 
+    attr_reader :last_jev_traces
+
     def initialize(connection:, project_root:, pool:, evidence_cache:, advisor:,
                    overview: nil, release: UNSET, route_cost_inputs: nil, allowed_models: nil)
       @allowed_models = allowed_models
@@ -64,6 +66,7 @@ module Orbit
     # string/array acceptance, model_requirements). Reusing an unchanged
     # previous assessment returns it with reused: true and spends nothing.
     def assess(state:, work_unit:, previous: nil, excluded: [], route_costs: nil)
+      @last_jev_traces = []
       @native = nil
       prepared = prepare(state: state, work_unit: work_unit, excluded: excluded, route_costs: route_costs)
       reusable = reusable_assessment(previous, prepared)
@@ -525,6 +528,8 @@ module Orbit
       body = judgment_body(prepared, prepared["candidates"])
       projection = projection_for(prepared)
       delegation = judge_call(phase: "delegation") { @advisor.assess_delegation(state: body) }
+      result["jev_traces"] ||= []
+      result["jev_traces"] << delegation.delete("trace") if delegation["trace"]
       result["judgments"] << delegation["receipt"]
       result["judgment_state"] = body
       receipt = delegation["receipt"]
@@ -542,6 +547,7 @@ module Orbit
       candidates_call = judge_call(phase: "candidates") do
         @advisor.assess_candidates(state: body, candidates: body["candidates"])
       end
+      result["jev_traces"] << candidates_call.delete("trace") if candidates_call["trace"]
       result["judgments"] << candidates_call["receipt"]
       unless candidates_call["ok"]
         return close_judgment(result, prepared, release, receipt, nil,
@@ -627,13 +633,19 @@ module Orbit
     # or a fabricated zero.
     def judge_call(phase:)
       receipt = yield
-      { "phase" => phase, "ok" => true, "receipt" => judgment_receipt(phase, receipt) }
+      trace = @advisor.last_trace if @advisor.respond_to?(:last_trace)
+      @last_jev_traces << trace if trace.is_a?(Hash)
+      { "phase" => phase, "ok" => true, "receipt" => judgment_receipt(phase, receipt), "trace" => trace }
     rescue JevAdvisor::Error => error
-      { "phase" => phase, "ok" => false, "receipt" => judgment_receipt(phase, error.judgment, error: error.message) }
+      trace = @advisor.last_trace if @advisor.respond_to?(:last_trace)
+      @last_jev_traces << trace if trace.is_a?(Hash)
+      { "phase" => phase, "ok" => false, "receipt" => judgment_receipt(phase, error.judgment, error: error.message), "trace" => trace }
     rescue StandardError => error
+      trace = @advisor.last_trace if @advisor.respond_to?(:last_trace)
+      @last_jev_traces << trace if trace.is_a?(Hash)
       { "phase" => phase, "ok" => false,
         "receipt" => { "phase" => phase, "status" => "unavailable", "receipt_missing" => true,
-                       "error" => "judgment call failed (#{error.class})" } }
+                       "error" => "judgment call failed (#{error.class})" }, "trace" => trace }
     end
 
     # The recorded receipt is the real one, copied field by field: its input

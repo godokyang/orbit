@@ -119,7 +119,7 @@
     },
     "resume_from": {
       "since": "1.0",
-      "from_status": ["paused"],
+      "from_status": ["paused", "needs_user"],
       "requires": "native_user_message"
     },
     "external_session_mode": {"since": "1.2", "environment_variable": "ORBIT_EXTERNAL_INTEGRATION", "enabled_value": "1", "automatic_entry": false, "root_start_available": true},

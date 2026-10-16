@@ -237,6 +237,18 @@ try {
   // Root session file reference: path only, straight from the registry ref.
   const rootState = await request(taskDir, 'state', { session: 'root' });
   assert.equal(rootState.session_file, rootRef.sessionFile, 'state exposes the main ref session file path');
+  // The registry ref's sessionFile is stamped at registration/attach and OMP
+  // 18.9.0 does not refresh it when the SAME session creates or switches its
+  // transcript, so the ref can pair the current session id with an earlier
+  // chat's file. The state RPC must report the ACTIVE session's own path.
+  root.sessionFile = '/tmp/switched-chat.jsonl';
+  try {
+    const switched = await request(taskDir, 'state', { session: 'root' });
+    assert.equal(switched.session_file, '/tmp/switched-chat.jsonl',
+      'state reports the active session file, not the stale registry copy');
+  } finally {
+    delete root.sessionFile;
+  }
   // Bounded delivery-attribution origin (kickoff ⑥): the nearest native user
   // message id preceding the last assistant turn — null while no assistant
   // turn exists, then the user message that turn answers.

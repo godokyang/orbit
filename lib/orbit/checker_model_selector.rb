@@ -55,6 +55,8 @@ module Orbit
     # from an explicitly injected release, including an injected nil.
     UNSET = Object.new
 
+    attr_reader :last_jev_trace
+
     def initialize(connection:, project_root:, pool: ModelCandidatePool.new,
                    evidence_cache: ModelEvidenceCache.new, advisor: nil, probe: nil,
                    clock: nil, overview: nil, release: UNSET, facts: nil, route_cost_inputs: nil, allowed_models: nil)
@@ -96,6 +98,7 @@ module Orbit
     # unknown, which never removes a runnable candidate.
     def select(explicit:, instruction:, previous: nil, selected_for: "start", excluded: [], state: {},
                route_costs: nil)
+      @last_jev_trace = nil
       # The only network opportunity is before the selection/Jev path. A
       # failed optional refresh never prevents a runnable checker from starting.
       @overview_refresh = @allowed_models ? nil : refresh_overview
@@ -534,19 +537,22 @@ module Orbit
       projected_state = nil
       judgment_error = nil
       gate_note = nil
+      jev_advisor = nil
       if judged.any? && !@allowed_models
-        advisor = resolved_advisor
-        if advisor
+        jev_advisor = resolved_advisor
+        if jev_advisor
           judgment_state = quality_body(prepared, judged)
           projected_state = ModelQualityPolicy.project_selection_state(judgment_state)
           gate_note = judgment_gate(prepared, projected_state)
           if gate_note.nil?
             begin
-              judgment = advisor.assess_checker_quality(
+              judgment = jev_advisor.assess_checker_quality(
                 state: judgment_state,
                 candidates: judged.map { |candidate| judgment_candidate(prepared, candidate) }
               )
+              @last_jev_trace = jev_advisor.last_trace if jev_advisor.respond_to?(:last_trace)
             rescue StandardError => error
+              @last_jev_trace = jev_advisor.last_trace if jev_advisor.respond_to?(:last_trace)
               judgment_error = "JEV task-fit judgment failed (#{error.class})"
               judgment = error.judgment.merge("scores" => {}) if error.is_a?(JevAdvisor::Error)
             end
@@ -573,7 +579,7 @@ module Orbit
         raise failed_selection(prepared, "no unused runnable OMP checker model (#{decision['reason']})",
                                detail: probe_lines(availability, prepared["models"]),
                                judgment: judgment, judgment_state: judgment_state, judgment_error: judgment_error,
-                               availability: availability)
+                               availability: availability, jev_trace: @last_jev_trace)
       end
 
       chosen = decision["model"]
@@ -697,7 +703,7 @@ module Orbit
     # judgment/probe trace. The local project log contains the actual bounded
     # state sent to JEV and its structured response, never a guessed score.
     def failed_selection(prepared, reason, detail:, judgment: nil, judgment_state: nil,
-                         judgment_error: nil, availability: nil)
+                         judgment_error: nil, availability: nil, jev_trace: nil)
       error = undecided(reason, detail: detail)
       path = File.join(@project_root, ".orbit", "checker-selection-failures.jsonl")
       trace = {
@@ -705,7 +711,7 @@ module Orbit
         "pool" => prepared["pool"], "session_candidates" => prepared["models"],
         "identities" => prepared["identities"], "release" => release_binding(prepared["release"]),
         "question_set_version" => ModelQualityPolicy::QUESTION_SET_VERSIONS.fetch("checker_quality"),
-        "judgment_state" => judgment_state, "judgment" => judgment,
+        "judgment_state" => judgment_state, "judgment" => judgment, "jev_trace" => jev_trace,
         "judgment_error" => judgment_error, "isolated_probe" => availability
       }
       FileUtils.mkdir_p(File.dirname(path))

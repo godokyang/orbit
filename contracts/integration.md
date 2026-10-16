@@ -30,7 +30,7 @@
 | `stop_receipt` | 停止回执：`stop --json` 只表示入队，已确认停止只看 `stop_confirmation.confirmed` |
 | `start_external_refs` | `start` 可带 `--external-ref`；`max_refs`、`max_length` 为强制上限；`inherited_on_resume=false` |
 | `check_coverage_ref` | 检查结果的每个覆盖项可带 `ref`；`max_length` 为 schema 上限；`blank_is_omitted=true`（1.1 起）表示空串或纯空白按未提供处理 |
-| `resume_from` | `start --resume-from`；`from_status` 列出可接续的旧任务终态（当前仅 `paused`）；`requires=native_user_message` |
+| `resume_from` | `start --resume-from`；`from_status` 列出可接续的旧任务终态（`paused` 与 `needs_user`）；`requires=native_user_message` |
 
 | `external_session_mode` | 1.2 起：`ORBIT_EXTERNAL_INTEGRATION=1` 关闭自动入口，Root 显式 start 保留 |
 | `control_socket_env` | 1.2 起：指定私有父目录中的绝对路径，session_start 提前监听，关闭只释放自有 socket |
@@ -119,7 +119,7 @@ models 从该检查 usage.calls 的 model（缺时仅用该回执 requested_mode
 
 ## 7. `resume_from` 的范围与前提
 
-- 只接续同一 Root 会话、同一项目、已确认停止的 `paused` 任务（`status=needs_user` 等其他终态当前**不被接受**，由 `from_status` 声明）。
+- 只接续同一 Root 会话、同一项目、已确认停止的 `paused` 或 `needs_user` 任务；两者的旧终态含义保持不变，由 `from_status` 明确声明。
 - 需要一条**真实的原生用户消息**（`--message-id`），来源于同一 Root 会话；调用方无法用外部文本伪造。外部系统收到的用户答复要接续，必须先以原生用户消息进入同一 Root 会话。
 - 复制原要求与有效修订，建立新的监督边界；旧任务终态、成员、检查与用量不迁入，监督空档不被追认。
 
@@ -137,7 +137,7 @@ models 从该检查 usage.calls 的 model（缺时仅用该回执 requested_mode
 - 调用方先建立同一 uid 所有、无组/其他用户权限的私有父目录（建议 0700）；Orbit 不更改父目录权限、不删除该目录或其其他文件。非法路径/权限、非 socket 文件、其他 uid 的 socket、活监听或无法确认已死的通道均拒绝，不覆盖。只有私有目录中的同 uid 死 socket，且探测后身份未换，才可清理重用；退出仅释放本进程绑定的自有 socket。
 - 为避免 Node 关闭监听时删除调用方替换文件，Orbit 在自有私有临时目录监听，以硬链接暴露指定路径；调用方目录须与私有临时目录同文件系统且支持 Unix socket 硬链接，失败时拒绝启动通道，不覆盖调用方文件。
 - 会话切换/分支/树切换关闭原通道；随后的 `session_start` 在同一指定字符串路径重新监听。进程崩溃的遗留由调用方管理，不扫描其他目录。
-- `start` 仍要 `--thread`；会话 id 来自 OMP 自身的 RPC `get_state.sessionId`。首条消息前可得性只按 OMP 18.9.0 的本次实测成立（见[验收记录](../docs/reference/loom-integration-acceptance-20261011.md)），不承诺所有版本，也不新增 `status --session` 或会话登记。
+- `start` 仍要 `--thread`；会话 id 来自 OMP 自身的 RPC `get_state.sessionId`。首条消息前可得性只在 OMP 18.9.0 上验证，不承诺所有版本，也不新增 `status --session` 或会话登记。详细历史记录可从 Git 历史取回。
 
 ## 10. 严格模型授权（1.4）
 
@@ -161,3 +161,4 @@ Root 原生调用、原生成员派发/实际请求、检查者/复核者在调�
 - 1.3：持久 revision/updated_at、粗粒度 attention 与最近完成检查 latest_check；旧字段及 status 取值不变。
 
 - 1.4：可选严格模型名单、会话调用前授权上限与冻结任务字段；普通偏好池及既有 status 取值不变。
+- 1.4（追加能力）：`resume_from.from_status` 增加已确认停止的 `needs_user`；旧记录仍是已停止终态，续接建立新任务边界且不恢复旧成员、检查或用量。

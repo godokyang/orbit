@@ -46,7 +46,7 @@ export interface CheckResultStructure {
 	coverageItemRequired: string[];
 	coverageItemClosed: boolean;
 	coverageItemsMin: number;
-	coverageItemsMax: number;
+	coverageItemsMax?: number;
 	coverageRequirementMax: number;
 	coverageEvidenceMax: number;
 	coverageRefMax: number;
@@ -95,7 +95,9 @@ export function deriveCheckResultStructure(schema: Record<string, any>): CheckRe
 		coverageStatuses: itemProperties.status?.enum,
 		coverageScopes: itemProperties.scope?.enum,
 	};
-	const missing = Object.entries(structure).filter(([, value]) => value === undefined).map(([key]) => key);
+	// maxItems is optional JSON Schema metadata. Its absence leaves only the
+	// required minimum; the reviewer does not invent an upper bound.
+	const missing = Object.entries(structure).filter(([key, value]) => value === undefined && key !== "coverageItemsMax").map(([key]) => key);
 	if (missing.length) throw new Error(`check-result schema is missing structural facts: ${missing.join(", ")}`);
 	return structure;
 }
@@ -190,8 +192,9 @@ function coverageProblems(structure: CheckResultStructure, coverage: unknown): s
 	if (structure.booleanProperties.includes("coverage.complete") && typeof c.complete !== "boolean") {
 		problems.push("coverage.complete must be a boolean");
 	}
-	if (!Array.isArray(c.items) || c.items.length < structure.coverageItemsMin || c.items.length > structure.coverageItemsMax) {
-		return [...problems, `coverage.items must contain ${structure.coverageItemsMin}..${structure.coverageItemsMax} entries`];
+	if (!Array.isArray(c.items) || c.items.length < structure.coverageItemsMin ||
+		(structure.coverageItemsMax !== undefined && c.items.length > structure.coverageItemsMax)) {
+		return [...problems, `coverage.items must contain ${structure.coverageItemsMin}..${structure.coverageItemsMax ?? "more"} entries`];
 	}
 	const seen = new Set<string>();
 	for (const item of c.items) {

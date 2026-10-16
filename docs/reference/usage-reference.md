@@ -162,7 +162,7 @@ orbit model-status --project DIR  # 只读精确身份的证据诊断；无会�
 
 新版成员选择针对 Root 声明的有界工作单元，保留目标、要求引用、上下文／决定、范围、验收、依赖和升级条件。单元绑定当前输入与实际产物根；未满足依赖不派发建议，修订或工作区重绑定后不能采纳旧结果。Root 可通过 Orbit 工具或 `orbit work-unit` 声明与核验；工作区已接真实宿主 bind 和逐工具范围校验。Root 的原生 task 文本须以独立行引用 `orbit-unit: wu-...`；未知／过期单元或真实模型失配拒绝派发或工具执行。macOS 声明命令还经系统沙盒；没有已验证沙盒的平台由 Root 执行必要核验，不能默许成员无约束运行。当前修复的真实闭环证据与剩余限制见验收记录（Git 历史：`aa089bb:docs/reference/ordinary-task-repair-acceptance-20261002.md`）。
 
-工作单元可设 `execution=root|delegate`（缺省 delegate），Root 的集成单设 root，不占选型队列。declare 回执携带运行时选型；可用 `work-unit select` 刷新具体单元，native task 在派发前再次预检、复用和版本核对。Root 保留候选池内自选裁量。成员需要的项目文件可列入 `input_materials`，必须已存在且在 allowed_paths 内；外部技能/MCP 不自动开放。bash 必须声明完整 allowed_commands；无可执行入口或无权限材料会在成员启动前返回修复步骤。
+工作单元可设 `execution=root|delegate`（缺省 delegate），Root 的集成单设 root，不占选型队列。declare 回执携带运行时选型；可用 `work-unit select` 刷新具体单元，native task 在派发前再次预检、复用和版本核对。Root 保留候选池内自选裁量。成员可在产物根内自主选择原生文件工具的目标，程序逐目标核验根目录、元数据目录和符号链接；`allowed_paths` 用于 bash 文件系统沙箱及命令路径预检，不是原生文件工具名单。`input_materials` 是产物根内须已存在的文件。外部技能/MCP 不自动开放；bash 必须声明 `allowed_paths` 与完整 `allowed_commands`；无可执行入口或缺少所需材料时会在成员启动前返回修复步骤。
 
 read 的原生行号选择器、多路径及 grep/glob 的内嵌通配符按真实目标校验。grep 裸通配符保留原生递归语义，要求成员实际 cwd 与产物根一致。当前目录搜索仍采用保守边界：搜索子树出现 `.git`、`.orbit`、符号链接，或遍历超过 10000 项时拒绝；Root 应给出较窄的项目目录或具体文件入口。
 

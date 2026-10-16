@@ -79,6 +79,20 @@ module RequirementCoverageTest
     end
   end
 
+  def coverage_above_old_fixed_item_limit_is_preserved
+    with_coverage do |coverage|
+      items = 70.times.map do |index|
+        { "requirement" => "requirement #{index + 1}", "status" => "verified",
+          "evidence" => "inspected source for requirement #{index + 1}" }
+      end
+      coverage.record(check_id: "wide", kind: "artifact", role: "reviewer",
+                      coverage: { "complete" => true, "items" => items }, **binding)
+      status = coverage.status(**binding)
+      assert(status["ready"] == true && status["verified"] == 70 && status["items"].length == 70,
+             "all reported requirements above the former fixed capacity are preserved")
+    end
+  end
+
   # Any input/artifact/root revision or a stale record revokes currency.
   # Process checks and adjudicator records stay history: they never grant,
   # replace or erase artifact-review coverage in either direction.
@@ -158,15 +172,13 @@ module RequirementCoverageTest
         nil
       end
 
-      too_many = { "complete" => true,
-                   "items" => (1..65).map { |i| { "requirement" => "r#{i}", "status" => "unverified", "evidence" => "" } } }
-      begin
-        coverage.record(check_id: "c", kind: "artifact", role: "reviewer", coverage: too_many, **binding)
-        raise "more than 64 items must raise"
-      rescue Orbit::RequirementCoverage::Error
-        nil
-      end
       assert(!File.exist?(coverage.path), "invalid submissions never create the file")
+      over_old_limit = { "complete" => true,
+                         "items" => (1..65).map { |i| { "requirement" => "r#{i}", "status" => "verified",
+                                                        "evidence" => "checked r#{i}" } } }
+      coverage.record(check_id: "c", kind: "artifact", role: "reviewer", coverage: over_old_limit, **binding)
+      assert(coverage.status(**binding)["items"].length == 65,
+             "coverage above the former 64-item limit remains complete and intact")
     end
   end
 
@@ -210,6 +222,7 @@ module RequirementCoverageTest
 
   def run
     long_requirement_text_is_stored_verbatim_but_still_bounded
+    coverage_above_old_fixed_item_limit_is_preserved
     complete_verified_coverage_releases_the_current_binding
     revisions_stale_records_and_process_checks_never_release
     missing_corrupt_and_invalid_never_count

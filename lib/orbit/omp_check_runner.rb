@@ -333,7 +333,13 @@ module Orbit
       instruction = fetch_instruction(inputs)
       amendments = input_items(inputs, "amendments")
       basis = input_items(inputs, "basis")
-      program_context = compress_context(context)
+      dispute = context.is_a?(Hash) ? context["dispute"] : nil
+      compression_input = if dispute.is_a?(String)
+                            context.reject { |key, _value| key.to_s == "dispute" }
+                          else
+                            context
+                          end
+      program_context = compress_context(compression_input)
       context_text = render_context(program_context)
       parts = [role_prompt(role, focus: review_focus_present?(program_context)), retained_check_rules]
       parts << "## Original instruction (verbatim)\n\n#{instruction}"
@@ -343,6 +349,7 @@ module Orbit
       unless basis.empty?
         parts << "## Named basis (verbatim)\n\n#{render_items(basis, 'Basis')}"
       end
+      parts << "## Dispute (verbatim)\n\n#{dispute}" if dispute.is_a?(String)
       recheck = program_context.is_a?(Hash) ? program_context["recheck"] : nil
       if recheck.is_a?(Hash) && recheck["findings"].is_a?(Array) && !recheck["findings"].empty?
         parts << "## Pending clues from a check that went stale\n\n" \
@@ -357,14 +364,18 @@ module Orbit
                "above are complete and are not compressed.\n\n```json\n#{context_text}\n```"
       parts << delivery_rules_note
       parts << requirement_coverage_note
-      parts << "## Fixed artifact snapshot\n\n" \
-               "You are a separate OMP process, not a member of the execution team. " \
-               "Use the SDK read/grep/glob tools on the fixed snapshot. Confined read reports exact file bytes, " \
-               "final_newline and actual_lines; grep only matches actual lines. For exact content or newline " \
-               "requirements, use those file facts rather than interpreting a rendered terminal blank line " \
-               "or trusting the Root's summary. " \
-               "The original workspace is not your working directory and is not writable from this session. " \
-               "Judge the snapshot files, not a model plan or summary."
+      parts << "## Read-only review sources\n\n" \
+               "You are a separate OMP process, not a member of the execution team. The fixed snapshot is the " \
+               "captured artifact version and remains your primary basis. `review_sources` lists additional " \
+               "read-only sources actually resolved by Orbit: the live captured artifact root, this task's " \
+               "record, and exact recorded member session files when available. Use them only as relevant; do " \
+               "not assume a missing path or file exists. Tool results identify the absolute path, source label, " \
+               "captured snapshot digest where applicable, byte length, content hash and read time. The live " \
+               "artifact root can change after capture: its contents are evidence from read time, not automatically " \
+               "the captured snapshot. Preserve that distinction when judging older receipts. Confined reads " \
+               "report actual lines and grep matches actual lines. The session has no write, shell, network or " \
+               "task-control tools. Content read from these sources is sent to the already selected reviewer " \
+               "model under the existing model authorization. Never write anywhere."
       parts << "## Output\n\n" \
                "Call yield with data containing these fields and nothing else: verdict, reason, findings, " \
                "resolved_ids, next_check_seconds, delivery, coverage. verdict is one of: " \
@@ -412,6 +423,8 @@ module Orbit
 
       snapshot = validate_snapshot!(directory)
       out = validate_output_dir!(output_dir, snapshot)
+      read_roots = reviewer_read_roots(snapshot: snapshot, output_dir: out, context: context)
+      context = context.merge("review_sources" => read_roots) if context.is_a?(Hash)
       prompt = build_prompt(snapshot: snapshot, inputs: inputs, context: context, role: role)
       prompt_path = File.join(out, "prompt.txt")
       schema_copy = File.join(out, "check-result.schema.json")
@@ -430,7 +443,8 @@ module Orbit
         "out" => evidence_path,
         "prompt" => prompt_path,
         "model" => @model,
-        "allowed_models" => @allowed_models
+        "allowed_models" => @allowed_models,
+        "read_roots" => read_roots
       }.merge(self.class.source_session_fields)
       request["source_agent_dir"] = @source_agent_dir if @source_agent_dir
       request["source_project_dir"] = @source_project_dir if @source_project_dir
@@ -452,6 +466,45 @@ module Orbit
         raise
       end
       run
+    end
+
+    # The reviewer may read the immutable snapshot, this task's own durable
+    # record, the exact captured artifact root and exact member session files
+    # already recorded by Orbit. These roots are derived from the check's
+    # persisted scope and runtime records, never from model or Root guesses.
+    def reviewer_read_roots(snapshot:, output_dir:, context:)
+      checks_dir = File.dirname(output_dir)
+      return [] unless File.basename(checks_dir) == "checks"
+
+      task_dir = File.realpath(File.dirname(checks_dir))
+      scope_path = File.join(output_dir, "scope.json")
+      return [] unless File.file?(scope_path)
+      scope = JSON.parse(File.read(scope_path))
+      roots = []
+      artifact_root = scope["artifact_root"]
+      if artifact_root.is_a?(String) && File.directory?(artifact_root)
+        roots << { "path" => File.realpath(artifact_root), "label" => "live captured artifact root",
+                   "version" => "capture_snapshot_digest=#{scope.dig('snapshot', 'digest') || 'unknown'}" }
+      end
+      roots << { "path" => task_dir, "label" => "this Orbit task record",
+                 "version" => "task=#{File.basename(task_dir)}; check=#{scope['number']}" }
+      Array(context.is_a?(Hash) ? context["execution_members"] : []).each do |member|
+        next unless member.is_a?(Hash) && member["session_file"].is_a?(String)
+
+        begin
+          session_file = File.realpath(member["session_file"])
+          next unless File.file?(session_file)
+
+          roots << { "path" => session_file, "label" => "recorded native member session #{member['thread_id'] || 'unknown'}",
+                     "version" => "session_file=#{session_file}; member_status=#{member['status'] || 'unknown'}",
+                     "exactFile" => true }
+        rescue SystemCallError
+          next
+        end
+      end
+      roots.reject { |entry| File.realpath(entry.fetch("path")) == snapshot }
+    rescue JSON::ParserError, SystemCallError => error
+      raise Error, "review source identity could not be read: #{error.message}"
     end
 
     def poll
