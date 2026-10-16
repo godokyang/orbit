@@ -190,7 +190,7 @@ module JevAdvisorTest
       check(advisor.last_trace.dig("request", "state") == sent["state"] &&
             advisor.last_trace.dig("request", "questions") == sent["questions"] &&
             advisor.last_trace.dig("result", "call_id") == result["call_id"] &&
-            Base64.decode64(advisor.last_trace.dig("provider_response", "body_base64")) == payload(STAGE_ONE_ANSWERS),
+            advisor.last_trace.dig("provider_response", "body_base64").unpack1("m0") == payload(STAGE_ONE_ANSWERS),
             "the call trace captures the complete wire request, raw response and linked parsed result")
     end
   end

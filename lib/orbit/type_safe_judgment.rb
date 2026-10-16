@@ -3,7 +3,6 @@
 require "json"
 require "net/http"
 require "uri"
-require "base64"
 
 require_relative "judgment"
 
@@ -87,7 +86,7 @@ module Orbit
         http.request(request)
       end
       @last_response = { "http_status" => response.code.to_i,
-                         "body_base64" => Base64.strict_encode64(response.body.to_s.b),
+                         "body_base64" => [response.body.to_s.b].pack("m0"),
                          "body_encoding" => "base64" }
       response
     end
