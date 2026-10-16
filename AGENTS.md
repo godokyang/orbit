@@ -2,7 +2,7 @@
 
 > 本文件约束在本仓库工作的开发 Agent。核心目标：**正确、高质量、可维护地完成用户任务**，防止协作、测试或协议操作偏离交付目标。
 >
-> 本文件及 `docs/agents/` 是**开发 Orbit 的客户端纪律**，不产生 Orbit 产品运行事实。产品规则由 `contracts/task-runtime.md` 与 ADR-008/009 定义；[ADR-011](docs/adr/011-agent-autonomy-and-runtime-responsibility.md) 已确认部分替代职责与限制，尚待实现，须区分目标规则与当前能力（对外集成合同见 `contracts/integration.md`、ADR-010）。实际会话、检查和停止结果由运行程序记录。用户明确指令优先；改变产品语义时先处理对应合同和决策，不用开发规范伪造完成或停止。
+> 本文件及 `docs/agents/` 是**开发 Orbit 的客户端纪律**，不产生 Orbit 产品运行事实。产品规则由 `contracts/task-runtime.md` 与 ADR-008/009 定义；[ADR-011](docs/adr/011-agent-autonomy-and-runtime-responsibility.md) 已替代部分职责与限制，Orbit 阶段一已实施，Loom 协同待用户通知；当前实现缺口见交接与待办（对外集成合同见 `contracts/integration.md`、ADR-010）。实际会话、检查和停止结果由运行程序记录。用户明确指令优先；改变产品语义时先处理对应合同和决策，不用开发规范伪造完成或停止。
 
 ## 按需加载（动手前先读）
 

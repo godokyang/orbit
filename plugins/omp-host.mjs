@@ -421,15 +421,269 @@ async function closeCollabWriters() {
 }
 
 // --- ADR-009 keyboard multi-select picker (proposal B, 2026-09-26) --------
-// Pure component over ctx.ui.custom(): no OMP imports, no IO. The extension
-// command supplies entries (session-available first, pooled-but-unavailable
-// last), the opening snapshot and an async commit; the component owns search,
-// cursor/scroll, checkbox state and the ONE Enter-driven net-delta submit.
-// Space on an unavailable row can only uncheck (stale pool entries are
-// removable, never addable); Esc closes without writing; a failed commit
-// keeps the selection on screen with the error so nothing must be re-picked.
+// Pure component over ctx.ui.custom(): no OMP imports, no IO. ONE role is edited
+// per invocation: the extension command supplies a view per role (executor /
+// checker) and the component first asks which role this run edits (unless the
+// caller already named it) before showing that role's multi-select rows. The
+// session catalog is the addable source for BOTH roles; each role keeps its own
+// checkbox state, opening snapshot and net delta, and the snapshot of the edited
+// role is exactly what its commit is compared against. Presentation follows
+// OMP's own model picker (title, search line, `>` cursor, footer hints); the
+// persisted multi-select semantics stay Orbit's: Space toggles, Esc writes
+// nothing, a refused commit keeps the selection on screen with the reason, and
+// ONE Enter commits exactly ONE net delta for the selected role — there is no
+// cross-role transaction, so the other pool is a separate command run. Space on
+// an unavailable row can only uncheck (stale entries are removable, never
+// addable).
 const PICKER_MAX_QUERY = 64;
 const PICKER_LIST_ROWS = 12;
+
+function pickerRow(entry) {
+  return {
+    id: entry.id, available: entry.available === true,
+    evidenceStatus: entry.evidenceStatus, overviewStatus: entry.overviewStatus,
+  };
+}
+
+export function createModelPicker({ roles, role = null, commit, done, listRows = PICKER_LIST_ROWS }) {
+  const views = new Map();
+  // One independent view per role. `configured=false` is "never configured": the
+  // rows come from the inherited legacy candidates and the role keeps its
+  // fallback. A configured role with zero rows is an explicit empty pool.
+  function loadView(state, { entries = [], snapshot = [], configured = false, statusNote } = {}) {
+    state.rowFor = new Map(entries.map(entry => [entry.id, pickerRow(entry)]));
+    state.current = [...state.rowFor.values()];
+    state.selected = new Set([...snapshot].filter(id => state.rowFor.has(id)));
+    state.base = new Set(snapshot);
+    state.configured = configured === true;
+    if (statusNote !== undefined) state.statusNote = statusNote;
+  }
+  for (const definition of roles) {
+    const state = {
+      role: definition.role, label: definition.label || definition.role, scope: definition.scope || '',
+      configured: definition.configured === true, roleScoped: definition.roleScoped !== false,
+      statusNote: definition.statusNote || null,
+      rowFor: new Map(), current: [], selected: new Set(), base: new Set(),
+      query: '', cursor: 0, scroll: 0,
+    };
+    loadView(state, definition);
+    views.set(state.role, state);
+  }
+  const order = [...views.keys()];
+  // ONE role is edited per invocation: the role chooser runs first (unless the
+  // caller already named the role), then the multi-select for that role only. A
+  // single Enter commits that role's ONE net delta, so a half-committed pair is
+  // impossible by construction; the other pool is a separate `--role` run.
+  let active = views.has(role) ? role : null;
+  let choosing = active === null;
+  let roleCursor = 0;
+  let notice = null;
+  let error = null;
+  let committing = false;
+  let closed = false;
+  const finish = result => { if (!closed) { closed = true; done(result); } };
+  const current = () => views.get(active);
+  const filtered = () => { const state = current(); return state.query ? state.current.filter(entry => pickerQueryMatches(entry.id, state.query)) : state.current; };
+  const deltaOf = state => pickerNetDelta(state.current, state.base, state.selected);
+  const pending = state => { const delta = deltaOf(state); return delta.add.length > 0 || delta.remove.length > 0; };
+  const clampCursor = () => {
+    const state = current();
+    if (!state) return;
+    const rows = filtered();
+    if (!rows.length) { state.cursor = 0; state.scroll = 0; return; }
+    state.cursor = Math.min(state.cursor, rows.length - 1);
+    if (state.cursor < state.scroll) state.scroll = state.cursor;
+    if (state.cursor >= state.scroll + listRows) state.scroll = state.cursor - listRows + 1;
+  };
+  const statusLines = () => [
+    error ? `保存失败：${error}` : null,
+    notice ? `提示：${notice}` : null,
+  ].filter(Boolean);
+  // Every role is shown, but only the edited one is writable: the others stay
+  // read-only so a save can never be mistaken for a cross-pool edit.
+  const roleTabs = () => [...views.values()].map(state =>
+    `${state.role === active ? '>' : ' '} [${state.label}${state.configured ? ` 已配置 ${state.base.size}` : ' 未配置'}]`).join('  ');
+  const roleStateLine = state => {
+    if (!state.roleScoped) return `角色池接口不可用：Orbit CLI 未支持 model-candidates --role，当前显示旧共享列表，保存会被拒绝（请升级 Orbit）。`;
+    if (!state.configured) {
+      // An unconfigured role is NOT an empty pool: until it is edited it keeps
+      // using the inherited legacy shared candidates when there are any, and
+      // only falls back to the ordinary OMP behaviour when there are none.
+      return state.base.size > 0
+        ? `${state.label}池未单独配置：当前继承旧共享候选 ${state.base.size} 个；另一未配置角色也继承旧列表。`
+        : `${state.label}池未配置且无继承候选：沿用 OMP 空池行为。`;
+    }
+    if (state.base.size === 0) return `${state.label}池已配置为空：不借用另一角色候选，也不回退 OMP 默认。`;
+    return `${state.label}池已配置：${state.base.size} 个候选，与另一角色独立。`;
+  };
+  const untouchedLine = () => {
+    const others = [...views.values()].filter(state => state.role !== active);
+    if (!others.length) return null;
+    return `本次只保存 ${current().label}池；` +
+      others.map(state => `${state.label}池${state.configured ? '保持已配置（不改动）' : '维持未配置回退（不改动）'}`).join('、') + '。';
+  };
+
+  function render(width) {
+    const clip = lines => lines.map(line => line.length > width ? line.slice(0, width - 1) + '…' : line);
+    const state = current();
+    // Step 1: pick the role that this invocation edits (skipped when --role
+    // already named it). Each row carries its own pool state so an unconfigured
+    // role is never presented as an empty configured one.
+    if (choosing || !state) {
+      const rows = order.map((id, index) => {
+        const view = views.get(id);
+        const pool = view.configured
+          ? `已配置 ${view.base.size} 个候选${view.base.size ? '' : '（显式空池：不借用另一角色，也不回退 OMP 默认）'}`
+          : (view.base.size > 0
+            ? `未单独配置 · 继承旧共享候选 ${view.base.size} 个`
+            : '未配置且无继承候选 · 沿用 OMP 空池行为');
+        return `${index === roleCursor ? '>' : ' '} ${view.label}（${view.role}）· ${view.scope} · ${pool}`;
+      });
+      return clip([
+        'Orbit 候选模型池（ADR-009）· 选择本次要编辑的角色',
+        ...rows,
+        '↑/↓ 移动 · Enter 进入该角色的多选编辑 · Esc 取消',
+        '执行者池与检查者池独立保存：一次 Enter 只提交当前角色的净增删；另一池重开命令编辑。',
+        'Root 模型由 OMP 原生 --model 选择；本候选池不切换当前 Root。',
+        ...statusLines(),
+      ]);
+    }
+    const rows = filtered();
+    const availableCount = state.current.filter(entry => entry.available).length;
+    const delta = deltaOf(state);
+    const head = [
+      `Orbit 候选模型池 · 编辑角色 ${state.label}（${state.role}）· ${state.scope}`,
+      roleTabs(),
+      roleStateLine(state),
+      ...(untouchedLine() ? [untouchedLine()] : []),
+      `已选 ${state.selected.size} / 当前可选 ${availableCount}` +
+        (delta.add.length || delta.remove.length
+          ? ` · 本次待新增 ${delta.add.length} 待移出 ${delta.remove.length}` : ''),
+      `搜索: ${state.query || '（输入即过滤 provider/id）'}`,
+    ];
+    const body = [];
+    if (rows.length) {
+      const start = Math.max(0, state.scroll);
+      const stop = Math.min(rows.length, start + listRows);
+      for (let index = start; index < stop; index++) {
+        const entry = rows[index];
+        const mark = state.selected.has(entry.id) ? '[x]' : '[ ]';
+        const pointer = index === state.cursor ? '>' : ' ';
+        const tag = entry.available ? '' : '  · 当前不可选，仅可移出';
+        const evidence = entry.evidenceStatus ? `  · 证据 ${entry.evidenceStatus}` : '';
+        const overview = entry.overviewStatus ? `  · 概述 ${entry.overviewStatus}` : '';
+        body.push(`${pointer} ${mark} ${entry.id}${tag}${evidence}${overview}`);
+      }
+      if (rows.length > stop) body.push(`  … 还有 ${rows.length - stop} 项（继续 ↓）`);
+      if (start > 0) body.unshift(`  … 以上还有 ${start} 项（继续 ↑）`);
+    } else {
+      body.push(state.query ? '（无匹配模型；Backspace 删词后重试）' : '（当前会话没有可选模型）');
+    }
+    const footer = [
+      '↑/↓ 移动 · Space 勾选/取消 · Backspace 删搜索 · Tab 换角色（先保存）· Enter 保存本角色 · Esc 取消',
+      'Root 模型由 OMP 原生 --model 选择；本候选池不切换当前 Root。',
+      '缺证据：orbit model-evidence --file FILE|-；质量与隔离环境尚未探测。',
+      ...(state.statusNote ? [`本角色诊断：${state.statusNote}`] : []),
+      ...statusLines(),
+    ];
+    return clip([...head, ...body, ...footer]);
+  }
+
+  // A refused commit keeps the user's selection and replaces the snapshot the
+  // next Enter is compared against, so one retry needs no re-picking. The
+  // refresh payload is always scoped to the role that failed.
+  function refresh(state, result) {
+    if (Array.isArray(result.entries)) {
+      state.rowFor = new Map(result.entries.map(entry => [entry.id, pickerRow(entry)]));
+      state.current = [...state.rowFor.values()];
+      state.selected = new Set([...state.selected].filter(id => state.rowFor.has(id)));
+    }
+    if (Array.isArray(result.snapshot)) state.base = new Set(result.snapshot);
+    if (typeof result.configured === 'boolean') state.configured = result.configured;
+  }
+
+  async function submit() {
+    const state = current();
+    if (!state || !pending(state)) return finish({ status: 'noop' });
+    const delta = deltaOf(state);
+    committing = true;
+    error = null;
+    notice = `正在保存 ${state.label}池……`;
+    try {
+      // The snapshot this delta was computed against travels WITH the commit:
+      // after a failure-refresh the picker's base may differ from the pool
+      // state at open, and the role pool must compare against exactly what the
+      // user saw when they pressed Enter.
+      const result = await commit({ role: state.role, add: delta.add, remove: delta.remove, base: [...state.base] });
+      if (result && result.ok) {
+        notice = null;
+        return finish({ status: 'committed', role: state.role, label: state.label,
+          models: Array.isArray(result.models) ? result.models : [...state.base] });
+      }
+      error = (result && result.error) || '保存失败（未知原因）';
+      if (result) refresh(state, result);
+    } catch (failure) {
+      error = String(failure?.message || failure);
+    } finally {
+      committing = false;
+      notice = null;
+      clampCursor();
+    }
+  }
+
+  function handleInput(data) {
+    const key = decodePickerKey(data);
+    if (!key || closed || committing) return;
+    if (choosing || !current()) {
+      if (key === 'escape') return finish({ status: 'cancelled' });
+      if (order.length && (key === 'up' || key === 'down')) {
+        roleCursor = (roleCursor + (key === 'up' ? -1 : 1) + order.length) % order.length;
+        return;
+      }
+      if (key === 'enter' && order.length) {
+        active = order[roleCursor];
+        choosing = false;
+        error = null;
+        notice = null;
+        clampCursor();
+      }
+      return;
+    }
+    if (key === 'escape') return finish({ status: 'cancelled' });
+    if (key === 'enter') { void submit(); return; }
+    const state = current();
+    if (key === 'roleNext' || key === 'rolePrev') {
+      // Switching pools never carries uncommitted edits: save or Esc first.
+      if (pending(state)) { notice = `先保存或 Esc 取消 ${state.label}池的改动，再切换角色`; return; }
+      choosing = true;
+      roleCursor = Math.max(0, order.indexOf(state.role));
+      error = null;
+      notice = null;
+      return;
+    }
+    if (key === 'backspace') { state.query = state.query.slice(0, -1); error = null; notice = null; clampCursor(); return; }
+    if (key.startsWith('text:')) {
+      if (state.query.length < PICKER_MAX_QUERY) { state.query += key.slice(5); error = null; notice = null; clampCursor(); }
+      return;
+    }
+    const rows = filtered();
+    if (!rows.length) return;
+    if (key === 'up' || key === 'down') {
+      state.cursor = (state.cursor + (key === 'up' ? -1 : 1) + rows.length) % rows.length;
+    } else if (key === 'pageUp' || key === 'pageDown') {
+      const step = Math.max(1, listRows - 1);
+      state.cursor = Math.min(rows.length - 1, Math.max(0, state.cursor + (key === 'pageUp' ? -step : step)));
+    } else if (key === 'space') {
+      const entry = rows[state.cursor];
+      if (state.selected.has(entry.id)) { state.selected.delete(entry.id); error = null; notice = null; }
+      else if (entry.available) { state.selected.add(entry.id); error = null; notice = null; }
+      else { notice = `${entry.id} 当前不可选，只能移出，不能新增`; }
+    }
+    clampCursor();
+  }
+
+  return { render, handleInput, dispose() { closed = true; }, debugId: 'orbit-model-picker' };
+}
 
 // Raw terminal data -> canonical key. Covers the legacy sequences OMP's TUI
 // forwards plus the kitty CSI-u forms for the bound keys; anything else is
@@ -439,17 +693,21 @@ export function decodePickerKey(data) {
   switch (data) {
     case '\r': case '\n': return 'enter';
     case ' ': return 'space';
+    case '\t': return 'roleNext';            // Tab switches the edited role
+    case '\x1b[Z': return 'rolePrev';        // Shift+Tab switches back
     case '\x7f': case '\b': return 'backspace';
     case '\x1b': case '\x03': return 'escape'; // bare Esc; ctrl+c cancels like Esc
     case '\x1b[A': case '\x1bOA': return 'up';
     case '\x1b[B': case '\x1bOB': return 'down';
+    case '\x1b[D': case '\x1bOD': return 'rolePrev';
+    case '\x1b[C': case '\x1bOC': return 'roleNext';
     case '\x1b[5~': return 'pageUp';
     case '\x1b[6~': return 'pageDown';
     default: break;
   }
   const kitty = data.match(/^\x1b\[(\d+)(?::\d+)?u$/);
   if (kitty) {
-    return { 13: 'enter', 32: 'space', 27: 'escape', 127: 'backspace' }[Number(kitty[1])] ?? null;
+    return { 9: 'roleNext', 13: 'enter', 32: 'space', 27: 'escape', 127: 'backspace' }[Number(kitty[1])] ?? null;
   }
   if (data.length === 1) {
     const code = data.charCodeAt(0);
@@ -478,132 +736,6 @@ export function pickerNetDelta(entries, snapshot, selected) {
   const add = [...selected].filter(id => !snapshot.has(id) && available.has(id));
   const remove = [...snapshot].filter(id => !selected.has(id));
   return { add, remove };
-}
-
-export function createModelPicker({ entries, snapshot, commit, done, listRows = PICKER_LIST_ROWS }) {
-  const rowFor = new Map(entries.map(entry => [entry.id, {
-    id: entry.id, available: entry.available === true,
-    evidenceStatus: entry.evidenceStatus, overviewStatus: entry.overviewStatus,
-  }]));
-  let current = [...rowFor.values()];
-  let selected = new Set([...snapshot].filter(id => rowFor.has(id)));
-  let base = new Set(snapshot);
-  let query = '';
-  let cursor = 0;
-  let scroll = 0;
-  let notice = null;
-  let error = null;
-  let committing = false;
-  let closed = false;
-  const finish = result => { if (!closed) { closed = true; done(result); } };
-
-  const filtered = () => query ? current.filter(entry => pickerQueryMatches(entry.id, query)) : current;
-  const clampCursor = () => {
-    const rows = filtered();
-    if (!rows.length) { cursor = 0; scroll = 0; return; }
-    cursor = Math.min(cursor, rows.length - 1);
-    if (cursor < scroll) scroll = cursor;
-    if (cursor >= scroll + listRows) scroll = cursor - listRows + 1;
-  };
-
-  function render(width) {
-    const rows = filtered();
-    const availableCount = current.filter(entry => entry.available).length;
-    const delta = pickerNetDelta(current, base, selected);
-    const head = [
-      `候选模型池 · 已选 ${selected.size} / 当前可选 ${availableCount}` +
-        (delta.add.length || delta.remove.length
-          ? ` · 本次待新增 ${delta.add.length} 待移出 ${delta.remove.length}` : ''),
-      `搜索: ${query || '（输入即过滤）'}`,
-    ];
-    const body = [];
-    if (rows.length) {
-      const start = Math.max(0, scroll);
-      const stop = Math.min(rows.length, start + listRows);
-      for (let index = start; index < stop; index++) {
-        const entry = rows[index];
-        const mark = selected.has(entry.id) ? '[x]' : '[ ]';
-        const pointer = index === cursor ? '>' : ' ';
-        const tag = entry.available ? '' : '  · 当前不可选，仅可移出';
-        const evidence = entry.evidenceStatus ? `  · 证据 ${entry.evidenceStatus}` : '';
-        const overview = entry.overviewStatus ? `  · 概述 ${entry.overviewStatus}` : '';
-        body.push(`${pointer} ${mark} ${entry.id}${tag}${evidence}${overview}`);
-      }
-      if (rows.length > stop) body.push(`  … 还有 ${rows.length - stop} 项（继续 ↓）`);
-      if (start > 0) body.unshift(`  … 以上还有 ${start} 项（继续 ↑）`);
-    } else {
-      body.push(query ? '（无匹配模型；Backspace 删词后重试）' : '（当前会话没有可选模型）');
-    }
-    const statusLine = error ? `保存失败：${error}` : notice ? `提示：${notice}` : null;
-    const footer = [
-      '↑/↓ 移动  Space 勾选/取消  Backspace 删除搜索  Enter 保存  Esc 取消',
-      'Root 模型由 OMP 原生 --model 选择；本候选池不切换当前 Root。',
-      '缺证据：orbit model-evidence --file FILE|-；质量与隔离环境尚未探测。',
-      ...(statusLine ? [statusLine] : []),
-    ];
-    return [...head, ...body, ...footer].map(line => line.length > width ? line.slice(0, width - 1) + '…' : line);
-  }
-
-  async function submit() {
-    const delta = pickerNetDelta(current, base, selected);
-    if (!delta.add.length && !delta.remove.length) return finish({ status: 'noop' });
-    committing = true;
-    error = null;
-    notice = '正在保存……';
-    try {
-      // The snapshot this delta was computed against travels WITH the commit:
-      // after a failure-refresh the picker's base may differ from the pool
-      // state at open, and the pool must compare against exactly what the
-      // user saw when they pressed Enter.
-      const result = await commit({ add: delta.add, remove: delta.remove, base: [...base] });
-      if (result && result.ok) return finish({ status: 'committed', add: delta.add, remove: delta.remove, models: result.models });
-      error = (result && result.error) || '保存失败（未知原因）';
-      if (result && Array.isArray(result.entries)) {
-        rowFor.clear();
-        for (const entry of result.entries) rowFor.set(entry.id, {
-          id: entry.id, available: entry.available === true,
-          evidenceStatus: entry.evidenceStatus, overviewStatus: entry.overviewStatus,
-        });
-        current = [...rowFor.values()];
-        selected = new Set([...selected].filter(id => rowFor.has(id)));
-      }
-      if (result && Array.isArray(result.snapshot)) base = new Set(result.snapshot);
-    } catch (failure) {
-      error = String(failure?.message || failure);
-    } finally {
-      committing = false;
-      notice = null;
-      clampCursor();
-    }
-  }
-
-  function handleInput(data) {
-    const key = decodePickerKey(data);
-    if (!key || closed || committing) return;
-    if (key === 'escape') return finish({ status: 'cancelled' });
-    if (key === 'enter') { void submit(); return; }
-    if (key === 'backspace') { query = query.slice(0, -1); error = null; notice = null; clampCursor(); return; }
-    if (key.startsWith('text:')) {
-      if (query.length < PICKER_MAX_QUERY) { query += key.slice(5); error = null; notice = null; clampCursor(); }
-      return;
-    }
-    const rows = filtered();
-    if (!rows.length) return;
-    if (key === 'up' || key === 'down') {
-      cursor = (cursor + (key === 'up' ? -1 : 1) + rows.length) % rows.length;
-    } else if (key === 'pageUp' || key === 'pageDown') {
-      const step = Math.max(1, listRows - 1);
-      cursor = Math.min(rows.length - 1, Math.max(0, cursor + (key === 'pageUp' ? -step : step)));
-    } else if (key === 'space') {
-      const entry = rows[cursor];
-      if (selected.has(entry.id)) { selected.delete(entry.id); error = null; notice = null; }
-      else if (entry.available) { selected.add(entry.id); error = null; notice = null; }
-      else { notice = `${entry.id} 当前不可选，只能移出，不能新增`; }
-    }
-    clampCursor();
-  }
-
-  return { render, handleInput, dispose() { closed = true; }, debugId: 'orbit-model-picker' };
 }
 
 // --- Automatic-entry failure: current-turn recovery instruction -----------
@@ -640,13 +772,13 @@ function entryRecoveryInstruction(reason, messageId, explicit) {
   if (!explicit) return [
     ...intro,
     '这是非显式的自动受控候选，本次工作未受 Orbit 监督。可以按原要求普通执行并向用户说明未受控；不要声称独立检查或完成门已经启动。',
-    '如希望改用受控任务：Orbit 优先从候选池选择 OMP 可运行检查模型；池内都不可用时 Root 可从 OMP 当前可用型号中选择。缺证据时仅提交一手来源事实：orbit model-evidence --file FILE|-。不需要用户逐型号授权。',
+    '如希望改用受控任务：执行成员自动选型只看执行者池，检查者自动选型只看检查者池与当前 OMP 可用目录的交集；已配置角色池不跨池或退回整份目录。未配置时，有旧共享候选的角色继承旧候选；否则执行者沿用 @task，检查者沿用当前 OMP 目录回退。Root 保持当前 OMP 型号；需要显式指定检查型号时可调用 action=review-model，选择任一可运行 OMP 型号。缺证据时仅提交一手来源事实：orbit model-evidence --file FILE|-。',
     `然后对原始消息调用 Orbit action=start，message_id="${messageId}"。选模失败不会自动重试；不想受控则无需补证据。`,
   ].join('\n');
   return [
     ...intro,
     '用户明确要求 Orbit 受控：本轮不要以普通执行替代。请修复失败原因后对原始消息显式启动；不要将未启动当作已受控。',
-    '先核对 OMP 当前会话模型及隔离检查者凭据；Root 可指定可运行的 provider/id，证据缺失时只提交真实来源事实，不借近似型号或编造指标。',
+    '执行成员自动选型只看执行者池，检查者自动选型只看检查者池与当前 OMP 可用目录的交集；已配置角色池不跨池或退回整份目录。未配置时，有旧共享候选的角色继承旧候选；否则执行者沿用 @task，检查者沿用当前 OMP 目录回退。Root 保持当前 OMP 型号；Root 需要指定检查型号时可单独调用 action=review-model 选择任一可运行 OMP 型号。证据缺失时只提交真实来源事实，不借近似型号或编造指标。',
     `显式调用 Orbit action=start，message_id="${messageId}"；已有任务则用返回的 task_directory 继续。`,
   ].join('\n');
 }
@@ -766,7 +898,7 @@ export function installOmpExtension(pi, sdk) {
   const taskDirs = new Map();       // root session id -> task directory (bound via orbit start/context)
   const statusBoundTasks = new Map(); // root session id -> task directory recovered from durable records (status display only)
   const rootAgentWrites = new Set(); // in-flight OMP `write agent://...` calls awaiting their result
-  let lastKnownPool = null; // last successful pool read (status display only; never a second pool state)
+  let lastKnownPool = null; // last executor-role pool read (status display only; never a second pool state)
   let host, currentContext, registryHookInstalled;
 
   // The candidate pool is a PREFERENCE surface: it materializes generated
@@ -775,31 +907,66 @@ export function installOmpExtension(pi, sdk) {
   // (contract: model usage boundary, 2026-09-27 user ruling).
   const sessionAgentRoot = process.env.ORBIT_SESSION_AGENT_ROOT || null;
   const sessionAgents = new Map();        // generated agent name -> 'provider/id' (per bound instance; rebuilt on sync)
+  // Role split (ADR-009): the execution-member pool and the independent-checker
+  // pool are read and edited independently. `configured=false` means the role was
+  // never configured and therefore keeps its existing fallback; a configured but
+  // empty pool is a deliberate "no candidates" and never borrows the other role.
+  const EXECUTOR_ROLE = 'executor';
+  const PICKER_ROLES = [
+    { role: 'executor', label: '执行者', scope: '受控任务的执行成员' },
+    { role: 'checker', label: '检查者', scope: '独立检查者的首选型号' },
+  ];
   const poolBin = () => process.env.ORBIT_CLI_BIN || orbitCliBin;
   const poolArgv = args => (process.env.ORBIT_CLI_BIN ? [poolBin(), ['model-candidates', ...args]] : [rubyBin(), ['--disable-gems', poolBin(), 'model-candidates', ...args]]);
-  const runPoolCli = args => {
+  // `role` scopes both the read and the atomic delta; a call without one is the
+  // legacy shared list that only exists for backward compatibility.
+  const runPoolCli = (args, role = null) => {
     try {
-      const [bin, argv] = poolArgv(args);
+      const [bin, argv] = poolArgv(role ? [...args, '--role', role] : args);
       const run = spawnSync(bin, argv, { encoding: 'utf8', timeout: 15000, maxBuffer: 1024 * 1024 });
       if (run.status !== 0 || !run.stdout) return { ok: false, reason: ((run.stderr || run.error?.message || `exit ${run.status}`) || 'no output').trim().slice(0, 200) };
       const parsed = JSON.parse(run.stdout.trim().split('\n').at(-1));
       const models = Array.isArray(parsed?.models) ? parsed.models.filter(m => typeof m === 'string') : [];
-      lastKnownPool = models;
-      return { ok: true, models };
+      return { ok: true, models, role: typeof parsed?.role === 'string' ? parsed.role : null, configured: parsed?.configured === true };
     } catch (error) {
       return { ok: false, reason: String(error?.message || error).slice(0, 200) };
     }
   };
-  // Read-only exact-identity cache facts; session availability is supplied by
-  // ctx.models.list() and neither quality nor isolated credentials are probed.
-  const runModelStatusCli = project => {
+  // An older Orbit CLI cannot answer a role question at all. Only that shape
+  // falls back to the legacy shared list, and it stays flagged role-scoped=false
+  // so the surface says so instead of presenting the shared list as a role pool.
+  const roleBridgeMissing = reason => /unexpected arguments|invalid option|--role/i.test(reason || '');
+  const readRolePool = role => {
+    const scoped = runPoolCli(['list'], role);
+    if (scoped.ok) {
+      const view = { ok: true, role, models: scoped.models, configured: scoped.configured === true, roleScoped: true };
+      if (role === EXECUTOR_ROLE) lastKnownPool = view;
+      return view;
+    }
+    if (!roleBridgeMissing(scoped.reason)) return { ok: false, role, reason: scoped.reason };
+    const legacy = runPoolCli(['list']);
+    if (!legacy.ok) return { ok: false, role, reason: legacy.reason };
+    const view = { ok: true, role, models: legacy.models, configured: false, roleScoped: false };
+    if (role === EXECUTOR_ROLE) lastKnownPool = view;
+    return view;
+  };
+  // Read-only exact-identity cache facts for ONE role; session availability is
+  // supplied by ctx.models.list() and neither quality nor isolated credentials
+  // are probed. A CLI without role-aware diagnostics reports unavailable instead
+  // of letting the checker-scoped report annotate the executor surface.
+  const runModelStatusCli = (project, role) => {
     try {
-      const argv = ['model-status', '--project', project];
+      const base = ['model-status', '--project', project];
+      const arr = role ? [...base, '--role', role] : base;
       const run = process.env.ORBIT_CLI_BIN
-        ? spawnSync(poolBin(), argv, { encoding: 'utf8', timeout: 15000, maxBuffer: 1024 * 1024 })
-        : spawnSync(rubyBin(), ['--disable-gems', poolBin(), ...argv],
+        ? spawnSync(poolBin(), arr, { encoding: 'utf8', timeout: 15000, maxBuffer: 1024 * 1024 })
+        : spawnSync(rubyBin(), ['--disable-gems', poolBin(), ...arr],
           { encoding: 'utf8', timeout: 15000, maxBuffer: 1024 * 1024 });
-      if (run.status !== 0 || !run.stdout) return { ok: false, reason: (run.stderr || run.error?.message || `exit ${run.status}`).trim().slice(0, 200) };
+      if (run.status !== 0 || !run.stdout) {
+        const detail = (run.stderr || run.error?.message || `exit ${run.status}`).trim().slice(0, 200);
+        if (role && roleBridgeMissing(detail)) return { ok: false, reason: 'model-status 尚不支持 --role（需升级 Orbit）；本角色诊断标为未知' };
+        return { ok: false, reason: detail };
+      }
       return { ok: true, report: JSON.parse(run.stdout.trim().split('\n').at(-1)) };
     } catch (error) {
       return { ok: false, reason: String(error?.message || error).slice(0, 200) };
@@ -811,7 +978,9 @@ export function installOmpExtension(pi, sdk) {
   // Nothing is written to project `.omp/agents` or the user agent directory.
   async function syncSessionAgents(ctx) {
     if (!sessionAgentRoot) return { ok: false, reason: 'ORBIT_SESSION_AGENT_ROOT is not set; dynamic member agents need the orbit omp entry' };
-    const pool = runPoolCli(['list']);
+    // Generated member agents are the EXECUTOR role pool (an unconfigured
+    // executor role still inherits the legacy shared candidates server-side).
+    const pool = readRolePool(EXECUTOR_ROLE);
     if (!pool.ok) return { ok: false, reason: `model pool unreadable: ${pool.reason}` };
     let available = [];
     try { available = (ctx.models?.list?.() ?? []).map(m => `${m.provider}/${m.id}`); } catch { available = []; }
@@ -819,8 +988,14 @@ export function installOmpExtension(pi, sdk) {
     try { sessionId = ctx.sessionManager?.getSessionId?.(); } catch { /* bootstrap */ }
     const authorized = taskAllowedModels(taskDirs.get(sessionId));
     const availableSet = new Set(authorized ? available.filter(model => authorized.includes(model)) : available);
+    // Task authorization remains a hard upper bound. The executor pool is a
+    // separate candidate preference, so a configured pool intersects it with
+    // that authorization instead of replacing it.
     const desired = new Map();
-    for (const model of (authorized ?? pool.models)) {
+    const desiredModels = authorized
+      ? (pool.configured ? pool.models.filter(model => authorized.includes(model)) : authorized)
+      : pool.models;
+    for (const model of desiredModels) {
       if (!availableSet.has(model)) continue; // session intersection only (ADR-009)
       desired.set(agentNameFor(model), model);
     }
@@ -853,7 +1028,7 @@ export function installOmpExtension(pi, sdk) {
     // files when a NEW spawn is prefighted, never for a running session.
     sessionAgents.clear();
     for (const [name, model] of desired) sessionAgents.set(name, model);
-    return { ok: true, agents: [...desired].map(([name, model]) => ({ name, model })) };
+    return { ok: true, agents: [...desired].map(([name, model]) => ({ name, model })), configured: pool.configured === true };
   }
 
   // Native collaboration: OMP 18.3.4 sends peer messages through both the
@@ -1120,25 +1295,9 @@ export function installOmpExtension(pi, sdk) {
         // normal tool end never pays for it.
         if (event.toolName === 'ask') observeAskEnd(event, id, agentIdFor(id));
       }
-      if (event.type === 'model_changed') {
-        // Public AgentSession event (subscribe) — model_changed has no
-        // extension-facing hook. A change while rootModelInFlight is set was
-        // caused by the orbit tool or the program switch; anything else is an
-        // external explicit selection (native /model, UI) and conservatively
-        // wins over program auto-selection.
-        if (rootModelInFlight.has(id)) ownModelSwitches.set(id, (ownModelSwitches.get(id) || 0) + 1);
-        else externalModelChange.set(id, true);
-      }
       if (event.type === 'message_end' && event.message.role === 'assistant' && sdk.isUserInterruptAbort(event.message)) entry.interrupted = true;
     });
     entries.set(id, entry);
-    // Durable model_change baseline at attach time: the launch entry already
-    // exists here, so any later durable entry this process did not cause (see
-    // the model_changed handler above) is an external explicit selection.
-    try {
-      const count = session.sessionManager?.getBranch?.().filter(e => e && e.type === 'model_change').length;
-      modelChangeBaseline.set(id, typeof count === 'number' ? count : -1);
-    } catch { modelChangeBaseline.set(id, -1); } // -1 = unknown -> never auto-select
     observeNativeCalls(session, () => nativeCallContext(session));
     return entry;
   }
@@ -1153,12 +1312,7 @@ export function installOmpExtension(pi, sdk) {
       if (!ACTIVE.has(state.status)) return null;
     } catch { return null; }
     const model = session.model;
-    // The Root phase is an intent declaration captured at message_start; it
-    // rides the recorder meta so the switch's own (old-model) call stays in
-    // its original phase and only the next new-model call carries the phase.
-    const rootPhase = member ? undefined : rootPhaseByTask.get(taskDir);
     return { taskDir, projectRoot: state.project_root, role: member ? 'member' : 'root', agentId,
-      ...(rootPhase ? { phase: rootPhase } : {}),
       workUnitId: memberWorkUnits.get(agentId)?.bound ? memberWorkUnits.get(agentId).unitId : undefined,
       actualProvider: model?.provider, actualModelId: model?.id,
       actualModel: model?.provider && model?.id ? `${model.provider}/${model.id}` : undefined,
@@ -1419,10 +1573,6 @@ export function installOmpExtension(pi, sdk) {
     }
     if (!ACTIVE.has(state.status) || state.connection?.provider !== 'omp' || state.connection?.thread_id !== sessionId) {
       taskDirs.delete(sessionId);
-      rootPhaseByTask.delete(taskDir);
-      rootToolSelectedByTask.delete(taskDir);
-      for (const key of rootIntegrationAttempts.keys()) if (key.startsWith(JSON.stringify([taskDir]).slice(0, -1) + ','))
-        rootIntegrationAttempts.delete(key);
       return { ok: false, reason: 'The bound Orbit task is not active for this Root; start a new Orbit task before delegating' };
     }
     return { ok: true, taskDir, state };
@@ -1553,8 +1703,15 @@ export function installOmpExtension(pi, sdk) {
     const parts = [];
     const memberCount = Array.isArray(state.members) ? state.members.length : 0;
     parts.push(memberCount > 0 ? `已有 ${memberCount} 个协作成员` : '尚无协作成员');
-    if (Array.isArray(lastKnownPool))
-      parts.push(lastKnownPool.length > 0 ? `备选模型 ${lastKnownPool.length} 个` : '尚未选择备选模型');
+    if (lastKnownPool) {
+      if (lastKnownPool.configured)
+        parts.push(lastKnownPool.models.length > 0
+          ? `执行者池已配置 ${lastKnownPool.models.length} 个候选`
+          : '执行者池已配置为空');
+      else if (lastKnownPool.models.length > 0)
+        parts.push(`执行者池未配置，继承旧候选 ${lastKnownPool.models.length} 个`);
+      else parts.push('执行者池未配置，沿用 @task 回退');
+    }
     const jev = state.jev;
     if (jev && typeof jev === 'object') {
       if (jev.status === 'unavailable') parts.push('自动评估暂时不可用');
@@ -1590,7 +1747,7 @@ export function installOmpExtension(pi, sdk) {
       ...(activeState(state) ? [
         '原生 task 派发前，用 Orbit work-unit declare 保存本次目标、有效要求、范围、验收及升级条件；在每个 task 文本中单独写一行 orbit-unit: <返回的wu-id>。',
         '派发前核对必要工具、路径和环境能力；超时先核查实际登记、成员状态和已有结果，不盲目重发。权限不足由有权执行者接管；只问不可替代的前置。工具仅限单元允许范围；成员不能改 Orbit／Git 内部记录、访问外部工具或二次派发。通过 hub 向 Root 回报；Root 核验实际结果后 finish accepted/rejected/failed。失败历史保留，依赖只在 accepted 后继续；无需用户逐次安排。',
-        '选型必须声明与任务有关的 model_requirements.relevant_indices（coding_index/intelligence_index 等真实适用维度，勿替未分类任务硬套 coding）；fresh 但 prior 为空时先核对维度而非编造分数。具体型号优先、基础降级须保留来源；渠道计费、额度、上下文仍按实际渠道。采纳建议或自主选择均给任务相关理由；用户偏好 GPT-6.1 时纳入取舍，不自动禁用 GPT-6。facts_only 不是推荐成功。',
+        '执行成员仅从执行者池自动选型，检查者仅从检查者池自动选型；已配置角色池只在本角色池与当前会话可用目录的交集中选择。未配置角色沿用既有 fallback。Root 保持当前 OMP 型号。模型建议与自主选择都只说明任务相关理由；未分类任务保持未知，facts_only 不是推荐成功。',
         '识别到有界交接即可先 declare 工作单元供 Jev 评估并开始派发，无需 Root 先补证或全池校准完成；是否派发仍由 Root 自主决定。',
       ] : []),
       '上下文中的简短同意或继续沿真实原要求及已授权方案理解；启动任务用原始需求的原生 message_id，不能把短答复或状态提问替换原目标。不得从 Git 改动猜用户目标。用户纠正必须先调用 Orbit amend（原生 message_id，原文或省略 text），把纠正写入有效要求，再按修订执行并传递给活动成员；用户明确指令高于技能默认流程。独立问题只回答，不吞成修订；任务进度追问仅作续接来源，不调用 amend，及时回答后继续原目标，不用回答状态代替交付。只有归属真正不明才问。',
@@ -2058,9 +2215,7 @@ export function installOmpExtension(pi, sdk) {
       if (state && state.connection?.provider === 'omp' && state.connection?.thread_id === sessionId) return { taskDir: known, state };
       statusBoundTasks.delete(sessionId);
       if (taskDirs.get(sessionId) === known) {
-        taskDirs.delete(sessionId); rootPhaseByTask.delete(known); rootToolSelectedByTask.delete(known);
-        for (const key of rootIntegrationAttempts.keys()) if (key.startsWith(JSON.stringify([known]).slice(0, -1) + ','))
-          rootIntegrationAttempts.delete(key);
+        taskDirs.delete(sessionId);
       }
     }
     const project = await projectRootFor(cwd);
@@ -2897,27 +3052,7 @@ export function installOmpExtension(pi, sdk) {
                  allowed_models: taskAllowedModels(taskDirs.get(entry.id)), authorization_guard: authorizationGuards.has(entry.id),
                  agent_dir: typeof sdk.getAgentDir === 'function' ? sdk.getAgentDir() : null };
       }
-      case 'send': {
-        // Ordinary sends behave exactly as before. An integration_check tag is
-        // a narrow program-purpose marker from remind_manual_final_check only;
-        // the tag alone grants nothing — the tagged branch re-verifies every
-        // durable fact and performs any eligible public pi.setModel selection
-        // BEFORE the same custom-message wake, so the woken turn (which the
-        // SDK never routes through before_agent_start) still lands on the
-        // selected model. Selection failure never blocks the reminder.
-        let text = request.text;
-        if (Number.isInteger(request.integration_check) && request.integration_check > 0) {
-          try {
-            const outcome = await considerProgramIntegrationSwitch(entry, currentContext,
-              await resolveBoundTask(entry.id, currentContext?.cwd), entry.id,
-              { taggedCheck: request.integration_check });
-            // The program-source guidance rides the SAME reminder message —
-            // only when a selection actually succeeded for the current target.
-            if (outcome && typeof outcome.guidance === 'string') text = `${request.text}\n\n${outcome.guidance}`;
-          } catch { /* classified trace only; the reminder below still goes out */ }
-        }
-        return send(entry, text);
-      }
+      case 'send': return send(entry, request.text);
       case 'stop': return stop(entry);
       // Simple readable interface for TaskRuntime wiring (M1.x): the native
       // member roster and recent native hub traffic.
@@ -2966,16 +3101,6 @@ export function installOmpExtension(pi, sdk) {
     entries.clear();
     prestartSeen.clear();
     entryRecovery.clear();
-    // Pure in-memory selection state follows the same entry lifecycle: a
-    // branch/resume creates a fresh entry for the same sessionId, and a stale
-    // own-switch count would swallow same-ID native /model durable entries.
-    // Persistent ledgers and agent roots are NOT touched (see note below).
-    rootPhaseByTask.clear();
-    rootIntegrationAttempts.clear();
-    modelChangeBaseline.clear();
-    ownModelSwitches.clear();
-    externalModelChange.clear();
-    rootToolSelectedByTask.clear();
     // NOTE: the per-session agent root is intentionally NOT removed here.
     // close() also runs on session_before_switch/branch/tree, where the same
     // OMP process keeps running and the root must survive for the next
@@ -3033,6 +3158,7 @@ export function installOmpExtension(pi, sdk) {
     const sync = await syncSessionAgents(ctx);
     if (!sync.ok)
       return { block: true, reason: `candidate pool is unavailable (${sync.reason}); refusing controlled member dispatch` };
+    const executorPoolConstrainsDispatch = sync.configured || sync.agents.length > 0;
     // Decision-relevant dispatch evidence: the ORIGINAL item input as issued
     // by the model (captured before `item.name` is rewritten to the
     // Orbit-assigned requested name), the explicitly supplied model and an
@@ -3072,8 +3198,10 @@ export function installOmpExtension(pi, sdk) {
         if (!resolved?.provider || !resolved?.id)
           return { block: true, reason: `Explicit member model ${selector} cannot be resolved before dispatch` };
         expectedModel = `${resolved.provider}/${resolved.id}`;
-        if (sync.agents.length && !sync.agents.some(candidate => candidate.model === expectedModel))
-          return { block: true, reason: `Explicit member model ${expectedModel} is outside the available Orbit candidate pool` };
+        if (executorPoolConstrainsDispatch && !sync.agents.some(candidate => candidate.model === expectedModel))
+          return { block: true, reason: sync.configured && sync.agents.length === 0
+            ? `The configured executor pool has no runnable candidates in this OMP session; explicit member model ${expectedModel} cannot fall back outside it`
+            : `Explicit member model ${expectedModel} is outside the available Orbit candidate pool` };
         if (itemAgent && itemAgent !== 'task' && !sessionAgents.has(itemAgent))
           return { block: true, reason: 'An explicit model override needs @task or a live Orbit candidate agent with verified tool entrances' };
       } else if (itemAgent.startsWith(AGENT_NAME_PREFIX)) {
@@ -3088,7 +3216,9 @@ export function installOmpExtension(pi, sdk) {
           const resolved = ctx.models?.resolve?.('@task');
           if (!resolved?.provider || !resolved?.id) throw new Error('unresolved @task');
           expectedModel = `${resolved.provider}/${resolved.id}`;
-          if (sync.agents.length && !sync.agents.some(candidate => candidate.model === expectedModel)) {
+          if (executorPoolConstrainsDispatch && !sync.agents.some(candidate => candidate.model === expectedModel)) {
+            if (sync.configured && sync.agents.length === 0)
+              return { block: true, reason: 'The configured executor pool has no runnable candidates in this OMP session; @task cannot fall back outside it' };
             const choices = sync.agents.map(candidate => `${candidate.name} (${candidate.model})`).join(', ');
             const request = bound.state.evidence_request;
             const evidenceAction = request?.identities?.candidates?.length &&
@@ -3796,489 +3926,6 @@ export function installOmpExtension(pi, sdk) {
     }
   });
 
-  // Root-stage model selection (action=root-model). Ownership was already
-  // verified by the shared host; this closure owns the pool∩catalog check,
-  // the public pi.setModel call, and one small factual record per attempt.
-  // No credentials, no raw provider payloads, no rollback guessing; the
-  // actual identity after the switch is proven by the next native assistant
-  // receipt, never by this return value.
-  const rootModelInFlight = new Set();
-  // The declared Root phase for the NEXT and subsequent provider calls of
-  // this task session. Keyed by taskDir (canonical owned path), set only on a
-  // confirmed switch, cleared when the session re-binds or the task ends.
-  const rootPhaseByTask = new Map();
-  // Program-initiated Root integration selection (contract: 程序发起的 Root
-  // integration 阶段选择). One attempt per (taskDir,input,artifactRoot,
-  // artifactDigest); the value records the classified outcome so a duplicate
-  // same-triple tagged send never switches twice.
-  const rootIntegrationAttempts = new Map();
-  // User/Root selection priority: durable model_change baseline per session
-  // (captured at first observation, AFTER the launch entry exists), our own
-  // switch count while rootModelInFlight was set, and a live flag from the
-  // public session subscribe (model_changed has no extension-facing hook).
-  const modelChangeBaseline = new Map();
-  const ownModelSwitches = new Map();
-  const externalModelChange = new Map();
-  // Tasks where the ROOT TOOL path confirmed a model selection: conservative
-  // per-task priority over any later program attempt (the program's own
-  // switch sets rootPhaseByTask for attribution but never this set).
-  const rootToolSelectedByTask = new Set();
-  async function handleRootModel(args, entry, ctx, toolCallId) {
-    const sessionId = entry.id;
-    // Trusted log destination starts null and is set only after ownership is
-    // re-verified; an early reject never writes to a caller-supplied path.
-    let boundDir = null;
-    const record = (extra) => {
-      const payload = {
-        kind: 'root_model_selection', at: Date.now(), session_id: sessionId,
-        agent_id: sdk.MAIN_AGENT_ID,
-        task_dir: (extra.canonical_task_dir ?? null),
-        tool_call_id: typeof toolCallId === 'string' ? toolCallId : null,
-        from: extra.original_from ?? null,
-        actual_model_after: extra.actual_model_after ?? undefined,
-        to: args.root_model ?? null, phase: args.phase ?? null,
-        reason: typeof args.text === 'string' ? args.text.slice(0, 300) : null,
-        ...extra,
-      };
-      try { if (payload.task_dir) recordCollabFor(payload.task_dir, payload); } catch { /* record only */ }
-      return payload;
-    };
-    const reject = (error, extra = {}) => { record({ ok: false, error, canonical_task_dir: boundDir ?? null, ...extra }); return { ok: false, error }; };
-    // Bind the real task now: re-resolve, re-verify ownership+activity+runtime
-    // so a foreign or stale task_dir is never used as a log destination.
-    let bound;
-    try { bound = await resolveBoundTask(sessionId, ctx?.cwd); }
-    catch { return reject('task binding could not be verified'); }
-    // resolveBoundTask is a display-grade lookup (provider/thread match only).
-    // A trusted log destination requires REAL ownership: the current process
-    // must hold this task's control socket AND the caller's path must resolve
-    // to the same canonical directory we would write to.
-    let controlOwned = false;
-    try { controlOwned = !!bound && await host.ownsTask(bound.taskDir, sessionId) === true; } catch { controlOwned = false; }
-    if (!bound || !controlOwned || !args.task || bound.taskDir !== args.task)
-      return reject('task is not owned by the current host session');
-    boundDir = bound.taskDir; // ONLY after successful ownership and exact task match
-    if (!activeState(bound.state)) return reject('task is not active');
-    if (runtimeAbandoned(bound.state)) return reject('task runtime is no longer running');
-    // Waiting discipline: an in-flight independent check or a queued manual
-    // finalization means the Root should yield, not switch mid-verification.
-    // Real shapes: state.check_observations[*].status === 'in_flight' and
-    // state.pending_finalization (queued manual final), per task_runtime.
-    const observations = bound.state.check_observations;
-    if (observations && typeof observations === 'object'
-        && Object.values(observations).some(o => o && typeof o === 'object' && o.status === 'in_flight'))
-      return reject('an independent check is in flight; wait for its notice');
-    if (bound.state.pending_finalization || bound.state.completion_stop_pending)
-      return reject('a manual final check or completion stop is queued; wait for its notice');
-    if (bound.state.next_check_manual === true)
-      return reject('the task is waiting on its manual final check window; wait for its notice');
-    // The catalog resolves only through the CURRENT pool∩session intersection;
-    // no guessed targets, no cached lists. The listing branch stays here (it
-    // is tool-only); the shared switch core below is reused verbatim by the
-    // program-initiated integration selection.
-    const sync = await syncSessionAgents(ctx);
-    if (!sync.ok) return reject(`model catalog is stale: pool re-sync failed (${sync.reason})`);
-    const authorized = taskAllowedModels(boundDir);
-    const exact = [...new Set(sessionAgents.values())].filter(model => !authorized || authorized.includes(model));
-    if (!args.root_model || !args.root_model.trim())
-      return { ok: true, listing_only: true, available: exact, note: 'pass root_model with one of these exact provider/id values plus phase and text' };
-    const target = args.root_model.trim();
-    if (!args.phase) return reject('phase is required (execution | integration | diagnosis)');
-    if (typeof args.text !== 'string' || !args.text.trim())
-      return reject('text (a non-empty selection reason) is required');
-    return performRootModelSwitch({ entry, ctx, boundDir, target, phase: args.phase, reason: args.text,
-      origin: 'tool', toolCallId });
-  }
-
-  // Shared switch core used by BOTH the Root `root-model` tool action and the
-  // program-initiated integration selection: same public pi.setModel chain,
-  // same pool∩catalog + exact resolve + in-flight latch + API check, same
-  // record shape. `origin` selects the record kind ('tool' keeps
-  // root_model_selection with the real tool_call_id; 'program' uses the
-  // separate kind with tool_call_id=null and never fakes a Root tool call).
-  async function performRootModelSwitch({ entry, ctx, boundDir, target, phase, reason, origin, toolCallId = null, provenance = {} }) {
-    const sessionId = entry.id;
-    const recordSwitch = (extra) => {
-      const payload = {
-        kind: origin === 'program' ? 'root_integration_model_selected' : 'root_model_selection',
-        at: Date.now(), session_id: sessionId, agent_id: sdk.MAIN_AGENT_ID,
-        origin, tool_call_id: origin === 'program' ? null : (typeof toolCallId === 'string' ? toolCallId : null),
-        task_dir: boundDir, to: target, phase: phase ?? null,
-        reason: typeof reason === 'string' ? reason.slice(0, 300) : null,
-        ...provenance, ...extra,
-      };
-      try { recordCollabFor(boundDir, payload); } catch { /* record only */ }
-      return payload;
-    };
-    // Every classified refusal from the shared core leaves the same bounded,
-    // owned-log evidence the tool path always produced — never a silent skip.
-    const rejectSwitch = (error, extra = {}) => {
-      recordSwitch({ ok: false, error, ...extra });
-      return { ok: false, error, ...extra };
-    };
-    // The intersection is the synced session-agent set (pool ∩ session
-    // catalog), NOT ctx.models.list() (which is the full session catalog and
-    // would allow out-of-pool targets). Same set for listing and selection.
-    const authorized = taskAllowedModels(boundDir);
-    const exact = [...new Set(sessionAgents.values())].filter(model => !authorized || authorized.includes(model));
-    if (!target || !exact.includes(target))
-      return rejectSwitch(`target ${target} is not in the current pool ∩ OMP catalog`, { available: exact });
-    if (rootModelInFlight.has(sessionId)) return rejectSwitch('another root-model selection is already in progress for this session');
-    // API availability first: a missing surface must not consume the latch.
-    if (typeof pi.setModel !== 'function')
-      return rejectSwitch('pi.setModel is not available in this extension API surface');
-    // Capture the model identity BEFORE any switch attempt: reading
-    // entry.session.model after setModel would record `to` as `from`.
-    const originalFrom = entry.session?.model ? `${entry.session.model.provider}/${entry.session.model.id}` : null;
-    // Duplicate = the ACTUAL current model already IS the target AND this
-    // task's declared phase already IS the requested phase. A new task in the
-    // same session starts with a different (or absent) phase entry, and a
-    // native /model change resets the actual model — both correctly allow a
-    // fresh selection without any extra state machine.
-    if (originalFrom === target && rootPhaseByTask.get(boundDir) === phase)
-      return rejectSwitch('this exact model and phase is already active for this task');
-    // The SDK needs the fully resolved Model. Catalog list entries may be
-    // partial ModelInfo shapes; resolve the exact provider/id and require the
-    // resolved identity to match — never guess from a list element or @task.
-    let model;
-    try { model = ctx.models?.resolve?.(target) ?? null; } catch { model = null; }
-    if (!model || `${model.provider}/${model.id}` !== target)
-      return rejectSwitch('target model could not be resolved to its exact provider/id in the current session');
-    rootModelInFlight.add(sessionId);
-    let switched = false;
-    const nowModel = () => entry.session?.model ? `${entry.session.model.provider}/${entry.session.model.id}` : null;
-    try {
-      switched = await pi.setModel(model);
-    } catch {
-      // A classified, bounded record only: no raw SDK error strings (they can
-      // carry provider payloads). The actually observable current model is
-      // recorded — never a claimed rollback or success.
-      return rejectSwitch('sdk_error', { from: originalFrom, actual_model_after: nowModel() });
-    } finally {
-      rootModelInFlight.delete(sessionId);
-    }
-    if (switched !== true)
-      return rejectSwitch('pi.setModel returned without confirming the switch', { from: originalFrom, actual_model_after: nowModel() });
-    // A true return is only a CONFIGURATION success. The phase (and the
-    // success record) are granted only when the live session model actually
-    // reads back as the exact target; anything else stays a classified gap.
-    const liveAfter = nowModel();
-    if (liveAfter !== target)
-      return rejectSwitch('switch not verified on the live session model', { from: originalFrom, actual_model_after: liveAfter });
-    rootPhaseByTask.set(boundDir, phase);
-    if (origin === 'tool') rootToolSelectedByTask.add(boundDir);
-    recordSwitch({ ok: true, switched: true, from: originalFrom, actual_model_after: liveAfter });
-    return { ok: true, switched: true, from: originalFrom, to: target, phase };
-  }
-
-  // Program-initiated Root integration selection (contract: 程序发起的 Root
-  // integration 阶段选择). Entry point is the TAGGED pre-send position in the
-  // owned `send` RPC only (remind_manual_final_check persists durable facts,
-  // then sends with integration_check). All gates reuse existing read-side
-  // state and wait discipline; cheap screens run before the fingerprint probe.
-  // Returns the classified outcome (cached in rootIntegrationAttempts so a
-  // duplicate same-triple send never switches twice) plus guidance text that
-  // rides the SAME reminder message when the switch succeeded.
-  async function considerProgramIntegrationSwitch(entry, ctx, bound, sessionId, options = {}) {
-    // The ONLY entry is the tagged pre-send position in the owned send RPC.
-    // A missing/invalid tag selects nothing (and never blocks the reminder).
-    if (!Number.isInteger(options.taggedCheck) || options.taggedCheck <= 0)
-      return { attempted: false, reason: 'tag_missing_or_invalid' };
-    // Main-session identity and a live entry: the RPC's session must be the
-    // registry main, the entry's own session, AND the ctx that will resolve
-    // models must be the SAME session's context — otherwise selection would
-    // use another context's catalog for the current entry. Registry identity
-    // is checked against the LIVE ref (ref.session === entry.session); any
-    // unknown shape is a skip, never a guess.
-    let ctxSessionId = null;
-    try { ctxSessionId = ctx?.sessionManager?.getSessionId?.() ?? null; } catch { ctxSessionId = null; }
-    let liveRef = null;
-    try { liveRef = sdk.AgentRegistry.global().list().find(r => r.id === sdk.MAIN_AGENT_ID && r.kind === 'main') ?? null; }
-    catch { liveRef = null; }
-    if (!isMainSession(sessionId) || !entry || entry.session?.sessionId !== sessionId
-        || ctxSessionId !== sessionId || !liveRef || liveRef.session !== entry.session
-        || !activeState(bound.state) || runtimeAbandoned(bound.state))
-      return { attempted: false, reason: 'main_session_or_task_not_live' };
-    // Real control ownership — resolveBoundTask is display-grade. After the
-    // awaits, re-read the CURRENT state synchronously (one read, no polling)
-    // and make it the SINGLE authority for every gate below: read failure,
-    // or a connection that no longer matches the just-confirmed owned
-    // binding, is a skip. Cached and first attempts therefore share exactly
-    // the same fresh authority — no duplicated gate block.
-    let controlOwned = false;
-    try { controlOwned = await host.ownsTask(bound.taskDir, sessionId) === true; } catch { controlOwned = false; }
-    if (!controlOwned) return { attempted: false, reason: 'task_not_owned_by_current_host' };
-    let state = null;
-    try { state = JSON.parse(readFileSync(path.join(bound.taskDir, 'state.json'), 'utf8')); } catch { state = null; }
-    if (!state || state.connection?.provider !== 'omp'
-        || state.connection?.thread_id !== sessionId
-        || state.connection?.socket !== bound.state.connection?.socket
-        || !activeState(state) || runtimeAbandoned(state))
-      return { attempted: false, reason: 'current_state_unavailable_or_rebound' };
-    const td = state.task_delivery;
-    if (!td || typeof td !== 'object'
-        || typeof td.artifact_root !== 'string' || typeof td.input_digest !== 'string' || typeof td.artifact_digest !== 'string')
-      return { attempted: false, reason: 'no_current_task_delivery' };
-    // Full tagged-clean authority, evaluated BEFORE any cached outcome so a
-    // bad tag or an already-ACKed reminder can never serve stale guidance:
-    // verdict complete/continue, delivery.ready, an EMPTY findings array (not
-    // merely a missing key), and the exact current triple.
-    const taggedCheck = (state.checks || [])[options.taggedCheck - 1];
-    const reminderKey = createHash('sha256')
-      .update(JSON.stringify([td.artifact_root, td.input_digest, td.artifact_digest])).digest('hex');
-    // Full tagged-clean authority as one local predicate, reused verbatim by
-    // the final post-await re-check so validity can never be inferred from a
-    // record read before the awaits.
-    const taggedClean = (check, triple) => !!check && Number.isInteger(options.taggedCheck)
-      && check.number === options.taggedCheck
-      && !check.stale && !check.manual && check.role === 'reviewer'
-      && check.kind === 'artifact'
-      && ['complete', 'continue'].includes(check?.result?.verdict)
-      && check?.result?.delivery?.ready === true
-      && Array.isArray(check?.result?.findings) && check.result.findings.length === 0
-      && check.input_digest === triple.input_digest && check.artifact_root === triple.artifact_root
-      && check.artifact_digest === triple.artifact_digest;
-    const taggedAuthorityOk = taggedClean(taggedCheck, td);
-    if (!taggedAuthorityOk) return { attempted: false, reason: 'tagged_check_scope_mismatch' };
-    if ((state.manual_check_reminders || {})[reminderKey])
-      return { attempted: false, reason: 'reminder_already_sent_for_triple' };
-    const attemptKey = JSON.stringify([bound.taskDir, td.input_digest, td.artifact_root, td.artifact_digest]);
-    // Idempotency slot is consumed ONLY by an actual switch attempt (success
-    // or classified failure): precondition screens below can mature later
-    // (reminder arrival, member settle, busy clear) and must stay re-checkable.
-    const finish = (outcome) => { if (outcome.attempted === true) rootIntegrationAttempts.set(attemptKey, outcome); return outcome; };
-    // Root tool selection on this task conservatively wins (any confirmed
-    // switch in this process, regardless of version).
-    if (rootToolSelectedByTask.has(bound.taskDir)) return finish({ attempted: false, reason: 'root_tool_already_selected' });
-    // Wait discipline: identical gates to the root-model tool.
-    const observations = state.check_observations;
-    if (observations && typeof observations === 'object'
-        && Object.values(observations).some(o => o && typeof o === 'object' && o.status === 'in_flight'))
-      return finish({ attempted: false, reason: 'independent_check_in_flight' });
-    if (state.pending_finalization || state.completion_stop_pending || state.next_check_manual === true)
-      return finish({ attempted: false, reason: 'manual_final_or_stop_queued' });
-    if (state.recheck) return finish({ attempted: false, reason: 'recheck_scheduled' });
-    const findings = Object.values(state.findings || {});
-    if (findings.some(f => f && f.status === 'open')) return finish({ attempted: false, reason: 'open_finding' });
-    // Tagged authority and the pre-send reminder window were verified above,
-    // BEFORE the cached outcome; the busy screens follow.
-    // Root must actually be at rest: live tools, native streaming, and
-    // owner-scoped async jobs. At this PRE-SEND RPC position no direct prompt
-    // is preparing (#promptInFlightCount is 0), so the public isStreaming
-    // getter is a valid busy screen here — unlike inside before_agent_start
-    // preparation, where it is always true.
-    if (entry.activeTools.size > 0) return finish({ attempted: false, reason: 'root_tools_in_flight' });
-    if (entry.session?.isStreaming === true) return finish({ attempted: false, reason: 'root_streaming' });
-    let asyncSnapshot = null;
-    try { asyncSnapshot = typeof entry.session?.getAsyncJobSnapshot === 'function' ? entry.session.getAsyncJobSnapshot() : null; }
-    catch { asyncSnapshot = null; }
-    if (!asyncSnapshot || !Array.isArray(asyncSnapshot.running))
-      return finish({ attempted: false, reason: 'async_job_state_unknown' });
-    if (asyncSnapshot.running.length > 0) return finish({ attempted: false, reason: 'owner_async_jobs_running' });
-    // Members settled: the runtime's own rule (terminal member statuses, no
-    // queued amendment delivery).
-    if (!Array.isArray(state.members))
-      return finish({ attempted: false, reason: 'members_state_unknown' });
-    if (!state.members.every(m => m && ['completed', 'failed', 'refused', 'rejected'].includes(m.status)))
-      return finish({ attempted: false, reason: 'members_not_settled' });
-    if (Array.isArray(state.amendment_delivery_queue) && state.amendment_delivery_queue.length)
-      return finish({ attempted: false, reason: 'amendments_queued' });
-    // External explicit model selection conservatively wins: live flag from
-    // the public session subscribe, or durable model_change entries beyond
-    // the baseline that this process did not cause. Baseline is captured at
-    // first observation (after the launch entry exists); unknown -> skip.
-    if (externalModelChange.get(sessionId)) return finish({ attempted: false, reason: 'external_model_change_observed' });
-    let branchChanges = null;
-    try {
-      branchChanges = entry.session?.sessionManager?.getBranch?.().filter(e => e && e.type === 'model_change').length ?? null;
-    } catch { branchChanges = null; }
-    const baseline = modelChangeBaseline.get(sessionId);
-    if (branchChanges === null || typeof baseline !== 'number' || baseline < 0)
-      return finish({ attempted: false, reason: 'model_change_baseline_unknown' });
-    if (branchChanges < baseline) return finish({ attempted: false, reason: 'model_change_history_rewound' });
-    if (branchChanges - baseline - (ownModelSwitches.get(sessionId) || 0) > 0)
-      return finish({ attempted: false, reason: 'external_model_change_recorded' });
-    // Cached outcome: every generic gate above (fresh durable wait/members/
-    // delivery, live busy screens, external selection) has already run. The
-    // cache only decides TARGET/PHASE liveness and fingerprint validity — a
-    // stale target is never presented as "selected for this turn".
-    const prior = rootIntegrationAttempts.get(attemptKey);
-    if (prior) {
-      const liveModel = entry.session?.model ? `${entry.session.model.provider}/${entry.session.model.id}` : null;
-      const targetStillLive = prior.ok === true && prior.to === liveModel
-        && rootPhaseByTask.get(bound.taskDir) === 'integration';
-      const bindingNow = readRootBinding(bound.taskDir);
-      const tripleStillCurrent = !!bindingNow && bindingNow.fingerprint_status === 'ok'
-        && bindingNow.artifact_root === td.artifact_root && bindingNow.input_digest === td.input_digest
-        && bindingNow.artifact_digest === td.artifact_digest;
-      if (!targetStillLive || !tripleStillCurrent) return { ...prior, guidance: undefined };
-      return prior;
-    }
-    // Provenance: only the checks that ACTUALLY found a resolved finding for
-    // the current triple. No state.review.model, no ranking, no time-based
-    // inference; ledger cross-check by exact call_id.
-    let ledger = null;
-    try {
-      // Same-task verification goes through the ledger document's own scope
-      // fields (ResourceCallLedger#read/valid_row shape): a known schema
-      // version, the CURRENT task id at the top level, and per-row exact
-      // call_id + task_id. A foreign or unknown document is a classified
-      // skip — a file merely sitting in this directory proves nothing.
-      const document = JSON.parse(await fs.readFile(path.join(bound.taskDir, 'resource-calls.json'), 'utf8'));
-      if (typeof state.id !== 'string' || !state.id
-          || document.schema_version !== 'orbit-resource-calls-v1'
-          || document.task_id !== state.id
-          || !document.calls || typeof document.calls !== 'object' || Array.isArray(document.calls))
-        return finish({ attempted: false, reason: 'ledger_scope_unknown_or_foreign' });
-      ledger = document.calls;
-    } catch { return finish({ attempted: false, reason: 'ledger_unreadable' }); }
-    const resolvedForCurrent = findings.filter(f => f && typeof f === 'object' && f.status === 'resolved'
-      && f.observed_input === td.input_digest && f.observed_root === td.artifact_root
-      && f.resolution_input === td.input_digest && f.resolution_root === td.artifact_root
-      && f.resolution_version === td.artifact_digest
-      && typeof f.check === 'number' && typeof f.resolution_check === 'number');
-    const targets = new Map();
-    const INDEPENDENT_ROLES = ['reviewer', 'adjudicator'];
-    for (const f of resolvedForCurrent) {
-      const raiseCheck = (state.checks || [])[f.check - 1];
-      const resolveCheck = (state.checks || [])[f.resolution_check - 1];
-      if (!raiseCheck || raiseCheck.stale || !resolveCheck || resolveCheck.stale)
-        return finish({ attempted: false, reason: 'finding_check_stale_or_missing' });
-      // Raising check scope must match the finding's OBSERVED triple (the
-      // buggy version), and it must actually contain the finding id.
-      if (!INDEPENDENT_ROLES.includes(raiseCheck.role) || raiseCheck.kind !== 'artifact'
-          || raiseCheck.input_digest !== f.observed_input || raiseCheck.artifact_root !== f.observed_root
-          || typeof f.observed_version !== 'string' || raiseCheck.artifact_digest !== f.observed_version)
-        return finish({ attempted: false, reason: 'raising_check_scope_mismatch' });
-      const raising = Array.isArray(raiseCheck?.result?.findings)
-        && raiseCheck.result.findings.some(x => x && (x.id === f.id || x === f.id));
-      if (!raising) return finish({ attempted: false, reason: 'finding_not_in_raising_check_result' });
-      // Resolution check scope must match the finding's RESOLUTION triple (the
-      // fixed version) and its real result must carry the finding as resolved.
-      if (!INDEPENDENT_ROLES.includes(resolveCheck.role) || resolveCheck.kind !== 'artifact'
-          || resolveCheck.input_digest !== f.resolution_input || resolveCheck.artifact_root !== f.resolution_root
-          || resolveCheck.artifact_digest !== f.resolution_version
-          || !['complete', 'continue', 'correct'].includes(resolveCheck?.result?.verdict)
-          || !Array.isArray(resolveCheck?.result?.resolved_ids) || !resolveCheck.result.resolved_ids.includes(f.id))
-        return finish({ attempted: false, reason: 'resolution_check_scope_mismatch' });
-      const calls = raiseCheck?.usage?.calls;
-      if (!Array.isArray(calls) || !calls.length) return finish({ attempted: false, reason: 'raising_check_has_no_calls' });
-      const models = new Set();
-      for (const c of calls) {
-        if (!c || typeof c.provider !== 'string' || typeof c.model !== 'string' || typeof c.call_id !== 'string')
-          return finish({ attempted: false, reason: 'raising_call_shape_invalid' });
-        const row = ledger[c.call_id];
-        if (!row || row.call_id !== c.call_id || row.task_id !== state.id
-            || row.status !== 'completed' || row.role !== 'checker'
-            || row.actual_identity?.provider !== c.provider || row.actual_identity?.model !== c.model)
-          return finish({ attempted: false, reason: 'raising_call_ledger_mismatch' });
-        models.add(`${c.provider}/${c.model}`);
-      }
-      if (models.size !== 1) return finish({ attempted: false, reason: 'raising_identity_ambiguous' });
-      const target = models.values().next().value;
-      const priorEntry = targets.get(target) || { findingIds: [], callIds: [] };
-      targets.set(target, { findingIds: [...priorEntry.findingIds, f.id],
-        callIds: [...priorEntry.callIds, ...calls.map(c => c.call_id)] });
-    }
-    if (targets.size === 0) return finish({ attempted: false, reason: 'no_resolved_finding_for_current_triple' });
-    if (targets.size > 1) return finish({ attempted: false, reason: 'multiple_finding_models_no_ranking' });
-    const target = targets.keys().next().value;
-    const { findingIds, callIds } = targets.get(target);
-    // Target must differ from the live current Root model.
-    const currentModel = entry.session?.model ? `${entry.session.model.provider}/${entry.session.model.id}` : null;
-    if (target === currentModel) return finish({ attempted: false, reason: 'finding_model_already_root' });
-    // readRootBinding fingerprint gate: unknown/stale/amend/rebind refuse.
-    const binding = readRootBinding(bound.taskDir);
-    if (!binding || binding.fingerprint_status !== 'ok'
-        || binding.artifact_root !== td.artifact_root || binding.input_digest !== td.input_digest
-        || binding.artifact_digest !== td.artifact_digest)
-      return finish({ attempted: false, reason: 'root_binding_fingerprint_mismatch' });
-    // Fresh pool∩catalog re-sync AFTER the screens mature and BEFORE the
-    // final binding/ownership/wait re-verification: a sessionAgents cache
-    // left by an earlier tool call must never authorize a target the user
-    // has since removed from their pool. A failed re-sync is a classified
-    // skip of this evaluation (no idempotency slot consumed).
-    const freshSync = await syncSessionAgents(ctx);
-    if (!freshSync.ok) return finish({ attempted: false, reason: 'pool_resync_failed' });
-    // Bounded re-verification after every await (ledger read, screens): the
-    // task must still be the same owned active binding with the same wait
-    // gates clear — a terminal transition, rebind, or queued manual during
-    // evaluation aborts the attempt without consuming the idempotency slot.
-    const rebind = await resolveBoundTask(sessionId, ctx?.cwd).catch(() => null);
-    let stillOwned = false;
-    try { stillOwned = !!rebind && rebind.taskDir === bound.taskDir && await host.ownsTask(rebind.taskDir, sessionId) === true; } catch { stillOwned = false; }
-    // Final bounded verification: re-read the CURRENT state synchronously
-    // (never the pre-await rebind.state), re-check the owned connection and
-    // that the ctx/session/live Main identity still correspond. Read failure
-    // or a changed ownership is a skip — no new RPC, no claim of eliminating
-    // every cross-process or concurrent-UI race (the documented last-writer
-    // limitation stands).
-    // Synchronous fingerprint FIRST: readRootBinding shells out to Ruby, and a
-    // check state written by another process during that window must not be
-    // ignored by an rs read that started earlier. Only after the fingerprint
-    // returns is the CURRENT state read synchronously.
-    const bindingFinal = readRootBinding(bound.taskDir);
-    const tripleAuthoritative = !!bindingFinal && bindingFinal.fingerprint_status === 'ok'
-      && bindingFinal.artifact_root === td.artifact_root && bindingFinal.input_digest === td.input_digest
-      && bindingFinal.artifact_digest === td.artifact_digest;
-    let rs = null;
-    try { rs = JSON.parse(readFileSync(path.join(bound.taskDir, 'state.json'), 'utf8')); } catch { rs = null; }
-    let ctxSessionIdFinal = null;
-    try { ctxSessionIdFinal = ctx?.sessionManager?.getSessionId?.() ?? null; } catch { ctxSessionIdFinal = null; }
-    if (!stillOwned || !rs || rs.connection?.provider !== 'omp'
-        || rs.connection?.thread_id !== sessionId
-        || rs.connection?.socket !== bound.state.connection?.socket
-        || ctxSessionIdFinal !== sessionId
-        || !isMainSession(sessionId) || entry.session?.sessionId !== sessionId)
-      rs = null;
-    const rtd = rs?.task_delivery;
-    // The fresh tagged check must bind to the SAME triple the selection was
-    // derived from: explicit field-by-field equality with the original td,
-    // beyond taggedClean's internal scope match against rtd itself.
-    const taggedStillCurrent = !!rtd
-      && rtd.artifact_root === td.artifact_root && rtd.input_digest === td.input_digest
-      && rtd.artifact_digest === td.artifact_digest
-      && taggedClean((rs.checks || [])[options.taggedCheck - 1], rtd)
-      && !(rs.manual_check_reminders || {})[reminderKey];
-    // Live Root busy screens re-checked AFTER every await: work that started
-    // during the ledger/pool/rebind/ownsTask awaits must not be overridden.
-    let jobsNow = null;
-    try { jobsNow = typeof entry.session?.getAsyncJobSnapshot === 'function' ? entry.session.getAsyncJobSnapshot() : null; }
-    catch { jobsNow = null; }
-    let branchChangesNow = null;
-    try {
-      branchChangesNow = entry.session?.sessionManager?.getBranch?.().filter(e => e && e.type === 'model_change').length ?? null;
-    } catch { branchChangesNow = null; }
-    if (!rs || !activeState(rs) || runtimeAbandoned(rs)
-        || (rs.check_observations && typeof rs.check_observations === 'object'
-            && Object.values(rs.check_observations).some(o => o && typeof o === 'object' && o.status === 'in_flight'))
-        || rs.pending_finalization || rs.completion_stop_pending || rs.next_check_manual === true
-        || rs.recheck || Object.values(rs.findings || {}).some(f => f && f.status === 'open')
-        || !Array.isArray(rs.members) || !rs.members.every(m => m && ['completed', 'failed', 'refused', 'rejected'].includes(m.status))
-        || (Array.isArray(rs.amendment_delivery_queue) && rs.amendment_delivery_queue.length)
-        || !tripleAuthoritative || !taggedStillCurrent
-        || entry.activeTools.size > 0 || entry.session?.isStreaming === true
-        || !jobsNow || !Array.isArray(jobsNow.running) || jobsNow.running.length > 0
-        || rootToolSelectedByTask.has(bound.taskDir) || externalModelChange.get(sessionId)
-        || branchChangesNow === null)
-      return finish({ attempted: false, reason: 'state_changed_during_evaluation' });
-    const finalBaseline = modelChangeBaseline.get(sessionId);
-    if (typeof finalBaseline !== 'number' || finalBaseline < 0 || branchChangesNow < finalBaseline
-        || branchChangesNow - finalBaseline - (ownModelSwitches.get(sessionId) || 0) > 0)
-      return finish({ attempted: false, reason: 'state_changed_during_evaluation' });
-    const outcome = { attempted: true, ...(await performRootModelSwitch({ entry, ctx, boundDir: bound.taskDir, target,
-      phase: 'integration',
-      reason: `program integration selection: finding(s) ${findingIds.join(',')} found by ${target}`,
-      origin: 'program',
-      provenance: { finding_ids: findingIds, detecting_call_ids: callIds,
-        raising_check_of_first_finding: resolvedForCurrent[0].check,
-        resolution_check_of_first_finding: resolvedForCurrent[0].resolution_check, tagged_check: options.taggedCheck,
-        detecting_model: target,
-        version_triple: { artifact_root: td.artifact_root, input_digest: td.input_digest, artifact_digest: td.artifact_digest } } })) };
-    if (outcome.ok === true) outcome.guidance = `程序来源提示（本条为程序追加，非用户新要求）：已核查的独立检查发现并确认修复的真实缺陷（${findingIds.join(',')}，逐项来源与回执见 root_integration_model_selected 记录）由 ${target} 发现——程序已在发送本终检提醒前选择该型号承担 integration 阶段（仅此一次，配置已选择；真实调用以本回合后的 native 回执为准）。（核对职责已由本轮提醒正文承担。）task_delivery 与 Root verifications 归属不变。`;
-    return finish(outcome);
-  }
-
   pi.registerTool({ name: 'orbit', label: 'Orbit', description: toolDescription, parameters: pi.zod.object(toolArgs(pi.zod)),
     async execute(_id, args, _signal, _update, ctx) {
       const entry = await connect(ctx);
@@ -4299,15 +3946,7 @@ export function installOmpExtension(pi, sdk) {
           if (preflight?.block) throw new Error(preflight.reason);
         }
       }
-      if (args?.action === 'root-model') {
-        // The shared host already verified task ownership; this branch owns
-        // the pool∩catalog check, the public pi.setModel call, and the small
-        // factual record. A null from host.execute means "native dispatch".
-        await host.execute(args, ctx);
-        text = JSON.stringify(await handleRootModel(args, entry, ctx, typeof _id === 'string' ? _id : null));
-      } else {
-        text = await host.execute(args, ctx);
-      }
+      text = await host.execute(args, ctx);
       try {
         const result = JSON.parse(text);
         if (typeof result.task_directory === 'string') {
@@ -4330,124 +3969,191 @@ export function installOmpExtension(pi, sdk) {
     }
   });
   pi.registerCommand('orbit-models', {
-    description: 'Searchable keyboard multi-select for the ADR-009 model candidate pool: type to filter, Space toggles, Enter saves ONE net delta atomically, Esc cancels; add/remove subcommands remain for headless and script use',
+    description: 'Edit one ADR-009 model pool at a time (executor or checker): choose a role with ↑/↓ and Enter, type to search, Space toggles models; Enter saves the current role as one net delta. Tab (or ←/→) opens role selection only after current edits are saved or cancelled; Esc cancels current edits. Headless/script use: add/remove [--role executor|checker].',
     handler: async (args, ctx) => {
-      const [sub, model] = (args || '').trim().split(/\s+/).filter(Boolean);
       const notify = (text, level = 'info') => { try { ctx.ui.notify(text, level); } catch { process.stderr.write(`${text}\n`); } };
+      const tokens = (args || '').trim().split(/\s+/).filter(Boolean);
+      const roleFlag = tokens.indexOf('--role');
+      let roleArg = null;
+      if (roleFlag >= 0) {
+        roleArg = tokens[roleFlag + 1] ?? null;
+        tokens.splice(roleFlag, 2);
+        if (!PICKER_ROLES.some(def => def.role === roleArg))
+          return notify('usage: --role executor|checker', 'warning');
+      }
+      const [sub, model] = tokens;
+      // Session-catalog candidates are the addable source for BOTH roles; the
+      // status cache never decides what is selected.
+      const sessionModelIds = () => {
+        try { return (ctx.models?.list?.() ?? []).map(m => `${m.provider}/${m.id}`); } catch { return []; }
+      };
+      const roleLabel = role => (PICKER_ROLES.find(def => def.role === role)?.label ?? role);
+      // Generated member agents come from the EXECUTOR pool, and an unconfigured
+      // executor inherits the legacy shared list — so only those two scopes
+      // change the session agent mapping. A checker-pool edit never does.
+      const affectsMemberAgents = role => !role || role === EXECUTOR_ROLE;
+      const statusByRole = new Map(); // role -> Map(model -> per-candidate diagnostics)
+      // Rows for ONE role: the session catalog first (addable), then that role's
+      // pooled-but-unselectable entries (kept; removable only).
+      const entriesFor = (role, models, available) => {
+        const byModel = statusByRole.get(role) ?? new Map();
+        const listed = new Set(available);
+        const entries = available.map(id => ({
+          id, available: true,
+          evidenceStatus: models.includes(id) ? byModel.get(id)?.evidence_status ?? '未知' : undefined,
+          overviewStatus: models.includes(id) ? byModel.get(id)?.model_overview : undefined,
+        }));
+        for (const id of models) if (!listed.has(id))
+          entries.push({ id, available: false, evidenceStatus: byModel.get(id)?.evidence_status ?? '未知',
+            overviewStatus: byModel.get(id)?.model_overview });
+        return entries;
+      };
       try {
         if (sub === 'add') {
-          if (!model) return notify('usage: /orbit-models add <provider/id>', 'warning');
+          if (!model) return notify('usage: /orbit-models add <provider/id> [--role executor|checker]', 'warning');
           // ADR-009: candidates are picked from THIS session's selectable
           // list; adding anything else would persist an identifier the user
           // never saw as available here.
-          let available = [];
-          try { available = (ctx.models?.list?.() ?? []).map(m => `${m.provider}/${m.id}`); } catch { available = []; }
+          const available = sessionModelIds();
           if (!available.includes(model))
             return notify(`${model} is not selectable in this session (see the list above). ` +
               'Only models from the current session list can enter the pool; stale entries can still be removed.', 'warning');
-          const result = runPoolCli(['add', model]);
+          const result = runPoolCli(['add', model], roleArg);
           if (!result.ok) return notify(`model-candidates add failed: ${result.reason}`, 'error');
+          const where = roleArg ? `${roleLabel(roleArg)}池（${roleArg}）` : '旧共享列表（无角色）';
+          if (!affectsMemberAgents(roleArg))
+            return notify(`Added ${model} → ${where}。执行者成员 Agent 未改动。`, 'info');
           const sync = await syncSessionAgents(ctx);
-          return notify(`Added ${model}. ` +
+          return notify(`Added ${model} → ${where}. ` +
             (sync.ok ? `Live session agents: ${sync.agents.map(a => `${a.name} -> ${a.model}`).join(', ') || 'none (pool empty or nothing selectable here)'}` : sync.reason),
             sync.ok ? 'info' : 'warning');
         }
         if (sub === 'remove') {
-          if (!model) return notify('usage: /orbit-models remove <provider/id>', 'warning');
-          const result = runPoolCli(['remove', model]);
+          if (!model) return notify('usage: /orbit-models remove <provider/id> [--role executor|checker]', 'warning');
+          const result = runPoolCli(['remove', model], roleArg);
           if (!result.ok) return notify(`model-candidates remove failed: ${result.reason}`, 'error');
-          await syncSessionAgents(ctx);
-          return notify(`Removed ${model}.`, 'info');
+          const where = roleArg ? `${roleLabel(roleArg)}池（${roleArg}）` : '旧共享列表（无角色）';
+          if (!affectsMemberAgents(roleArg))
+            return notify(`Removed ${model} ← ${where}。执行者成员 Agent 未改动。`, 'info');
+          const sync = await syncSessionAgents(ctx);
+          return notify(`Removed ${model} ← ${where}. ` + (sync.ok
+            ? `Live session agents: ${sync.agents.map(a => `${a.name} -> ${a.model}`).join(', ') || 'none (pool empty or nothing selectable here)'}`
+            : sync.reason), sync.ok ? 'info' : 'warning');
         }
-        if (sub) return notify('usage: /orbit-models [add|remove <provider/id>]', 'warning');
-        const pool = runPoolCli(['list']);
-        if (!pool.ok) return notify(`model pool unreadable: ${pool.reason}`, 'error');
-        const modelStatus = runModelStatusCli(ctx.cwd);
-        const reportedCandidates = modelStatus.ok && Array.isArray(modelStatus.report?.candidates)
-          ? modelStatus.report.candidates : [];
-        const statusByModel = new Map(reportedCandidates.map(candidate => [candidate.model, candidate]));
-        const sessionModelIds = () => {
-          try { return (ctx.models?.list?.() ?? []).map(m => `${m.provider}/${m.id}`); } catch { return []; }
+        if (sub) return notify('usage: /orbit-models [--role executor|checker] [add|remove <provider/id>]', 'warning');
+        // One view per role. A role read is never replaced by the other role's
+        // state: configured-empty stays empty, and an unconfigured role shows
+        // the candidates it inherits (legacy shared list) plus its fallback.
+        const buildView = definition => {
+          const pool = readRolePool(definition.role);
+          if (!pool.ok) return { ...definition, ok: false, reason: pool.reason };
+          const status = runModelStatusCli(ctx.cwd, definition.role);
+          const candidates = status.ok && Array.isArray(status.report?.candidates) ? status.report.candidates : [];
+          statusByRole.set(definition.role, new Map(candidates.map(candidate => [candidate.model, candidate])));
+          return {
+            ...definition, ok: true, models: pool.models, configured: pool.configured, roleScoped: pool.roleScoped,
+            // `snapshot` is the picker's opening checkbox state; it must be the
+            // ROLE's own pool (an unconfigured role brings its inherited list).
+            snapshot: pool.models,
+            entries: entriesFor(definition.role, pool.models, sessionModelIds()),
+            statusNote: status.ok ? null : `证据/概述不可用（${status.reason}）`,
+          };
         };
-        const poolEntries = (poolModels, available) => {
-          const listed = new Set(available);
-          const entries = available.map(id => ({
-            id, available: true,
-            evidenceStatus: poolModels.includes(id) ? statusByModel.get(id)?.evidence_status ?? '未知' : undefined,
-            overviewStatus: poolModels.includes(id) ? statusByModel.get(id)?.model_overview : undefined,
-          }));
-          for (const id of poolModels) if (!listed.has(id))
-            entries.push({ id, available: false, evidenceStatus: statusByModel.get(id)?.evidence_status ?? '未知',
-              overviewStatus: statusByModel.get(id)?.model_overview });
-          return entries;
-        };
+        const views = PICKER_ROLES.map(buildView);
         // Legacy/headless surface: no UI (or a UI that cannot host custom
         // components) still gets the plain text list and per-item commands.
-        const textListing = available => {
-          const poolSet = new Set(pool.models);
-          const stale = pool.models.filter(id => !available.includes(id));
+        const roleSection = view => {
+          if (!view.ok) return [`${view.label}（${view.role}）：不可读 — ${view.reason}`];
+          const poolSet = new Set(view.models);
+          const available = sessionModelIds();
+          const byModel = statusByRole.get(view.role) ?? new Map();
+          const fact = (id, field, fallback) => byModel.get(id)?.[field] ?? fallback;
+          const head = view.configured
+            ? `${view.label}（${view.role}）已配置：${view.models.length} 个候选` +
+              (view.models.length ? '' : '（显式空池：不借用另一角色候选，也不回退 OMP 默认）')
+            : (view.models.length
+              ? `${view.label}（${view.role}）未单独配置：当前继承旧共享候选 ${view.models.length} 个（另一未配置角色也继承旧列表）`
+              : `${view.label}（${view.role}）未配置且无继承候选：沿用 OMP 空池行为`);
           return [
-            'Model candidate pool (ADR-009). Selectable in this session:',
-            ...available.filter(id => poolSet.has(id)).map(id => `  [in pool]  ${id} · 证据 ${statusByModel.get(id)?.evidence_status ?? '未知'} · 概述 ${statusByModel.get(id)?.model_overview ?? '未知'}${statusByModel.get(id)?.evidence_detail ? `（${statusByModel.get(id).evidence_detail}）` : ''}`),
+            head,
+            ...available.filter(id => poolSet.has(id)).map(id => `  [in pool]  ${id} · 证据 ${fact(id, 'evidence_status', '未知')} · 概述 ${fact(id, 'model_overview', '未知')}${byModel.get(id)?.evidence_detail ? `（${byModel.get(id).evidence_detail}）` : ''}`),
             ...available.filter(id => !poolSet.has(id)).map(id => `  [addable]  ${id}`),
-            ...(stale.length ? ['In pool but NOT selectable in this session (kept; removable):', ...stale.map(id => `  [stale]    ${id} · 证据 ${statusByModel.get(id)?.evidence_status ?? '未知'} · 概述 ${statusByModel.get(id)?.model_overview ?? '未知'}`)] : []),
-            ...(modelStatus.ok ? [] : [`证据诊断不可用：${modelStatus.reason}`]),
-            '质量：未判断；检查者隔离目录/凭据：未探测。缺证据请从一手来源提交 orbit model-evidence --file FILE|-；Root 可直接选择 OMP 可用且隔离检查者可解析的型号。',
-            'Commands:',
-            '  /orbit-models add <provider/id>    (only IDs marked [addable])',
-            '  /orbit-models remove <provider/id>',
-            '受控通用 task 派发按当前会话解析 @task 精确型号，并在注册与首次请求核对实际成员模型；候选池只用于生成首选成员 agent。',
-            `当前 Root：${ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : '未知'}；低成本会话请自行指定 orbit omp --model <provider/id>，Orbit 不暗中切换模型。`,
-          ].join('\n');
+            ...view.models.filter(id => !available.includes(id)).map(id => `  [stale]    ${id} · 证据 ${fact(id, 'evidence_status', '未知')} · 概述 ${fact(id, 'model_overview', '未知')}`),
+            ...(view.roleScoped ? [] : ['  注意：当前 CLI 不支持 --role，保存会被拒绝；请升级 Orbit。']),
+            ...(view.statusNote ? [`  诊断：${view.statusNote}`] : []),
+          ];
         };
+        const textListing = () => [
+          'Orbit 候选模型池（ADR-009）· 执行者池与检查者池独立；本会话可选行：',
+          ...views.flatMap(roleSection),
+          '质量：未判断；检查者隔离目录/凭据：未探测。缺证据请从一手来源提交 orbit model-evidence --file FILE|-；Root 可直接选择 OMP 可用且隔离检查者可解析的型号。',
+          'Commands:',
+          '  /orbit-models add <provider/id> [--role executor|checker]     (无 --role 写入旧共享列表)',
+          '  /orbit-models remove <provider/id> [--role executor|checker]',
+          '受控通用 task 派发按当前会话解析 @task 精确型号，并在注册与首次请求核对实际成员模型；执行者池生成首选成员 agent。',
+          `当前 Root：${ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : '未知'}；低成本会话请自行指定 orbit omp --model <provider/id>，Orbit 不暗中切换模型。`,
+        ].join('\n');
         if (typeof ctx.ui?.custom !== 'function') {
-          notify(textListing(sessionModelIds()));
+          notify(textListing());
           await syncSessionAgents(ctx);
           return;
         }
-        // One Enter = one net-delta commit (proposal B): the session's
-        // selectable list is re-read AT COMMIT TIME; a would-be add that is
-        // no longer selectable is refused with a refreshed view and nothing
-        // written; the pool applies the delta under its cross-process lock
-        // with same-ID conflict refusal, so different-ID concurrent edits by
-        // other sessions are preserved. Any failure hands the refreshed
-        // entries + snapshot back so the picker keeps the remaining
-        // selection for an immediate retry instead of forcing a re-pick.
-        const commitPoolDelta = async ({ add, remove, base }) => {
+        // Nothing to edit when neither role pool could be read; the text listing
+        // carries the reason instead of opening an empty overlay.
+        if (!views.some(view => view.ok)) {
+          notify(textListing());
+          await syncSessionAgents(ctx);
+          return;
+        }
+        // One invocation edits one selected role; one Enter = that role's
+        // single net-delta commit. The session's selectable list is re-read AT COMMIT TIME; a would-be add
+        // that is no longer selectable is refused with a refreshed view and
+        // nothing written; each role applies its delta under the pool's
+        // cross-process lock with same-ID conflict refusal, so different-ID
+        // concurrent edits by other sessions are preserved. A failure hands the
+        // refreshed entries + snapshot of THAT role back so the picker keeps the
+        // remaining selection for an immediate retry instead of forcing a re-pick.
+        const commitRoleDelta = async ({ role, add, remove, base }) => {
           const availableNow = sessionModelIds();
-          const poolNow = runPoolCli(['list']);
-          if (!poolNow.ok) return { ok: false, error: `model pool unreadable: ${poolNow.reason}` };
+          const roleNow = readRolePool(role);
+          if (!roleNow.ok) return { ok: false, error: `模型池不可读：${roleNow.reason}` };
+          if (!roleNow.roleScoped)
+            return { ok: false, error: '当前 Orbit CLI 不支持角色池（model-candidates --role）；请升级 Orbit 后重试' };
           const availableSet = new Set(availableNow);
           const staleAdds = add.filter(id => !availableSet.has(id));
           if (staleAdds.length)
             return { ok: false, error: `待新增模型已不在当前会话可选列表：${staleAdds.join('、')}；列表已刷新，请重新确认`,
-              entries: poolEntries(poolNow.models, availableNow), snapshot: poolNow.models };
+              entries: entriesFor(role, roleNow.models, availableNow), snapshot: roleNow.models, configured: roleNow.configured };
           const applied = runPoolCli(['apply-delta',
-            '--base', base.join(','), '--add', add.join(','), '--remove', remove.join(',')]);
+            '--base', base.join(','), '--add', add.join(','), '--remove', remove.join(',')], role);
           if (!applied.ok)
             return { ok: false, error: `提交被拒绝：${applied.reason}`,
-              entries: poolEntries(poolNow.models, availableNow), snapshot: poolNow.models };
+              entries: entriesFor(role, roleNow.models, availableNow), snapshot: roleNow.models, configured: roleNow.configured };
           return { ok: true, models: applied.models };
         };
         // RPC mode's custom() resolves undefined without showing anything
         // (verified in 18.3.2): any non-object outcome falls back to text.
         let outcome = null;
         try {
+          // `roleArg` skips the chooser; otherwise the role is chosen inside the
+          // same overlay (one role per invocation = one atomic delta).
           outcome = await ctx.ui.custom((_tui, _theme, _keybindings, done) =>
-            createModelPicker({ entries: poolEntries(pool.models, sessionModelIds()), snapshot: pool.models, done, commit: commitPoolDelta }));
+            createModelPicker({ roles: views.filter(view => view.ok), role: roleArg, done, commit: commitRoleDelta }));
         } catch (error) {
           notify(`picker unavailable (${error?.message || error}); falling back to the text list`, 'warning');
         }
         if (!outcome || typeof outcome !== 'object') {
-          notify(textListing(sessionModelIds()));
+          notify(textListing());
           await syncSessionAgents(ctx);
           return;
         }
         if (outcome.status === 'committed') {
+          const listing = (outcome.models ?? []).join(', ') || '（空，已配置）';
+          const base = `已保存候选池：${outcome.label}（${outcome.role}）：${listing}。`;
+          if (!affectsMemberAgents(outcome.role)) return notify(base + ' 执行者成员 Agent 未改动。', 'info');
           const sync = await syncSessionAgents(ctx);
-          const listing = (outcome.models ?? []).join(', ');
-          return notify(`已保存候选池：${listing || '（空）'}。` + (sync.ok
-            ? ` 本会话 Agent：${sync.agents.map(a => `${a.name} -> ${a.model}`).join(', ') || '无（池为空或本会话无可选模型）'}`
+          return notify(base + (sync.ok
+            ? ` 本会话 Agent（执行者池）：${sync.agents.map(a => `${a.name} -> ${a.model}`).join(', ') || '无（池为空或本会话无可选模型）'}`
             : ` Agent 同步失败：${sync.reason}`), sync.ok ? 'info' : 'warning');
         }
         if (outcome.status === 'noop') return notify('没有净变化，未写入候选池。', 'info');
@@ -4496,15 +4202,8 @@ export function installOmpExtension(pi, sdk) {
     const block = statusBlock(bound.state);
     const advisory = entryDelegationAdvisory(bound.state, bound.taskDir);
     if (advisory) entryAdvisorySent.add(bound.taskDir);
-    // Only the regular status guidance (and the advisory, deduplicated by its
-    // own sent set) rides the system prompt. The work-unit bootstrap is NOT
-    // carried here: it belongs to the extensible provider payload path alone,
-    // so one request never sees the same sentence twice. The program-initiated
-    // integration selection does NOT ride this hook anymore: the SDK's idle
-    // custom-message wake (deliverCustomMessage) never runs before_agent_start,
-    // and the direct path is self-locked by isStreaming during preparation.
-    // Selection happens in the owned `send` RPC branch (see the
-    // integration_check tag handling there).
+    // Only regular status guidance and the advisory ride the system prompt.
+    // The work-unit bootstrap belongs to the extensible provider payload path.
     const parts = [block];
     if (advisory) parts.push(advisory);
     return { systemPrompt: withStatusBlock(event?.systemPrompt, parts.join('\n')) };

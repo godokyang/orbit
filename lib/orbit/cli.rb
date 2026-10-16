@@ -122,19 +122,20 @@ module Orbit
         金额只核算有实际调用时刻及完整用量构成的已归属调用；额度保留原规则，不换算金额。OpenRouter 目录报价不能作为 OMP 价格，未知不等于免费，不增加硬预算。
       TEXT
       "model-candidates" => <<~TEXT,
-        orbit model-candidates list
-        orbit model-candidates add <provider/id>
-        orbit model-candidates remove <provider/id>
-        orbit model-candidates apply-delta --base LIST --add LIST --remove LIST
+        orbit model-candidates list [--role executor|checker]
+        orbit model-candidates add <provider/id> [--role executor|checker]
+        orbit model-candidates remove <provider/id> [--role executor|checker]
+        orbit model-candidates apply-delta --base LIST --add LIST --remove LIST [--role executor|checker]
         内部桥：读写用户长期候选池（provider/id，id 可含斜杠）。每次 stdout 输出一行 JSON {"models":[...]}；
+        指定 --role 时操作对应角色池并回报配置状态；省略时保持旧共享池接口，只读写 legacy 列表，不改变已配置的角色池。
         出错时非零退出且只输出错误信息，不输出凭据、账号或连接配置。
         apply-delta 供扩展多选界面一次提交净增删差量：LIST 为逗号分隔的 provider/id；base 为打开界面时的池快照，
         任一差量 ID 的入池状态与快照不同则整体拒绝（退出 1），不覆盖其他会话对不同 ID 的修改。
       TEXT
       "model-status" => <<~TEXT,
-        orbit model-status [--project DIR] [--thread ID --socket PATH]
-        只读诊断：当前长期候选池逐项状态——是否在本 OMP 会话可选目录（需 --thread/--socket）、精确身份的缓存证据是有效／缺失／过期／无法取得还是结构无效，以及质量判定与隔离环境解析的“未探测”标记。不调用 JEV、不探测隔离环境、不建任务、不写文件。
-        stdout 输出一行 JSON（pool_empty、session_catalog、evidence_cache、candidates[]，无候选池时报告 OMP 会话当前型号；实际检查从 OMP 可用目录选并预检）。
+        orbit model-status [--role executor|checker] [--project DIR] [--thread ID --socket PATH]
+        只读诊断指定角色的长期候选池逐项状态——是否在本 OMP 会话可选目录（需 --thread/--socket）、精确身份的缓存证据是有效／缺失／过期／无法取得还是结构无效，以及质量判定与隔离环境解析的“未探测”标记。不调用 JEV、不探测隔离环境、不建任务、不写文件。
+        stdout 输出一行 JSON（role、pool_configured、pool_empty、session_catalog、evidence_cache、candidates[]；仅未配置且无继承旧候选时附当前 OMP 型号）。配置空池不显示可用默认候选；自动检查选型按检查者角色池规则执行。
       TEXT
       "start" => <<~TEXT,
         orbit start [--provider omp] [--project DIR]
@@ -145,7 +146,7 @@ module Orbit
         仅绑定已有可控 OMP 会话，不创建或替换主执行 Agent。
         project 默认为当前目录；thread 与 socket 来自当前受控 OMP 会话。
         原文来自指定或最近的原生用户消息；--basis 可重复，--prompt-file - 从 stdin 读取。
-        候选池有可运行型号时优先池内选模；池空或池内均不可运行时从 OMP 当前会话目录选。经真实任务校准并匹配实际输入／题义／Jev 型号的质量判断才可正向推荐；未放行时呈现事实并保留可运行候选。start 尚无工作单元上下文时不猜验收。model-evidence 可补充精确质量事实；无法取得如实记录 unavailable。Root 也可用 --review-model 指定 OMP 可用型号，不要求原生用户逐型号授权；所有选择均预检隔离检查者目录与凭据。
+        检查者候选池未配置时继承旧共享候选；无旧候选时从 OMP 当前会话目录选。显式配置后只在检查者池选，池空或池内均不可运行时失败关闭。经真实任务校准并匹配实际输入／题义／Jev 型号的质量判断才可正向推荐；未放行时呈现事实并保留可运行候选。start 尚无工作单元上下文时不猜验收。model-evidence 可补充精确质量事实；无法取得如实记录 unavailable。Root 也可用 --review-model 指定任何 OMP 可用型号，不要求原生用户逐型号授权；所有选择均预检隔离检查者目录与凭据。
         --check-in 首次默认 300 秒，后续由检查者约定；预估不是硬上限。
         只有用户明确设置的 --deadline 才形成截止。--foreground 在当前终端运行任务进程。
         --external-ref 可重复（最多 16 个，每个 ≤256 字符、无控制字符、互不相同）：调用方给本任务附的不透明外部引用，
@@ -680,9 +681,8 @@ module Orbit
       [model, selection, selector.last_jev_trace]
     end
 
-    # Root may choose any model in the current OMP catalog. This command
-    # preflights availability before queueing; the runtime rechecks before
-    # starting a new independent review.
+    # Model availability is preflighted before queueing; the runtime rechecks
+    # before starting a new independent review.
     def work_unit(argv)
       options = { file: "-" }
       OptionParser.new { |parser| parser.on("--file FILE") { |value| options[:file] = value } }.parse!(argv)
@@ -981,20 +981,36 @@ module Orbit
     # through the top-level handler, exit non-zero and never print credentials.
     def model_candidates(argv)
       subcommand = argv.shift
+      role = nil
+      if (index = argv.index("--role"))
+        raise ArgumentError, "--role requires executor or checker" if argv.length <= index + 1
+        role = argv.delete_at(index + 1)
+        argv.delete_at(index)
+        raise ArgumentError, "--role must be executor or checker" unless ModelCandidatePool::ROLES.include?(role)
+      end
+      pool = ModelCandidatePool.new
       case subcommand
       when "list"
         raise ArgumentError, "usage: orbit model-candidates list" unless argv.empty?
 
-        report_model_candidates(ModelCandidatePool.new.read)
+        if role
+          snapshot = pool.role_snapshot(role)
+          puts JSON.generate("role" => role, "configured" => snapshot["configured"], "models" => snapshot["models"])
+          0
+        else
+          report_model_candidates(pool.read)
+        end
       when "add"
         model = required_argument!(argv, "provider/id")
         raise ArgumentError, "usage: orbit model-candidates add <provider/id>" unless argv.empty?
 
-        report_model_candidates(ModelCandidatePool.new.add(model))
+        report_model_candidates(role ? pool.add_role(role, model) : pool.add(model), role: role,
+                                configured: role ? pool.configured?(role) : nil)
       when "remove"
         model = required_argument!(argv, "provider/id")
         raise ArgumentError, "usage: orbit model-candidates remove <provider/id>" unless argv.empty?
-        report_model_candidates(ModelCandidatePool.new.remove(model))
+        report_model_candidates(role ? pool.remove_role(role, model) : pool.remove(model), role: role,
+                                configured: role ? pool.configured?(role) : nil)
       when "apply-delta"
         # One atomic net-delta commit for the extension's multi-select picker:
         # `base` is the snapshot the caller took when its picker opened, and
@@ -1009,16 +1025,23 @@ module Orbit
         end.parse!(argv)
         raise ArgumentError, "usage: orbit model-candidates apply-delta --base LIST --add LIST --remove LIST" unless argv.empty?
 
-        report_model_candidates(ModelCandidatePool.new.apply_delta(
-                                  base: options.fetch("base"), add: options.fetch("add"), remove: options.fetch("remove")
-                                ))
+        base, additions, removals = options.values_at("base", "add", "remove")
+        models = if role
+                   pool.apply_role_delta(role, base: base, add: additions, remove: removals)
+                 else
+                   pool.apply_delta(base: base, add: additions, remove: removals)
+                 end
+        report_model_candidates(models, role: role, configured: role ? pool.configured?(role) : nil)
       else
         raise ArgumentError, "usage: orbit model-candidates list|add <provider/id>|remove <provider/id>|apply-delta --base LIST --add LIST --remove LIST"
       end
     end
 
-    def report_model_candidates(models)
-      puts JSON.generate("models" => models)
+    def report_model_candidates(models, role: nil, configured: nil)
+      result = { "models" => models }
+      result["role"] = role if role
+      result["configured"] = configured.nil? ? true : configured if role
+      puts JSON.generate(result)
       0
     end
 
@@ -1030,12 +1053,13 @@ module Orbit
     # writes anything. Without --thread/--socket the session catalog is
     # reported "not_provided" rather than guessed.
     def model_status(argv)
-      options = { project: Dir.pwd, provider: "omp", thread: nil, socket: nil }
+      options = { project: Dir.pwd, provider: "omp", thread: nil, socket: nil, role: "checker" }
       OptionParser.new do |parser|
         parser.on("--project DIR") { |value| options[:project] = value }
         parser.on("--provider NAME", %w[omp]) { |value| options[:provider] = value }
         parser.on("--thread ID") { |value| options[:thread] = value }
         parser.on("--socket PATH") { |value| options[:socket] = value }
+        parser.on("--role ROLE", %w[executor checker]) { |value| options[:role] = value }
       end.parse!(argv)
       raise ArgumentError, "unexpected arguments: #{argv.join(' ')}" unless argv.empty?
       if options[:thread].to_s.empty? != options[:socket].to_s.empty?
@@ -1052,12 +1076,14 @@ module Orbit
             unless File.realpath(opened.state.fetch("cwd")) == File.realpath(options[:project])
               raise ArgumentError, "Root session belongs to a different project"
             end
-            CheckerModelSelector.new(connection: opened, project_root: options[:project]).candidate_statuses
+            CheckerModelSelector.new(connection: opened, project_root: options[:project])
+                                .candidate_statuses(role: options[:role])
           ensure
             opened.close
           end
         else
-          CheckerModelSelector.new(connection: nil, project_root: options[:project]).candidate_statuses
+          CheckerModelSelector.new(connection: nil, project_root: options[:project])
+                                .candidate_statuses(role: options[:role])
         end
       puts JSON.generate(report)
       0

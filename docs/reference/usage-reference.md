@@ -149,18 +149,18 @@ orbit stop TASK_DIRECTORY --reason "停止原因" --json
 
 ### 候选模型池与检查者重选（ADR-009）
 
-在交互式 `orbit omp` 会话输入 `/orbit-models` 打开搜索多选：直接输入文字过滤 `provider/id`，↑/↓ 移动，Space 勾选，Enter 一次保存净变化，Esc 取消。当前不可选但已入池的旧标识可移出，不能新增。列表逐项展示当前会话可选性、精确身份的证据状态（缺失、过期、不可用或有效）及可选模型概述状态；**质量未判断、隔离检查者未探测**不代表已验证质量、认证或额度，也不等于池内模型不能被实际启动探针选择。无 UI 时文字列表仍给出诊断；`orbit model-status --project DIR` 只读池、用户级证据及概述快照，不发起 JEV、OpenRouter 刷新或模型探测。提交前若可选列表变化或同一 ID 被另一会话修改，界面提示刷新，不覆盖对方的修改。逐项命令和脚本入口保留：
+在交互式 `orbit omp` 会话输入 `/orbit-models` 先选执行者或检查者角色，再打开该角色的搜索多选：输入文字过滤 `provider/id`，↑/↓ 移动，Space 勾选，Enter 一次保存净变化，Esc 取消。当前不可选但已入池的旧标识可移出，不能新增。列表逐项展示当前会话可选性、精确身份的证据状态（缺失、过期、不可用或有效）及可选模型概述状态；**质量未判断、隔离检查者未探测**不代表已验证质量、认证或额度，也不等于池内模型不能被实际启动探针选择。无 UI 时文字列表仍给出诊断；`orbit model-status --role executor|checker --project DIR` 按角色只读候选、用户级证据及概述快照，不发起 JEV、OpenRouter 刷新或模型探测。提交前若可选列表变化或同一 ID 被另一会话修改，界面提示刷新，不覆盖对方的修改。逐项命令和脚本入口保留：
 
 ```text
-/orbit-models add provider/id     # 只能加入当前会话可选列表中的模型
-/orbit-models remove provider/id  # 可移除池内但当前不可选的旧标识
-orbit model-candidates list       # 命令行查看；add/remove 可用于脚本
-orbit model-status --project DIR  # 只读精确身份的证据诊断；无会话时可选性未知
+/orbit-models add provider/id [--role executor|checker]     # 无 --role 写旧共享列表
+/orbit-models remove provider/id [--role executor|checker]  # 可移除本角色池中当前不可选的旧标识
+orbit model-candidates list --role executor|checker         # 查看实际角色池；不带 --role 只读旧共享列表
+orbit model-status --role executor|checker --project DIR   # 只读精确身份的角色诊断；无会话时可选性未知
 ```
 
-候选池保存在用户级配置，跨会话共用，只保存型号，不保存凭据。检查者优先从池与当前 OMP 会话可用目录的交集中预检；池中无可运行型号或池空时，从 OMP 当前会话可用型号中继续筛选，Root 也可显式指定可用检查者。**受控任务的成员**有可用池内 Agent 时，通用 `agent="task"` 若解析为池外 OMP 默认型号会被拒绝并列出可用 Agent；Root 可直接派池内 Agent，即使 Jev 尚待补证。池空或当前无可用池内 Agent 才放行可解析的 OMP 默认。Root 想派默认型号可通过 `/orbit-models` 把它加入池；无需额外用户逐型号授权。非受控 OMP 会话不受此门约束，成员实际型号漂移仍被拒绝。Jev 只给建议，Root 自选不冒充推荐。
+两个候选池保存在用户级配置，跨会话共用，只保存型号，不保存凭据。v1 共享池迁移后，每个角色在自己被编辑前继承旧列表；没有角色配置且没有旧列表时，成员沿用当前 `@task` 解析，检查者沿用当前 OMP 会话可用目录。角色一旦配置（包括空列表），其自动选择仅在本角色池与 OMP 当前可用目录的交集中进行；不可用或空池不跨角色借用、不回退到全目录。检查者仍可由 Root 显式指定任一可解析且可运行型号。Root 不属于候选池，继续使用当前 OMP 会话模型。**受控任务的成员**有可用执行者池 Agent 时，通用 `agent="task"` 若解析为池外 OMP 默认型号会被拒绝并列出可用 Agent；Root 可直接派池内 Agent，即使 Jev 尚待补证。Jev 只给建议，Root 自选不冒充推荐。
 
-新版成员选择针对 Root 声明的有界工作单元，保留目标、要求引用、上下文／决定、范围、验收、依赖和升级条件。单元绑定当前输入与实际产物根；未满足依赖不派发建议，修订或工作区重绑定后不能采纳旧结果。Root 可通过 Orbit 工具或 `orbit work-unit` 声明与核验；工作区已接真实宿主 bind 和逐工具范围校验。Root 的原生 task 文本须以独立行引用 `orbit-unit: wu-...`；未知／过期单元或真实模型失配拒绝派发或工具执行。macOS 声明命令还经系统沙盒；没有已验证沙盒的平台由 Root 执行必要核验，不能默许成员无约束运行。当前修复的真实闭环证据与剩余限制见验收记录（Git 历史：`aa089bb:docs/reference/ordinary-task-repair-acceptance-20261002.md`）。
+新版成员选择针对 Root 声明的有界工作单元，保留目标、要求引用、上下文／决定、范围、验收、依赖和升级条件。单元绑定当前输入与实际产物根；未满足依赖不派发建议，修订或工作区重绑定后不能采纳旧结果。Root 可通过 Orbit 工具或 `orbit work-unit` 声明与核验；工作区已接真实宿主 bind 和逐工具范围校验。Root 的原生 task 文本须以独立行引用 `orbit-unit: wu-...`；未知／过期单元或真实模型失配拒绝派发或工具执行。macOS 声明命令还经系统沙盒；没有已验证沙盒的平台由 Root 执行必要核验，不能默许成员无约束运行。当前验证范围与限制见[交接](../plan/handoff.md)。
 
 工作单元可设 `execution=root|delegate`（缺省 delegate），Root 的集成单设 root，不占选型队列。declare 回执携带运行时选型；可用 `work-unit select` 刷新具体单元，native task 在派发前再次预检、复用和版本核对。Root 保留候选池内自选裁量。成员可在产物根内自主选择原生文件工具的目标，程序逐目标核验根目录、元数据目录和符号链接；`allowed_paths` 用于 bash 文件系统沙箱及命令路径预检，不是原生文件工具名单。`input_materials` 是产物根内须已存在的文件。外部技能/MCP 不自动开放；bash 必须声明 `allowed_paths` 与完整 `allowed_commands`；无可执行入口或缺少所需材料时会在成员启动前返回修复步骤。
 
@@ -174,7 +174,7 @@ decision-4 保留原问题和质量阈值，handoff_fit 判结构可交接，mem
 
 `member_selection_assessed` 是保存的判断；`delegation_recommendation_delivered` 和持久 delegation_hint 才表示已经送达。Root 自主经原生 task 使用候选，串行交接也合法。只有实际工作单元、成员、调用、型号及目标派发尝试，连同实际 bind 留存的已送达提示签名／message ID，都匹配才记为采纳；旧失败调用、同型号或相邻时间不能领取下一轮建议归因。Root 自选记为 root_without_hint。
 
-检查者始终先核对隔离只读环境可解析性，未放行不支付选型判断；缺事实不要求用户补完整池。质量未证实的可运行型号仍可降级，显式选模不跳过独立检查、手动终检或停止核对。模型级先验不证明本路由／推理档位／额度或价格；真实效果按有限真实验收记录，不作全域宣称（见完成记录）。
+检查者始终先核对隔离只读环境可解析性，未放行不支付选型判断；缺事实不要求用户补完整池。质量未证实的可运行型号仍可降级，显式选模不跳过独立检查、手动终检或停止核对。模型级先验不证明本路由／推理档位／额度或价格；真实效果的验证范围见[交接](../plan/handoff.md)，不作全域宣称。
 
 独立检查者沿用 OMP 模型配置与凭据解析，仍在独立只读会话中读取固定快照。认证、额度或结果校验失败会留下失败检查记录，Orbit 在**检查结束后**从尚未尝试的可运行型号中按池优先和 Jev 次序有界重试；所有型号失败才阻塞，不把失败当终检。Root 修复环境后可从 OMP 当前可用型号中重选：
 
@@ -184,21 +184,7 @@ orbit review-model TASK_DIRECTORY --model provider/id --reason "检查者凭据�
 
 该命令入队前核对当前 OMP 会话与隔离环境，任务进程在真正开始检查前再核对；在途检查不会切换。同一失败型号不能靠重复 `check` 绕过阻塞。Root 使用 Orbit 工具 `start` 的 `review_model` 参数也只接受经上述可用性核对的 OMP 型号。没有有效独立终检时，不称任务已完成；需要中断则按用户指令普通暂停并确认停止。
 
-Root 在受控会话中需要自己换用不同精确型号时（例如硬性 provider 错误需换型号诊断），使用 Orbit 工具的 `root-model` 动作——**这是 OMP 工具动作，不是新的 CLI 命令**：
-
-```text
-orbit 工具调用: { action: "root-model", task: TASK_DIRECTORY }
-              # 不带 root_model 时列出当前池 ∩ OMP 目录的精确 provider/id
-orbit 工具调用: { action: "root-model", task: TASK_DIRECTORY,
-                  root_model: "provider/id",   # 如 "provider-a/model-x"，从上面列出的可选 ID 中选
-                  phase: "diagnosis",          # execution | integration | diagnosis
-                  text: "选择理由" }            # 非空原因，写入事实记录
-```
-
-目标必须同时在候选池与当前 OMP 目录中并精确解析；`from`／`to` 按切换前后的真实身份记录。**配置选择回执本身不证明实际调用身份**——实际身份由切换后后续 native assistant 调用回执（`resource-calls.json` 中的 `actual_identity.provider`／`actual_identity.model`；`actual_model` 只是中间 receipt 字段）证明，该阶段归属适用于切换后的后续调用，不局限仅一次。在途独立检查、排队的手动终检或完成停止窗口内拒绝切换。同型号同阶段重复请求被拒；原生 `/model` 切换后可重新选择。这不是给检查者重选型号的入口（那用 `orbit review-model`）。
-
-
-除 Root 手动调用外，程序自身也可在满足合同的全部边界时（真实缺陷已被独立检查确认修复、手动终检提醒**发送之前**的窄程序标记、来源检查与账本回执可精确交叉核验等）为该任务选择**一次** integration 阶段型号（目标＝实际发现该缺陷的检查调用型号）。**该程序来源不是 Root 工具调用**：记录使用独立 kind（`tool_call_id=null`、origin=program），不冒充 Root 动作；配置选择回执同样不证明实际调用身份，仍以下一 native assistant 回执为准。程序保守识别已有显式选择并优先；之后用户与 Root 仍可自行改型（原生 `/model`、`root-model`），程序不自动回滚、不重试失败，并发场景的最后写者限制以合同为准。
+Root 使用当前 OMP 会话模型，两个角色候选池只用于成员与检查者。用户主动切换 Root 型号时使用 OMP 原生 `/model`。Orbit 不按阶段或检查发现替 Root 选型；实现与验证边界见[当前交接](../plan/handoff.md)。
 
 ### 模型证据提交（model-evidence）
 

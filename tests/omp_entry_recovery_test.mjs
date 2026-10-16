@@ -100,7 +100,10 @@ try {
   const instruction = lastBlockText(first);
   assert.match(instruction, /\[orbit-entry-failed\]/);
   assert.match(instruction, /glm\/x/, 'the verbatim selector reason must list the candidate');
-  assert.match(instruction, /核对 OMP 当前会话模型及隔离检查者凭据/);
+  assert.match(instruction, /执行成员自动选型只看执行者池/);
+  assert.match(instruction, /检查者自动选型只看检查者池/);
+  assert.match(instruction, /Root 保持当前 OMP 型号/);
+  assert.match(instruction, /action=review-model/);
   assert.match(instruction, /message_id="original"/);
   assert.match(instruction, /action=start/);
   assert.equal(first.messages.length, 1, 'instruction merges into the trailing user turn');

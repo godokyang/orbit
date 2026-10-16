@@ -128,12 +128,8 @@ module Orbit
     end
     def instruction_source_kind = "#{@provider}_user_message"
     def events = []
-    def send_message(text, integration_check: nil)
+    def send_message(text)
       payload = { "text" => text }
-      # Narrow optional program-purpose tag for the manual-final reminder send
-      # only (contract: 程序发起的 Root integration 阶段选择). Ordinary sends
-      # — corrections, finalization notices, member traffic — never set it.
-      payload["integration_check"] = integration_check if integration_check
       result = request("send", payload)
       @sent_ids << result.fetch("id")
       result

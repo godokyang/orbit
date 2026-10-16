@@ -946,6 +946,43 @@ module CliTest
            "empty LIST values are an empty side, not a malformed id")
   end
 
+  def model_candidates_bridge_operates_on_independent_roles
+    FileUtils.rm_f(File.join(@temp, "orbit", "model-candidates.json"))
+    before = JSON.parse(cli("model-candidates", "list", "--role", "executor"))
+    assert(before == { "role" => "executor", "configured" => false, "models" => [] },
+           "role listing reports an unconfigured pool separately from an empty configured pool")
+    executor = JSON.parse(cli("model-candidates", "add", "provider/executor", "--role", "executor"))
+    checker = JSON.parse(cli("model-candidates", "list", "--role", "checker"))
+    assert(executor == { "models" => ["provider/executor"], "role" => "executor", "configured" => true } &&
+           checker == { "role" => "checker", "configured" => false, "models" => [] },
+           "role edits do not populate the other role")
+    emptied = JSON.parse(cli("model-candidates", "remove", "provider/executor", "--role", "executor"))
+    assert(emptied["models"] == [] && emptied["configured"] == true &&
+           JSON.parse(cli("model-candidates", "list", "--role", "executor"))["configured"] == true,
+           "removing the last model retains configured-empty state")
+    cli("model-candidates", "add", "provider/checker", "--role", "checker")
+    cli("model-candidates", "add", "provider/shared", "--role", "executor")
+    cli("model-candidates", "add", "provider/shared", "--role", "checker")
+    assert(JSON.parse(cli("model-candidates", "list", "--role", "executor"))["models"].include?("provider/shared") &&
+           JSON.parse(cli("model-candidates", "list", "--role", "checker"))["models"].include?("provider/shared"),
+           "the same exact model may belong to both independent role pools")
+    cli("model-candidates", "remove", "provider/shared", "--role", "executor")
+    assert(!JSON.parse(cli("model-candidates", "list", "--role", "executor"))["models"].include?("provider/shared") &&
+           JSON.parse(cli("model-candidates", "list", "--role", "checker"))["models"].include?("provider/shared"),
+           "removing a shared model from one role leaves it in the other role")
+    cli("model-candidates", "remove", "provider/shared", "--role", "checker")
+    cli("model-candidates", "add", "provider/legacy", "--role", "executor")
+    cli("model-candidates", "add", "provider/old-cli")
+    cli("model-candidates", "remove", "provider/old-cli")
+    legacy_delta = JSON.parse(cli("model-candidates", "apply-delta", "--base", "", "--add", "provider/legacy-delta",
+                                  "--remove", ""))
+    assert(JSON.parse(cli("model-candidates", "list", "--role", "executor"))["models"] == ["provider/legacy"] &&
+           JSON.parse(cli("model-candidates", "list", "--role", "checker"))["models"] == ["provider/checker"] &&
+           legacy_delta == { "models" => ["provider/legacy-delta"] } &&
+           JSON.parse(cli("model-candidates", "list"))["models"] == ["provider/legacy-delta"],
+           "no-role list/add/remove/apply-delta retain the legacy pool without changing configured role pools")
+  end
+
   # Mid-flight takeover (main proposal §3.4; audit A05/A07). These tests cover
   # the program-captured boundary document and the CLI seams that must work
   # without a live OMP session: the payload is refused before any connection,
@@ -1249,6 +1286,7 @@ module CliTest
        model_candidates_bridge_round_trips_and_keeps_ids_with_slashes
        model_candidates_bridge_fails_closed_without_echoing_input
        model_candidates_bridge_applies_one_net_delta_atomically
+       model_candidates_bridge_operates_on_independent_roles
        takeover_boundary_is_program_captured_and_scope_is_declared_or_unknown
        takeover_scope_declarations_are_queued_append_only
        takeover_payload_is_refused_before_any_session_or_task_exists

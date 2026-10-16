@@ -42,18 +42,16 @@ class RuntimeHost
   def events = []
   def user_messages(after_id:) = []
 
-  def send_message(text, integration_check: nil)
+  def send_message(text)
     raise Orbit::Connection::Error, @fail_send_message if @fail_send_message.is_a?(String)
 
-    @on_send&.call(text, integration_check)
+    @on_send&.call(text)
     @messages << text
-    (@integration_tags ||= []) << integration_check
     @state["status"] = "active"
     { "id" => "sent-#{@messages.length}" }
   end
 
   attr_accessor :fail_send_message, :on_send
-  def integration_tags = (@integration_tags ||= [])
 
   def stop!
     @stop_calls += 1
@@ -1852,11 +1850,9 @@ fixture do |_root, record, host, checker, runtime|
 
 end
 
-# The manual-final reminder send carries the narrow integration_check tag, and
-# the durable facts the host must verify are already ON DISK when send_message
-# is CALLED (captured inside the host before the ACK returns): the clean
-# resolution check, the resolved finding and the matching delivery; the
-# reminder record and the sent id are written only AFTER the real ACK.
+# The manual-final reminder keeps its integration responsibility and sends
+# only after the clean check, resolved finding and matching delivery are saved.
+# The reminder record and sent id are written only AFTER the real ACK.
 fixture do |_root, record, host, checker, runtime|
   now = Time.now.to_f
   host.finish("delivered")
@@ -1870,24 +1866,27 @@ fixture do |_root, record, host, checker, runtime|
   checker.result = answer("complete", resolved: ["money-bug"])
   sent_count_before = host.messages.length
   at_send = nil
-  host.on_send = lambda do |_text, tag|
+  host.on_send = lambda do |_text|
     # Durable state at the moment the send is issued — BEFORE the host returns
     # an id, so the assertions prove save-before-send (removing the new save
     # would fail them under the old write order). The EXPECTED id of this very
     # send is derived from the pre-send message count; it must not be in the
     # durable sent list yet.
     expected_id = "sent-#{sent_count_before + 1}"
-    at_send = { "tag" => tag, "expected_id" => expected_id,
+    at_send = { "expected_id" => expected_id,
                 "state" => JSON.parse(File.read(File.join(record.path, "state.json"))) }
   end
   runtime.tick(now: now + 1)
   assert(host.messages.one? { |message| message.include?("action=check") },
          "the clean resolution check sends the manual-final reminder")
+  assert(host.messages.last.include?("按本任务的原始要求与规格核对当前交付") &&
+         host.messages.last.include?("对缺证或真实风险做必要可执行验证并修复"),
+         "the final-check reminder retains Root's integration and verification duties")
   assert(at_send, "the send hook captured the send-time disk state")
   clean = at_send["state"]["checks"].last
-  assert(at_send["tag"] == clean["number"] && clean["result"]["verdict"] == "complete" &&
+  assert(clean["result"]["verdict"] == "complete" &&
          clean["result"]["delivery"]["ready"] == true && clean["result"]["findings"] == [],
-         "the tagged clean check (empty findings) is durable BEFORE the send")
+         "the clean check (empty findings) is durable BEFORE the send")
   assert(at_send["state"].dig("findings", "money-bug", "status") == "resolved" &&
          at_send["state"].dig("findings", "money-bug", "resolution_check") == clean["number"],
          "the resolved finding is durable BEFORE the send")

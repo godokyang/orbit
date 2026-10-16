@@ -8,11 +8,19 @@ require_relative "../lib/orbit/member_model_selector"
 module MemberModelSelectorTest
   module_function
 
-  FakePool = Struct.new(:models) do
+  FakePool = Struct.new(:models, :role_models) do
     def read
       raise "scripted pool read failure" if models == :error
 
       models
+    end
+    def read_role(_role) = raise("selector must use the atomic role snapshot")
+    def configured?(_role) = raise("selector must use the atomic role snapshot")
+    def role_snapshot(role)
+      raise "scripted pool read failure" if models == :error
+
+      configured = role_models&.key?(role) || false
+      { "models" => configured ? role_models.fetch(role) : models, "configured" => configured }
     end
   end
   class FakeConnection
@@ -161,12 +169,32 @@ module MemberModelSelectorTest
       "thresholds" => Orbit::ModelQualityPolicy::GATING_QUESTIONS.to_h { |question| [question, threshold] },
       "reviewed_by" => "scripted fixture", "reviewed_at" => "2026-09-25T00:00:00Z" }
   end
-  def selector(pool:, catalog:, entries: [], advisor:, resolution: nil, release: nil, overview: FakeOverview.new)
+  def selector(pool:, catalog:, entries: [], advisor:, resolution: nil, release: nil, overview: FakeOverview.new,
+               role_models: nil)
     Orbit::MemberModelSelector.new(
       connection: FakeConnection.new(catalog, resolution: resolution), project_root: "/tmp",
-      pool: FakePool.new(pool), evidence_cache: FakeEvidence.new(entries), advisor: advisor,
+      pool: FakePool.new(pool, role_models), evidence_cache: FakeEvidence.new(entries), advisor: advisor,
       overview: overview, release: release
     )
+  end
+
+  def configured_role_uses_only_executor_candidates_and_empty_does_not_resolve_native
+    roles = { "executor" => ["exec/one"], "checker" => ["check/one"] }
+    built = selector(pool: [], role_models: roles,
+                     catalog: catalog_for(%w[exec/one check/one], agents: { "exec/one" => "agent-exec", "check/one" => "agent-check" }),
+                     advisor: FakeAdvisor.new(delegation: {}))
+    result = built.assess(state: state, work_unit: work_unit)
+    assert(result["candidates"].map { |candidate| candidate["model"] } == ["exec/one"] &&
+           built.instance_variable_get(:@connection).resolutions.zero?,
+           "member selection reads only the executor pool")
+
+    empty = selector(pool: [], role_models: { "executor" => [], "checker" => ["check/one"] },
+                     catalog: catalog_for(["check/one"], agents: { "check/one" => "agent-check" }),
+                     advisor: FakeAdvisor.new(delegation: {}),
+                     resolution: { "provider" => "native", "id" => "model" })
+    empty_result = empty.assess(state: state, work_unit: work_unit)
+    assert(empty_result["candidates"].empty? && empty.instance_variable_get(:@connection).resolutions.zero?,
+           "a configured empty executor pool does not fall back to @task")
   end
 
   def candidates_need_host_agents_and_an_empty_pool_uses_one_real_native_resolution
@@ -495,6 +523,7 @@ module MemberModelSelectorTest
 
   def main
     %w[candidates_need_host_agents_and_an_empty_pool_uses_one_real_native_resolution
+       configured_role_uses_only_executor_candidates_and_empty_does_not_resolve_native
        a_matching_release_pays_two_judgments_and_orders_the_candidates
        generalized_member_fit_does_not_skip_concrete_candidates
        a_failed_judgment_keeps_its_real_receipt_and_never_fabricates_success

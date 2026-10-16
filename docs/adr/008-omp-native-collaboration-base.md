@@ -1,8 +1,7 @@
 # ADR-008：以原版 OMP 的原生协作为 Orbit 基座
 
-- 状态：现行 OMP 单宿主决定；源码实现与当前验证边界见[交接](../plan/handoff.md)。已结束的 M4 九项历史判定与未测分支沿 Git 历史查阅（`git show 3865b76:docs/reference/omp-native-m4-acceptance-20260924.md`），不据此推断当前安装版或新选型方向已经验收。
+- 状态：现行 OMP 单宿主决定；实现与验证边界见[交接](../plan/handoff.md)。
 - 范围：当前 `orbit omp` 入口、原生成员、独立检查及上游策略。具体行为以[任务运行合同](../../contracts/task-runtime.md)和[ADR-009](009-user-selected-model-pool.md)为准。
-- 依据：OpenCode v2 与 OMP 调研、ADR-007 多宿主时代理由均沿 Git 历史查阅。后续架构选项见认可的主方案（Git 历史：`aa089bb:docs/plan/mixed-model-delivery-proposal.md`）。
 
 ## 背景与理由
 
@@ -10,10 +9,10 @@ Orbit 自建的执行成员没有直接使用 OMP 的 `task/hub` 协作，成员
 
 ## 已确认的决定
 
-**替代关系（2026-10-16）：**下列决定及补充记录保留原理由。其中成员预列文件范围、检查者只读固定快照且不读取任务记录、程序自动作废裁定和自动转 `needs_user` 的职责，已由 [ADR-011](011-agent-autonomy-and-runtime-responsibility.md) 与[合同中的目标规则](../../contracts/task-runtime.md#已确认的职责调整与当前实现状态)部分替代；阶段一源码已实施，安装及真实模型判断效果未由本次 Goal 验证。其余单宿主、原生协作、独立性、用户授权及真实停止决定保持，不把历史实测当作新方案已经通过。
+成员自主选择文件，检查者与裁定者独立读取相关材料，Root 决定业务处置。职责以 [ADR-011](011-agent-autonomy-and-runtime-responsibility.md) 及[运行合同](../../contracts/task-runtime.md#已确认的职责调整与当前实现状态)为准；单宿主、原生协作、独立性、用户授权与真实停止要求保持。
 
-1. **单一宿主。** 只支持 OMP。采用原版 OMP 加 Orbit 扩展；不复制 OMP 的 `task/hub` 模块，不预先维护 Fork。移除 Codex、OpenCode 等旧宿主路径时不建设兼容层或历史任务迁移；旧路径代码已移除（M3.1），历史验收证据保留在 `docs/reference/` 备查。
-2. **显式会话入口与按请求建任务。** `orbit omp [OMP 原生参数]` 启动原版 OMP 并为本次 Root 会话加载 Orbit 扩展；模型、工具、权限、profile 和恢复参数仍由 OMP 处理。普通 `omp` 不接入 Orbit。会话入口只使 Root 具备接入资格，不因打开会话就创建任务；未绑定任务的新用户请求按下文 2026-09-26 的入口门自动判定或交 Root 显式决定。受控会话的恢复仍走该入口，不识别 Zeen 等具体项目。
+1. **单一宿主。** 只支持 OMP。采用原版 OMP 加 Orbit 扩展；不复制 OMP 的 `task/hub` 模块，不预先维护 Fork。移除 Codex、OpenCode 等旧宿主路径时不建设兼容层或历史任务迁移。
+2. **显式会话入口与按请求建任务。** `orbit omp [OMP 原生参数]` 启动原版 OMP 并为本次 Root 会话加载 Orbit 扩展；模型、工具、权限、profile 和恢复参数仍由 OMP 处理。普通 `omp` 不接入 Orbit。会话入口只使 Root 具备接入资格，不因打开会话就创建任务；未绑定任务的新用户请求按当前入口规则判定或交 Root 显式决定。受控会话的恢复仍走该入口，不识别 Zeen 等具体项目。
 3. **原生执行团队。** 当前面向用户的 OMP 会话担任 Root，不另建 Root。Root 显式调用 OMP 原生 `task` 派发成员，成员通过原生 `hub` 通信、回报和唤醒；Orbit 不再以自己的 SDK 成员替代原生团队。团队保持一层：只有 Root 能派发，成员不能再调用 `task` 派发或自行启动 Orbit。Root 负责核验和集成成员结果。
 4. **Orbit 的职责。** Orbit 保留用户原文与有效修改、固定工作区快照、Jev 过程判断、独立检查、纠偏、状态记录和停止确认。委派建议在任务内按有界观察与事件变化给出，最终是否派发由 Root 决定；不使用 OMP advisor 代替 Orbit 的版本化检查，也不自动派发。用户修改要送到 Root 和相关活动成员。
 5. **独立检查与模型。** 检查者使用另一 OMP 会话，读取固定快照，保持只读并独立于执行团队；裁定者同样不得参与执行团队。执行成员和检查者的模型由 OMP 配置与可用模型决定，Orbit 记录实际使用的 provider/model，不硬编码 GPT、DeepSeek、GLM、Kimi 等型号，也不把目录可见当作账号可用。
@@ -24,19 +23,19 @@ Orbit 自建的执行成员没有直接使用 OMP 的 `task/hub` 协作，成员
 
 检查者继续是 Orbit 自有独立进程组与隔离只读会话。安装前要求用户已具备可执行、版本合格且通过实际可信扩展能力探针的本地 OMP；缺失或不兼容时中文说明下一步，失败保留旧安装，不自动安装/升级宿主或私有 SDK 兜底。help 与卸载不受该门阻碍。最低 CLI 版本仍为 18.2.8，版本过门不替代实际能力验证；旧最低版本缺接口时明确拒绝，不能继承 18.8.0 的探针结果。
 
-采用真实 compiled OMP 的可信扩展 factory 复用进程内 SDK，保留精确选模、源认证、隔离配置/registry、受限只读工具、图片字节、结果协议、usage/error 和取消清理；先验导出/加载/初始化副作用/生命周期，再删除私有依赖安装路径。版本或接口变化需要重新验证，不提前维护 Fork。
+采用真实 compiled OMP 的可信扩展 factory 复用进程内 SDK，保留精确选模、源认证、隔离配置/registry、受限只读工具、图片字节、结果协议、usage/error 和取消清理；验证导出、加载、初始化副作用与生命周期，不保留私有依赖安装路径。版本或接口变化需要重新验证，不提前维护 Fork。
 
-历史检查文件按项目内内容去重保存；在途独立完整目录保留，归档核验、进程组退出和回执完成三门成立才回收。恢复/导出保留历史原始事实与旧完整目录格式。理由：宿主已有可复用包面，重复私有 SDK 增加体积；逐检查完整项目长期重复存放同字节，可用文件内容对象保留历史而减少新增占用。方案依据及实现/验收状态见本轮总 TODO（Git 历史：`aa089bb:docs/plan/local-host-snapshot-repair.md`），本条决定不冒充实际安装验收。
+历史检查文件按项目内内容去重保存；在途独立完整目录保留，归档核验、进程组退出和回执完成三门成立才回收。恢复/导出保留历史原始事实与旧完整目录格式。理由：宿主已有可复用包面，重复私有 SDK 增加体积；逐检查完整项目长期重复存放同字节，可用文件内容对象保留历史而减少新增占用。实现与验证边界见[交接](../plan/handoff.md)。
 
-### 2026-10-09 补充决定：Esc 后任务相关追问续接（已确认，实施中）
+### Esc 后任务相关追问续接
 
-用户在长任务优化准备讨论中回复“同意你的建议”，确认 D1 采用任务相关追问／纠正后续接。Esc 当下停止受控执行；之后用户追问同一任务进度或纠正做法时，Root 先回答，再沿原要求和有效修订建立新任务／接管边界并推进，不再要求用户额外说一次“继续”。明确暂停／先讨论／取消优先，独立问题只回答；没有后续用户输入时不自动重启，真正无法确认目标时才问归属。
+Esc 当下停止受控执行；之后用户追问同一任务进度或纠正做法时，Root 先回答，再沿原要求和有效修订建立新任务／接管边界并推进，不再要求用户额外说一次“继续”。明确暂停／先讨论／取消优先，独立问题只回答；没有后续用户输入时不自动重启，真正无法确认目标时才问归属。
 
 理由：Zeen 现场出现暂停后普通执行继续而监督断档、等待已停止成员，以及最新状态提问成为新任务主体导致原目标丢失。需要保留中断当下的停止效力，同时让任务相关追问能接回原交付，减少用户反复催促。这不将普通独立状态问答一律视为新执行授权，也不改变异常退出后不自动恢复的边界。
 
 旧任务终态及真实停止记录保留，不在终态重检或申请完成，不追认监督空档或迁入旧成员／用量／检查。有效原要求、修改与最新原生消息来源必须可追溯；新边界建立后才可声明受控。采用当前 OMP Root 与 native task/hub，不另建 Root、不换宿主、不扩大权限，完成与实际停止门保持。
 
-目标语义见[合同](../../contracts/task-runtime.md#esc-后的任务续接)，实施与验收条件见优化实施（Git 历史：`aa089bb:docs/plan/orbit-long-task-optimization.md`）。2026-10-09 后续正式授权启动实施；源码以 start.resume_from 接回原要求和有效修订并建立新边界，D1 已实施并通过隔离新安装的有界真实验收，首轮失败与后续修正保留在长任务验收（Git 历史：`aa089bb:docs/reference/long-task-optimization-acceptance-20261009.md`）；本节标题保留确认阶段的链接锚点，不代表当前仍待实现。不宣称用户全局安装已更新。
+续接通过 `start.resume_from` 接回原要求和有效修订，建立新的受控边界；具体规则见[合同](../../contracts/task-runtime.md#esc-后的任务续接)。
 
 ### 2026-09-29 替换决定：入口价值与版本化放行（已交付，有限验收）
 
@@ -60,34 +59,30 @@ Orbit 自建的执行成员没有直接使用 OMP 的 `task/hub` 协作，成员
 
 旧 `orbit-entry-2` 的执行授权修订与有限真实样本按历史版本解释，已经被上方新题义替换，不能放行新门。讨论与引文中的命令不构成当前授权；普通直接执行命令和礼貌行动请求不要求额外出现“允许”字样。失败恢复、任务绑定、手动终检与停止门沿合同。
 
-**任务交付线索追加（本轮 P7 实测触发）：**独立 reviewer 先在同一固定快照看到了分类／发票结果、测试和限制，Root 随后仅回复「手动终检已排队」，下一次终检却因运行时把最后一句覆盖为唯一 `task_delivery` 而误判「没有交付」。同一输入与产物版本的最近四条已完成、可归属任务回复现按时间一并提供；检查排队回执不撤销旧交付，实质修订仍可取代旧答复，版本变化与独立用户问答不借用历史。只读快照与手动终检门不放宽；原因是归属正确但证据被后续内部流程回复覆盖，不能靠重复催 Root 再交付遮掩。
+**任务交付线索：**同一输入与产物版本的最近四条已完成、可归属任务回复按时间一并提供给检查者。检查排队回执不撤销旧交付，实质修订可以取代旧答复；版本变化与独立用户问答不借用历史。这样可避免后续内部流程回复覆盖真实交付证据；只读快照与手动终检门保持。
 
 ### 2026-09-26 补充决定：任务证据留在本地，由用户主动分享
 
 开发者需要跨任务分析 Orbit 的失误，不能依赖检查者临时摘要推断 Root 派发理由或从有界协作缓冲事后还原遗漏事件。因此扩展在可归属任务的原生事件发生时持久记录决策证据，运行程序关联检查、finding 与纠偏的编号和产物版本；本地导出包按时间排列原始事实，并明确标注缺失、不完整或无法归属。Root 原生 `task` 派发不因缺少理由而阻断，也不把 Jev 建议冒充 Root 的决定。任务结束与否仍由既有终检和停止门决定。
 
-Orbit 不在任务结束后自动调模型作缺陷分析，不上传 `.orbit`；用户自愿分享单任务证据包后，开发者另行分析。当时同时决定不让独立交付检查者读取任务记录取代固定快照；2026-10-16 已由 ADR-011 部分替代：检查者可按需读取相关任务记录作为证据，仍须核对实际交付，不能拿状态记录代替终检。运行中可主动截取导出，不将该时间点的材料称为完整任务结论。原决定的理由是区分事实采集与产品缺陷归因；开放相关记录不取消这一事实要求。
+Orbit 不在任务结束后自动调模型作缺陷分析，不上传 `.orbit`；用户自愿分享单任务证据包后，开发者另行分析。按 ADR-011，检查者可按需读取相关任务记录作为证据，仍须核对实际交付，不能拿状态记录代替终检。运行中可主动截取导出，不将该时间点的材料称为完整任务结论。事实采集与产品缺陷归因保持区分。
 
 ## 2026-09-30 决定：成员结算语义（现行）
 
 成员结算采用**多事实结算**，不随工作单元终裁单独驱动：以本派发的原生 `task` 结果与真实 provider error、精确 work-unit/成员/调用身份匹配、以及真实执行就绪证据共同判定；原生 `accepted_at` 只在真实 yield 交割发生时记录，不伪造、不由裁决反推。缺证据时经既有通道一次性通知，不自动置 `needs_user`。完整语义以[合同](../../contracts/task-runtime.md)成员结算节为准。
 
-## 历史迁移与 M4（结论）
+## 2026-10-01 补充：纯工具调用回合的原生操作摘要
 
-M4 与迁移各切片已结束（历史判定沿 Git 查阅）；后续版本若暴露关键接缝缺口，依据新证据处理，不把历史通过当作所有版本均支持。
+host `state()` 投影中，纯工具调用的 assistant 消息文本为空（交付诚实语义保留）。当前 `agent_message` 与近期 `prior_agent_message` 条目内容含原生 toolCall 即附有界原生工具调用摘要——原生 tool_call id、name、declared intent（声明非执行事实）、read/write/edit 的真实 `arguments.path` 目标（其余 unknown，不猜 eval/命令内嵌路径）；最多最新 3 个按原生序，超出记真实省略数，字段有界并如实标注截断，缺值 unknown。原始参数/内容/补丁/命令/eval 代码不进入该摘要（排除仅限新增摘要，既有 toolResult 输出投影不变）；不新增观察事件，18 事件窗口、用户边界、省略标记与严格 stale 判定零变化。
 
-## 2026-10-01 补充：纯工具调用回合的原生操作摘要（已安装 0.7.34 起）
+## 2026-10-01 补充二：Root 停止的复活断点修复
 
-host `state()` 投影中，纯工具调用的 assistant 消息文本为空（交付诚实语义保留），但原生声明意图与文件目标此前在卡点/跑偏评估前被丢弃。现行语义（已安装 0.7.34 起）：当前 `agent_message` 与近期 `prior_agent_message` 条目内容含原生 toolCall 即附有界原生工具调用摘要——原生 tool_call id、name、declared intent（声明非执行事实）、read/write/edit 的真实 `arguments.path` 目标（其余 unknown，不猜 eval/命令内嵌路径）；最多最新 3 个按原生序，超出记真实省略数，字段有界并如实标注截断，缺值 unknown。原始参数/内容/补丁/命令/eval 代码不进入该摘要（排除仅限新增摘要，既有 toolResult 输出投影不变）；不新增观察事件，18 事件窗口、用户边界、省略标记与严格 stale 判定零变化。以 030-r2 真实 native 片段（report_issue 截点 c3b4f4a7，非 A-failure 截点；该窗口真实 write target 为 xd://orbit）做过无 API 机械回放（Function 提取当前源码 state 块 + stub lifecycle）：真实 id/name/declared_intent 现已可见（如 "Reporting write tool content-drop bug"）。这是历史观察诊断证据，非实机 process 验收。
+停止时必须阻止本任务搁浅消息和延后投递的后台结果重新唤起模型。`runModeExitTeardown` 有界包住整个 cancel/abort/reap/确认；`getAllJobs({ownerId})` 快照→`acknowledgeDeliveries`（仅抑制投递，不 consume/不虚报核验）→`yieldQueue.clear("async-result")`；归属＝当前任务耐久 `sent_message_ids`（非会话历史集合）；abort 前清已归属搁浅消息、abort/reap 后再清一次 requeue（用户/他源/他任务 Orbit marker 原序保留，不泛 `clearQueue({forInterrupt})`）；teardown 返回 void，确认由回调捕获后返回；确认环加 `hasPendingAsyncWork()` 为 false。不跨 owner、不抑制快照后新 job、reap 未结算仍如实失败；旧版无新 API 不拒绝普通停止。不称根治所有场景（guard 后残留非本任务消息照常 drain＝正确）。
 
-## 2026-10-01 补充二：Root 停止的复活断点修复（已安装 0.7.37）
+## 2026-10-01 补充三：过程检查换型保留通道
 
-35 task `22b36fa0` 实测链（本地同版 SDK 源码与原生记录吻合；非运行 RPC 插桩因果证明）：搁浅 Orbit hint＋**已完成但投递被延后**的 owner 后台结果（bg_2）在中断后重新进入消息流，随后出现新模型调用（`826fd314`）与重问（`12dcf0ec`），且 stop 确认未通过（`stop_unconfirmed` 为已证事实）；原生记录不证明确认环与复活的先后次序。修复（全公开 SDK 面，18.2.8 floor 按能力探测）：`runModeExitTeardown` 有界包住整个 cancel/abort/reap/确认；`getAllJobs({ownerId})` 快照→`acknowledgeDeliveries`（仅抑制投递，不 consume/不虚报核验）→`yieldQueue.clear("async-result")`；归属＝当前任务耐久 `sent_message_ids`（非会话历史集合）；abort 前清已归属搁浅消息、abort/reap 后再清一次 requeue（用户/他源/他任务 Orbit marker 原序保留，不泛 `clearQueue({forInterrupt})`）；teardown 返回 void，确认由回调捕获后返回；确认环加 `hasPendingAsyncWork()` 为 false。不跨 owner、不抑制快照后新 job、reap 未结算仍如实失败；旧版无新 API 不拒绝普通停止。不称根治所有场景（guard 后残留非本任务消息照常 drain＝正确）。
+过程检查失败后换型仍保留 process 通道，避免被当作产物检查取得完成资格。schedule_check 持久 next_check_kind（仅 handle_check_failure 传入失败检查自身 kind；其余调用方传 nil 清除回 artifact 默认）；tick 仅对真正 scheduled 起点重放保存的 kind，自发 delivery 检查恒 artifact；finish_check 对成功/过期的 process 换型结果安排常规 timer 终止换型链（避免 model_fallback 去重豁免导致反复重开）；排队 manual 优先 return 早于任何状态写入，不被自动换型污染种类；first_change_checked 只由 artifact 起点置位。
 
-## 2026-10-01 补充三：过程检查换型保留通道（已安装 0.7.36）
+## 2026-10-01 补充：历史过程检查提示
 
-真实任务 `22b36fa0` 实测：process 检查 #1 失败后，model_fallback 调度未持久原 kind，tick 默认 artifact，#2–#6 降级为产物检查（22b36fa0 events 序列）。修复：schedule_check 持久 next_check_kind（仅 handle_check_failure 传入失败检查自身 kind；其余调用方传 nil 清除回 artifact 默认）；tick 仅对真正 scheduled 起点重放保存的 kind，自发 delivery 检查恒 artifact；finish_check 对成功/过期的 process 换型结果安排常规 timer 终止换型链（避免 model_fallback 去重豁免导致反复重开）；排队 manual 优先 return 早于任何状态写入，不被自动换型污染种类；first_change_checked 只由 artifact 起点置位。两例回归：连续失败→换型成功不授完成且下一 tick 不重开，随后常规调度回 artifact；排队 manual 经真实 consume 入口保持 artifact 终检语义。
-
-## 2026-10-01 补充：历史过程检查提示（已安装 0.7.33）
-
-当一个过程检查因 host 观察变化（唯一 stale 原因，其余 workspace/input/artifact/dispute 均未变）而变 stale，且 verdict correct/continue 有 findings、Root 未中断且 turn 归属本任务时，程序经既有 Root 消息通道发送一次明确历史性质的提示（非当前纠正），附有界 finding evidence/action 与检查号。attempt 先持久化（崩溃后不重发）；ACK 成功才记 sent_message_ids；失败记 unconfirmed 不自动重试。严格 host stale 判定、当前纠正路径、完成/停止门全部保留；recheck 线索资格不变。合成回放证实控制门逻辑（非实机 process 验收）。
+当一个过程检查因 host 观察变化（唯一 stale 原因，其余 workspace/input/artifact/dispute 均未变）而变 stale，且 verdict correct/continue 有 findings、Root 未中断且 turn 归属本任务时，程序经既有 Root 消息通道发送一次明确历史性质的提示（非当前纠正），附有界 finding evidence/action 与检查号。attempt 先持久化（崩溃后不重发）；ACK 成功才记 sent_message_ids；失败记 unconfirmed 不自动重试。严格 host stale 判定、当前纠正路径、完成/停止门全部保留；recheck 线索资格不变。验证边界见[交接](../plan/handoff.md)。

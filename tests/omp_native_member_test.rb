@@ -442,7 +442,7 @@ module OmpNativeMemberTest
                                 "session_attached" => false, "retained_snapshot" => true,
                                 "registration_removed" => true, "registration_removed_at" => "2026-10-16T00:00:00Z" }
     attempts = 0
-    host.define_singleton_method(:send_message) do |text, integration_check: nil|
+    host.define_singleton_method(:send_message) do |text|
       attempts += 1
       raise Orbit::Connection::Error, "temporary host failure" if attempts == 1
 

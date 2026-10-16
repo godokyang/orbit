@@ -130,8 +130,13 @@ module Orbit
     # attempted — so unjudged fields are reported as "not_judged"/"not_probed"
     # instead of a guess. An unreadable cache is reported as such, never as
     # "absent".
-    def candidate_statuses
-      pool = @pool.read
+    def candidate_statuses(role: "checker")
+      role = role.to_s
+      raise Error, "role must be executor or checker" unless ModelCandidatePool::ROLES.include?(role)
+
+      pool_snapshot = role_pool_snapshot(role)
+      pool = pool_snapshot["models"]
+      pool_configured = pool_snapshot["configured"]
       entries = stored_entries
       now = @clock.call
       catalog = model_catalog
@@ -157,6 +162,8 @@ module Orbit
         entry
       end
       report = {
+        "role" => role,
+        "pool_configured" => pool_configured,
         "pool_empty" => pool.empty?,
         "session_catalog" => @connection.nil? ? "not_provided" : (catalog.is_a?(Hash) ? "available" : "unavailable"),
         "evidence_cache" => entries.nil? ? "unavailable" : "available",
@@ -164,7 +171,7 @@ module Orbit
         "model_overview" => overview_diagnostics,
         "generated_at" => now.utc.iso8601
       }
-      if pool.empty?
+      if pool.empty? && !pool_configured
         report["default_model"] = begin
           @connection.configured_model.to_s.strip
         rescue StandardError
@@ -177,6 +184,16 @@ module Orbit
     end
 
     private
+
+    def role_pool_snapshot(role)
+      if @pool.respond_to?(:role_snapshot)
+        snapshot = @pool.role_snapshot(role)
+        return { "models" => snapshot["models"], "configured" => snapshot["configured"] == true }
+      end
+
+      models = @pool.respond_to?(:read_role) ? @pool.read_role(role) : @pool.read
+      { "models" => models, "configured" => @pool.respond_to?(:configured?) && @pool.configured?(role) }
+    end
 
     def same_explicit?(previous, text, prepared)
       previous.is_a?(Hash) && previous["source"] == "explicit" && previous["model"] == text &&
@@ -206,7 +223,9 @@ module Orbit
 
     def prepare(instruction, excluded: [], state: {}, route_costs: nil)
       route_costs = default_route_costs if route_costs.nil?
-      pool = @pool.read
+      pool_snapshot = role_pool_snapshot("checker")
+      pool = pool_snapshot["models"]
+      pool_configured = pool_snapshot["configured"]
       catalog = model_catalog
       available = Array(catalog&.[]("available")).select { |model| model.is_a?(String) &&
         model.match?(OmpCheckRunner::MODEL_ID) }.uniq
@@ -214,7 +233,11 @@ module Orbit
       available &= @allowed_models if @allowed_models
       available = [current, *available.reject { |model| model == current }] if available.include?(current)
       preferred = pool.select { |model| available.include?(model) && !excluded.include?(model) }
-      models = preferred.empty? ? available.reject { |model| excluded.include?(model) } : preferred
+      models = if pool_configured
+                 preferred
+               else
+                 preferred.empty? ? available.reject { |model| excluded.include?(model) } : preferred
+               end
       entries = stored_entries
       checked_at = @clock.call
       identities = available.to_h { |model| [model, identity_for(catalog, model)] }
@@ -240,7 +263,7 @@ module Orbit
         end
       end
       {
-        "pool" => pool, "catalog" => catalog, "models" => models, "preferred" => preferred,
+        "pool" => pool, "pool_configured" => pool_configured, "catalog" => catalog, "models" => models, "preferred" => preferred,
         "available" => available, "excluded" => excluded, "identities" => identities, "facts" => facts,
         "evidence" => evidence, "overview_priors" => priors,
         "evidence_statuses" => statuses.transform_values { |status| status["status"] },
@@ -280,6 +303,7 @@ module Orbit
           "policy" => ModelQualityPolicy.binding,
           "release" => release_binding(prepared["release"]),
           "allowed_models" => @allowed_models, "pool" => prepared["pool"],
+          "pool_configured" => prepared["pool_configured"],
           "catalog" => catalog_view(prepared["catalog"]),
           "identities" => prepared["identities"],
           "facts" => prepared["facts"],
@@ -496,7 +520,9 @@ module Orbit
                                detail: ["no OMP model can be verified without its current catalog"])
       end
       if prepared["models"].empty?
-        raise failed_selection(prepared, "no unused OMP model is available in this session",
+        message = prepared["pool_configured"] ? "no selectable checker candidate is available in the configured pool" :
+          "no unused OMP model is available in this session"
+        raise failed_selection(prepared, message,
                                detail: prepared["excluded"].empty? ? [] : ["already tried: #{listed(prepared['excluded'])}"])
       end
 
@@ -507,6 +533,7 @@ module Orbit
                                detail: ["candidates #{listed(prepared['models'])}; no model was proven runnable"])
       end
       if Array(availability["resolvable"]).empty? && prepared["choice_source"] != "explicit" &&
+         !prepared["pool_configured"] &&
          prepared["preferred"].any?
         # The pool is a preference, not a permission boundary. Probe the
         # remaining OMP models only when no preferred model is runnable.
@@ -730,7 +757,7 @@ module Orbit
       parts = [reason]
       parts << "(#{detail.join('; ')})" unless detail.empty?
       parts << extra if extra
-      parts << "check OMP model availability and isolated checker credentials; Root may select any resolvable OMP model"
+      parts << "check OMP model availability and isolated checker credentials; if the automatic checker pool cannot run, Root may explicitly use action=review-model to select another runnable OMP model; this does not change Root's current model"
       Error.new(parts.join("; "))
     end
 

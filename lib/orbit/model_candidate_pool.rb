@@ -36,6 +36,8 @@ module Orbit
   # config.
   class ModelCandidatePool
     SCHEMA_VERSION = "orbit-model-candidates-v1"
+    ROLE_SCHEMA_VERSION = "orbit-model-candidates-v2"
+    ROLES = %w[executor checker].freeze
     CONFIG_DIRECTORY = "orbit"
     FILE_NAME = "model-candidates.json"
     MAX_IDENTIFIER_LENGTH = 200
@@ -67,6 +69,72 @@ module Orbit
     def initialize(path: nil, env: ENV, home: nil)
       default = self.class.default_path(env: env, home: home)
       @path = File.expand_path(path.nil? || path.to_s.empty? ? default : path.to_s)
+    end
+
+    # Role-aware pools distinguish an absent role (the caller may use its
+    # existing OMP-session fallback) from a deliberately configured empty one.
+    # A legacy shared pool remains visible to each role until that role is
+    # explicitly configured. Role-specific pools never borrow from each other.
+    # Reads the effective role list and its explicit-configuration state from
+    # one document snapshot. Callers must use this when both values affect a
+    # selection decision.
+    def role_snapshot(role)
+      role = validate_role(role)
+      document = stored_document
+      if document && document["schema_version"] == ROLE_SCHEMA_VERSION
+        entry = document.fetch("pools", {})[role]
+        configured = entry.is_a?(Hash) && entry["configured"] == true
+        models = if configured
+                   normalize_stored_models(entry.fetch("models"))
+                 else
+                   normalize_stored_models(document.fetch("legacy_models", []))
+                 end
+        return { "models" => models, "configured" => configured }
+
+      elsif document
+        return { "models" => normalize_stored_models(document.fetch("models")), "configured" => false }
+      end
+      { "models" => [], "configured" => false }
+    end
+
+    def read_role(role)
+      role_snapshot(role).fetch("models")
+    end
+
+    def configured?(role)
+      role_snapshot(role).fetch("configured")
+    end
+
+    def add_role(role, models)
+      mutate_role(role, :add, models)
+    end
+
+    def remove_role(role, models)
+      mutate_role(role, :remove, models)
+    end
+
+    def apply_role_delta(role, base:, add: [], remove: [])
+      role = validate_role(role)
+      base_models = normalize_list(base)
+      additions = normalize_list(add)
+      removals = normalize_list(remove)
+      raise ValidationError, "a model candidate cannot be both added and removed in one delta" unless (additions & removals).empty?
+      raise ValidationError, "delta additions must not be in the snapshot pool" unless (additions & base_models).empty?
+      raise ValidationError, "delta removals must be in the snapshot pool" unless (removals - base_models).empty?
+      return read_role(role) if additions.empty? && removals.empty?
+
+      base_members = base_models.to_h { |model| [model, true] }
+      with_lock do
+        document = current_document_for_write
+        pools = document.fetch("pools")
+        current = role_models(document, role)
+        current_members = current.to_h { |model| [model, true] }
+        conflicts = (additions | removals).select { |model| current_members.key?(model) != base_members.key?(model) }
+        raise ConflictError, conflicts unless conflicts.empty?
+        kept = current.reject { |model| removals.include?(model) }
+        result = kept + additions.reject { |model| kept.include?(model) }
+        write_role_document(document, role, result)
+      end
     end
 
     # Ordered, de-duplicated `provider/id` identifiers. A missing pool is empty.
@@ -173,21 +241,87 @@ module Orbit
     end
 
     def stored_models
-      return [] unless File.exist?(@path)
+      document = stored_document
+      return [] unless document
+      return normalize_stored_models(document.fetch("models")) if document["schema_version"] == SCHEMA_VERSION
 
-      parsed =
-        begin
-          JSON.parse(File.read(@path))
-        rescue JSON::ParserError
-          raise Error, "model candidate pool is not valid JSON: #{@path}"
-        end
-      unless parsed.is_a?(Hash) && parsed["schema_version"] == SCHEMA_VERSION && parsed["models"].is_a?(Array)
-        raise Error, "model candidate pool does not match #{SCHEMA_VERSION}: #{@path}"
-      end
-
-      parsed["models"].map { |model| stored_identifier(model) }.uniq
+      legacy = document["legacy_models"]
+      normalize_stored_models(legacy || [])
     rescue Errno::ENOENT
       raise Error, "model candidate pool disappeared while reading: #{@path}"
+    end
+
+    def stored_document
+      return nil unless File.exist?(@path)
+      parsed = JSON.parse(File.read(@path))
+      valid_legacy = parsed.is_a?(Hash) && parsed["schema_version"] == SCHEMA_VERSION && parsed["models"].is_a?(Array)
+      valid_roles = parsed.is_a?(Hash) && parsed["schema_version"] == ROLE_SCHEMA_VERSION &&
+        parsed["pools"].is_a?(Hash) && (parsed["legacy_models"].nil? || parsed["legacy_models"].is_a?(Array))
+      raise Error, "model candidate pool does not match a supported schema: #{@path}" unless valid_legacy || valid_roles
+      if valid_roles
+        ROLES.each do |role|
+          entry = parsed["pools"][role]
+          next if entry.nil?
+          raise Error, "model candidate pool has an invalid role entry: #{@path}" unless entry.is_a?(Hash) &&
+            [true, false].include?(entry["configured"]) && entry["models"].is_a?(Array)
+        end
+      end
+      parsed
+    rescue JSON::ParserError
+      raise Error, "model candidate pool is not valid JSON: #{@path}"
+    rescue Errno::ENOENT
+      raise Error, "model candidate pool disappeared while reading: #{@path}"
+    end
+
+    def normalize_stored_models(models)
+      models.map { |model| stored_identifier(model) }.uniq
+    end
+
+    def validate_role(role)
+      value = role.to_s
+      raise ValidationError, "role must be executor or checker" unless ROLES.include?(value)
+      value
+    end
+
+    def mutate_role(role, operation, models)
+      role = validate_role(role)
+      values = normalize(models)
+      with_lock do
+        document = current_document_for_write
+        current = role_models(document, role)
+        result = if operation == :add
+                   current + values.reject { |model| current.include?(model) }
+                 else
+                   current.reject { |model| values.include?(model) }
+                 end
+        write_role_document(document, role, result)
+      end
+    end
+
+    def current_document_for_write
+      document = stored_document
+      return { "schema_version" => ROLE_SCHEMA_VERSION, "legacy_models" => [], "pools" => {} } unless document
+      return document if document["schema_version"] == ROLE_SCHEMA_VERSION
+
+      { "schema_version" => ROLE_SCHEMA_VERSION, "legacy_models" => normalize_stored_models(document["models"]), "pools" => {} }
+    end
+
+    def role_models(document, role)
+      entry = document.fetch("pools").dig(role)
+      models = if entry.is_a?(Hash) && entry["configured"] == true
+                 entry.fetch("models")
+               else
+                 document.fetch("legacy_models", [])
+               end
+      normalize_stored_models(models)
+    end
+
+    def write_role_document(document, role, models)
+      pools = document.fetch("pools").dup
+      pools[role] = { "configured" => true, "models" => models }
+      updated = document.merge("pools" => pools)
+      write_document(updated)
+      models
     end
 
     def stored_identifier(model)
@@ -197,8 +331,18 @@ module Orbit
     end
 
     def write(models)
+      current = stored_document
+      if current && current["schema_version"] == ROLE_SCHEMA_VERSION
+        write_document(current.merge("legacy_models" => models))
+      else
+        write_document("schema_version" => SCHEMA_VERSION, "models" => models)
+      end
+      models
+    end
+
+    def write_document(document)
       directory = ensure_directory
-      content = JSON.pretty_generate("schema_version" => SCHEMA_VERSION, "models" => models)
+      content = JSON.pretty_generate(document)
       temporary = File.join(directory, ".#{File.basename(@path)}.tmp-#{Process.pid}-#{format('%08x', rand(2**32))}")
       begin
         File.open(temporary, File::WRONLY | File::CREAT | File::EXCL, 0o600) do |file|
@@ -213,7 +357,7 @@ module Orbit
         raise
       end
       sync_directory(directory)
-      models
+      document
     end
 
     # Serializes read-modify-write across processes on a sibling lock file. The

@@ -11,13 +11,19 @@ require_relative "../lib/orbit/task_view"
 module CheckerModelSelectorTest
   module_function
 
-  FakePool = Struct.new(:models) do
+  FakePool = Struct.new(:models, :role_models) do
     def read
       models
     end
 
     def include?(model)
       models.include?(model)
+    end
+    def read_role(_role) = raise("selector must use the atomic role snapshot")
+    def configured?(_role) = raise("selector must use the atomic role snapshot")
+    def role_snapshot(role)
+      configured = role_models&.key?(role) || false
+      { "models" => configured ? role_models.fetch(role) : models, "configured" => configured }
     end
   end
 
@@ -166,12 +172,43 @@ module CheckerModelSelectorTest
   end
 
   def selector(pool:, catalog:, entries:, advisor:, probe:, default_model: "session/default", project_root: "/tmp",
-               overview: FakeOverview.new, release: nil, allowed_models: nil)
+               overview: FakeOverview.new, release: nil, allowed_models: nil, role_models: nil)
     Orbit::CheckerModelSelector.new(
       connection: FakeConnection.new(catalog, default_model), project_root: project_root,
-      pool: FakePool.new(pool), evidence_cache: FakeEvidence.new(entries),
+      pool: FakePool.new(pool, role_models), evidence_cache: FakeEvidence.new(entries),
       advisor: advisor, probe: probe, clock: -> { Time.utc(2026, 9, 25) }, overview: overview, release: release, allowed_models: allowed_models
     )
+  end
+
+  def configured_role_uses_only_checker_candidates_and_does_not_fall_back
+    roles = { "executor" => ["exec/one"], "checker" => ["check/one"] }
+    probe = FakeProbe.new(%w[exec/one check/one session/other])
+    selected, = selector(pool: [], role_models: roles, catalog: catalog_for(%w[exec/one check/one session/other]),
+                         entries: [], advisor: nil, probe: probe)
+                    .select(explicit: nil, instruction: "review")
+    assert(selected == "check/one" && probe.models == ["check/one"],
+           "automatic checker selection probes only its own role pool")
+
+    empty_probe = FakeProbe.new(["session/other"])
+    empty_selector = selector(pool: [], role_models: { "executor" => ["exec/one"], "checker" => [] },
+                              catalog: catalog_for(%w[exec/one session/other]), entries: [], advisor: nil,
+                              probe: empty_probe)
+    failure = assert_raises do
+      empty_selector.select(explicit: nil, instruction: "review")
+    end
+    assert(failure.message.include?("configured pool") && empty_probe.calls.zero?,
+           "a configured empty checker pool does not auto-select from the full session catalog")
+
+    unavailable_probe = FakeProbe.new([])
+    unavailable = selector(pool: [], role_models: { "executor" => ["exec/one"], "checker" => ["check/one"] },
+                           catalog: catalog_for(%w[check/one session/other]), entries: [], advisor: nil,
+                           probe: unavailable_probe)
+    unavailable_failure = assert_raises do
+      unavailable.select(explicit: nil, instruction: "review")
+    end
+    assert(unavailable_failure.message.include?("no unused runnable OMP checker") &&
+           unavailable_probe.calls == 1 && unavailable_probe.models == ["check/one"],
+           "unavailable configured checker candidates do not trigger a full-catalog retry")
   end
 
   # A structurally valid reviewed release, matching the current questions,
@@ -584,6 +621,18 @@ module CheckerModelSelectorTest
     assert(report["candidates"].all? { |candidate| candidate["quality"] == "not_judged" && candidate["isolated_probe"] == "not_probed" },
            "listing never judges or probes; unknown candidates stay unprobed")
     assert(advisor.calls.zero? && probe.calls.zero?, "the status listing is side-effect free")
+
+    configured_empty = selector(pool: [], role_models: { "checker" => [] }, catalog: nil,
+                                entries: [], advisor: advisor, probe: probe).candidate_statuses(role: "checker")
+    assert(configured_empty["pool_configured"] == true && configured_empty["pool_empty"] == true &&
+           !configured_empty.key?("default_model"),
+           "a configured empty role reports its state without implying a session-model fallback")
+
+    unconfigured_empty = selector(pool: [], catalog: nil, entries: [], advisor: advisor, probe: probe)
+                          .candidate_statuses(role: "executor")
+    assert(unconfigured_empty["pool_configured"] == false && unconfigured_empty.key?("default_model"),
+           "only an unconfigured empty role includes the existing default-model hint")
+    assert(advisor.calls.zero? && probe.calls.zero?, "empty-pool diagnostics remain read-only")
   end
 
   def catalog_billing_route_forms_the_exact_identity
@@ -825,6 +874,7 @@ module CheckerModelSelectorTest
 
   def main
     %w[strict_authorization_survives_input_changes_and_exhaustion
+       configured_role_uses_only_checker_candidates_and_does_not_fall_back
        root_selected_model_is_probed_and_jev_ranked_without_user_grant
        root_selected_model_must_be_omp_available_and_checker_resolvable
        empty_pool_uses_omp_catalog_and_checks_availability

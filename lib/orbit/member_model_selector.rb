@@ -173,19 +173,20 @@ module Orbit
 
     def prepare(state:, work_unit:, excluded:, route_costs:)
       catalog, catalog_error = model_catalog
-      pool, pool_note = candidate_pool
+      pool, pool_note, pool_configured = candidate_pool
       unit = unit_view(work_unit)
       route_costs = default_route_costs(unit) if route_costs.nil?
 
       state_digest = digest_field(state)
       stale = !unit["input_digest"].nil? && !state_digest.nil? && unit["input_digest"] != state_digest
       earlier = Array(excluded).map(&:to_s).uniq
-      candidates, selection_note = candidate_list(pool: pool, pool_note: pool_note, catalog: catalog,
+      candidates, selection_note = candidate_list(pool: pool, pool_note: pool_note, pool_configured: pool_configured, catalog: catalog,
                                                    excluded: earlier, unit: unit)
       release, release_note = current_release
       workspace_git = state.is_a?(Hash) ? state.dig("workspace", "project", "git") : nil
       {
         "catalog" => catalog, "catalog_error" => catalog_error, "pool" => pool, "pool_note" => pool_note,
+        "pool_configured" => pool_configured,
         "excluded" => earlier,
         "unit" => unit, "state" => state.is_a?(Hash) ? state : {}, "input_digest" => state_digest,
         "stale" => stale, "candidates" => candidates, "selection_note" => selection_note,
@@ -212,10 +213,12 @@ module Orbit
     # Pool members are only usable when the session catalog can both resolve the
     # model and map it to a generated agent; the name is never re-derived here.
     # An empty pool uses the one real native @task resolution and no default.
-    def candidate_list(pool:, pool_note:, catalog:, excluded:, unit:)
+    def candidate_list(pool:, pool_note:, pool_configured:, catalog:, excluded:, unit:)
       return [[], pool_note] if pool.nil?
 
       if pool.empty?
+        return [[], "the executor candidate pool is configured but empty"] if pool_configured
+
         resolution, note = native_resolution
         candidates = resolution ? native_candidates(resolution, catalog, unit, excluded) : []
         return [candidates, candidates.empty? ? (note || "the native task model resolved to no usable identity") : nil]
@@ -374,12 +377,18 @@ module Orbit
     # A pool that cannot be read is unknown, not empty: only a real empty array
     # may fall back to the native @task resolution.
     def candidate_pool
-      pool = @pool.read
+      snapshot = if @pool.respond_to?(:role_snapshot)
+                   @pool.role_snapshot("executor")
+                 else
+                   pool = @pool.respond_to?(:read_role) ? @pool.read_role("executor") : @pool.read
+                   { "models" => pool, "configured" => @pool.respond_to?(:configured?) && @pool.configured?("executor") }
+                 end
+      pool = snapshot["models"]
       return [nil, "the candidate pool could not be read: expected an array"] unless pool.is_a?(Array)
 
-      [pool.map(&:to_s).uniq, nil]
+      [pool.map(&:to_s).uniq, nil, snapshot["configured"] == true]
     rescue StandardError => error
-      [nil, "the candidate pool could not be read (#{error.class})"]
+      [nil, "the candidate pool could not be read (#{error.class})", nil]
     end
 
     def model_catalog
@@ -421,6 +430,7 @@ module Orbit
           "policy" => ModelQualityPolicy.binding,
           "release" => release_binding(prepared["release"]),
           "unit_basis" => prepared["unit_basis"],
+          "pool_configured" => prepared["pool_configured"], "pool" => prepared["pool"],
           "dependency_context" => Array(prepared["state"]["dependency_context"]).filter_map do |dependency|
             next unless dependency.is_a?(Hash) && Array(prepared["unit"]["dependencies"]).include?(dependency["id"])
 

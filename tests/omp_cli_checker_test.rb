@@ -296,8 +296,11 @@ module OmpCliCheckerTest
       xdg = File.join(tmp, "xdg-config")
       FileUtils.mkdir_p(File.join(xdg, "orbit"))
       File.write(File.join(xdg, "orbit", "model-candidates.json"),
-                 JSON.generate("schema_version" => "orbit-model-candidates-v1",
-                               "models" => ["kimi-code/k3-256k"]))
+                 JSON.generate("schema_version" => "orbit-model-candidates-v2", "legacy_models" => [],
+                               "pools" => {
+                                 "executor" => { "configured" => true, "models" => ["executor/model"] },
+                                 "checker" => { "configured" => true, "models" => ["kimi-code/k3-256k"] }
+                               }))
       cache_path = File.join(tmp, "xdg-cache", "orbit", "model-evidence-v1.json")
       Orbit::ModelEvidenceCache.new(path: cache_path).record_all([{
         "provider" => "kimi-code", "model" => "k3", "billing_route" => "unknown", "status" => "evidence",
@@ -320,6 +323,26 @@ module OmpCliCheckerTest
           $stdout = original_stdout
         end
         report = JSON.parse(stdout.string)
+        executor_stdout = StringIO.new
+        $stdout = executor_stdout
+        begin
+          Orbit::CLI.run(["model-status", "--project", project, "--role", "executor"])
+        ensure
+          $stdout = original_stdout
+        end
+        executor_report = JSON.parse(executor_stdout.string)
+
+        File.write(File.join(xdg, "orbit", "model-candidates.json"),
+                   JSON.generate("schema_version" => "orbit-model-candidates-v2", "legacy_models" => [],
+                                 "pools" => { "checker" => { "configured" => true, "models" => [] } }))
+        empty_stdout = StringIO.new
+        $stdout = empty_stdout
+        begin
+          Orbit::CLI.run(["model-status", "--project", project])
+        ensure
+          $stdout = original_stdout
+        end
+        empty_report = JSON.parse(empty_stdout.string)
       ensure
         previous ? ENV["XDG_CONFIG_HOME"] = previous : ENV.delete("XDG_CONFIG_HOME")
         previous_cache ? ENV["XDG_CACHE_HOME"] = previous_cache : ENV.delete("XDG_CACHE_HOME")
@@ -332,6 +355,14 @@ module OmpCliCheckerTest
       assert(report["session_catalog"] == "not_provided" && candidate["in_session"].nil? &&
              candidate["quality"] == "not_judged" && candidate["isolated_probe"] == "not_probed",
              "nothing is guessed: unprovided session and unjudged candidates are marked as such")
+      executor_candidate = executor_report.fetch("candidates").fetch(0)
+      assert(report["role"] == "checker" && executor_report["role"] == "executor" &&
+             executor_candidate["model"] == "executor/model" && executor_candidate["quality"] == "not_judged" &&
+             executor_candidate["isolated_probe"] == "not_probed" && executor_report["session_catalog"] == "not_provided",
+             "the role argument displays the executor pool with the same read-only diagnostics and no session probe")
+      assert(empty_report["pool_configured"] == true && empty_report["pool_empty"] == true &&
+             !empty_report.key?("default_model") && empty_report["session_catalog"] == "not_provided",
+             "model-status omits the default-model hint for a configured empty pool without a session")
       assert(Dir.glob(File.join(project, ".orbit/tasks/*")).empty?, "the read-only listing creates no task")
     end
   end

@@ -183,6 +183,8 @@ try {
   await fs.chmod(poolStub, 0o755);
   process.env.ORBIT_CLI_BIN = poolStub;
   installOmpExtension(pi, sdk);
+  assert.equal(definition.parameters.safeParse({ action: 'root-model', task: '/task' }).success, false,
+    'the public Orbit tool schema no longer exposes Root model switching');
   await emit("session_start", {}, ctx);
   const userBranch = root.sessionManager.getBranch();
   userBranch.push({ type: 'message', id: 'peer-as-user', message: { role: 'user', attribution: 'agent', content: 'Peer result, not a user correction.' } });
@@ -603,281 +605,6 @@ try {
     assert.equal(bound.dispatches[0].hint_message_id, 'gate-hint-msg',
       'the bound dispatch carries the hint message id');
   }
-  // 1f-pre. Program-initiated Root integration selection (contract: 程序发起的
-  // Root integration 阶段选择) driven through the REAL owned send RPC with the
-  // narrow integration_check tag — the same entry the Ruby runtime's
-  // remind_manual_final_check uses, not a synthetic hook emission. Runs on the
-  // FIRST task BEFORE its first root-model tool selection. Version triples are
-  // REAL digests from scripts/orbit-root-binding (a workspace marker change
-  // makes each new version). Fixture state/ledger/collab/pool/model and the
-  // sendCustomMessage spy are save/restored.
-  {
-    const gpt = { provider: 'openai-codex', id: 'gpt-6-sol' };
-    const originalSetModel = pi.setModel;
-    const originalList = ctx.models.list;
-    const originalResolve = ctx.models.resolve;
-    const originalRootModel = root.model;
-    const originalPool = await fs.readFile(poolStub, 'utf8');
-    const savedState = await taskState();
-    const statePath = path.join(started.task_directory, 'state.json');
-    const ledgerPath = path.join(started.task_directory, 'resource-calls.json');
-    const collabPath = path.join(started.task_directory, 'collaboration.jsonl');
-    const savedLedger = await fs.readFile(ledgerPath, 'utf8').catch(() => '');
-    const savedCollab = await fs.readFile(collabPath, 'utf8').catch(() => '');
-    const setModelCalls = [];
-    let falseSdkCalls = 0;
-    const originalSendCustom = root.sendCustomMessage;
-    const markerFile = path.join(project, 'prog-version-marker.tmp');
-    const bindingOf = async () => {
-      const run = spawnSync(process.env.ORBIT_RUBY, ['--disable-gems',
-        path.join(fileURLToPath(new URL('..', import.meta.url)), 'scripts', 'orbit-root-binding'), started.task_directory],
-        { encoding: 'utf8', timeout: 30000 });
-      assert.equal(run.status, 0, run.stderr);
-      const value = JSON.parse(run.stdout);
-      assert.equal(value.ok, true, 'real root binding required');
-      assert.equal(value.fingerprint_status, 'ok', 'a real fingerprint required');
-      return value;
-    };
-    const bumpVersion = async tag => {
-      await fs.writeFile(markerFile, `version ${tag}\n`);
-      return bindingOf();
-    };
-    const writeProgState = (buggy, fixed, suffix, extra = {}) => {
-      const td = { artifact_root: fixed.artifact_root, input_digest: fixed.input_digest,
-        artifact_digest: fixed.artifact_digest };
-      const reminderKey = createHash('sha256')
-        .update(JSON.stringify([td.artifact_root, td.input_digest, td.artifact_digest])).digest('hex');
-      const checks = [
-        { number: 1, kind: 'artifact', role: 'reviewer', manual: false, stale: false,
-          input_digest: td.input_digest, artifact_root: td.artifact_root, artifact_digest: buggy.artifact_digest,
-          result: { verdict: 'correct', findings: [{ id: 'money-bug' }], delivery: { ready: true } },
-          usage: { calls: [{ provider: 'openai-codex', model: 'gpt-6-sol', call_id: `call-find-a-${suffix}` },
-            { provider: 'openai-codex', model: 'gpt-6-sol', call_id: `call-find-b-${suffix}` }] } },
-        { number: 2, kind: 'artifact', role: 'reviewer', manual: false, stale: false,
-          input_digest: td.input_digest, artifact_root: td.artifact_root, artifact_digest: td.artifact_digest,
-          result: { verdict: 'complete', findings: [], resolved_ids: ['money-bug'], delivery: { ready: true } },
-          usage: { calls: [] } },
-      ];
-      // Pre-send semantics: manual_check_reminders is NOT written (the Ruby
-      // runtime records it only after the real delivery ACK). Extra overrides
-      // may add it to simulate an already-reminded duplicate send.
-      return fs.writeFile(statePath, JSON.stringify({ ...savedState, status: 'running',
-        task_delivery: td, checks,
-        findings: { 'money-bug': { id: 'money-bug', status: 'resolved', check: 1, resolution_check: 2,
-          observed_input: td.input_digest, observed_root: td.artifact_root, observed_version: buggy.artifact_digest,
-          resolution_input: td.input_digest, resolution_root: td.artifact_root, resolution_version: td.artifact_digest } },
-        members: [], recheck: null, next_check_manual: false, ...extra }));
-    };
-    const writeLedger = suffix => fs.writeFile(ledgerPath, JSON.stringify({
-      schema_version: 'orbit-resource-calls-v1', task_id: savedState.id, calls: {
-        [`call-find-a-${suffix}`]: { call_id: `call-find-a-${suffix}`, task_id: savedState.id,
-          status: 'completed', role: 'checker', actual_identity: { provider: 'openai-codex', model: 'gpt-6-sol' } },
-        [`call-find-b-${suffix}`]: { call_id: `call-find-b-${suffix}`, task_id: savedState.id,
-          status: 'completed', role: 'checker', actual_identity: { provider: 'openai-codex', model: 'gpt-6-sol' } } } }));
-    try {
-      await fs.writeFile(poolStub, '#!/bin/sh\nprintf \'{"models":["glm/x","openai-codex/gpt-6-sol"]}\n\'\n');
-      ctx.models.list = () => [model, gpt];
-      ctx.models.resolve = spec => spec === 'openai-codex/gpt-6-sol' ? gpt
-        : spec === 'glm/x' ? model : undefined;
-      const orderLog = [];
-      root.sendCustomMessage = async (message, options) => {
-        orderLog.push(`send:${String(message.content).slice(0, 24)}`);
-        return originalSendCustom.call(root, message, options);
-      };
-      pi.setModel = async m => { orderLog.push(`setModel:${m.provider}/${m.id}`); setModelCalls.push(`${m.provider}/${m.id}`); root.model = m; return true; };
-      const REMINDER = 'Orbit 过程检查未发现当前交付缺口，但这不是手动终检。请当前助手调用 Orbit action=check 结束本轮等待独立终检。';
-      const lastDeliveredText = () => {
-        const customs = root.sessionManager.getBranch().filter(e => e.type === 'custom_message');
-        return customs[customs.length - 1]?.content ?? '';
-      };
-      // (a) Positive via the REAL owned send RPC with the narrow tag: ONE
-      // program switch BEFORE sendCustomMessage (order proven), guidance rides
-      // the SAME reminder message, separate record kind, no fake tool id.
-      const buggy = await bumpVersion('buggy');
-      const fixed = await bumpVersion('fixed');
-      await writeProgState(buggy, fixed, 1);
-      await writeLedger(1);
-      const sent1 = await request('send', { text: REMINDER, integration_check: 2 });
-      assert.ok(sent1.id && sent1.delivery === 'accepted', 'the reminder is really delivered');
-      assert.equal(setModelCalls.length, 1, `one program switch expected, got ${JSON.stringify(setModelCalls)}`);
-      assert.equal(setModelCalls[0], 'openai-codex/gpt-6-sol');
-      assert.equal(root.model, gpt, 'the fixture root model actually switched');
-      assert.ok(orderLog.indexOf('setModel:openai-codex/gpt-6-sol') < orderLog.findIndex(x => x.startsWith('send:')),
-        'the public setModel precedes the wake sendCustomMessage');
-      const delivered1 = lastDeliveredText();
-      assert.ok(delivered1.includes('action=check'), 'the reminder text itself is delivered');
-      assert.match(delivered1, /integration 阶段/, 'guidance rides the SAME reminder message');
-      assert.match(delivered1, /程序来源提示/, 'the guidance is marked as program-source');
-      const progRecord = (await fs.readFile(collabPath, 'utf8')).split('\n').filter(Boolean)
-        .map(l => JSON.parse(l)).find(e => e.kind === 'root_integration_model_selected');
-      assert.ok(progRecord, 'a program-origin record exists');
-      assert.equal(progRecord.origin, 'program');
-      assert.equal(progRecord.tool_call_id, null, 'program records never fake a Root tool call id');
-      assert.equal(progRecord.to, 'openai-codex/gpt-6-sol');
-      assert.equal(progRecord.phase, 'integration');
-      assert.deepEqual(progRecord.finding_ids, ['money-bug']);
-      assert.deepEqual(progRecord.detecting_call_ids, ['call-find-a-1', 'call-find-b-1']);
-      assert.equal(progRecord.version_triple.artifact_digest, fixed.artifact_digest);
-      assert.equal(progRecord.tagged_check, 2);
-      // (b) Duplicate tagged send for the SAME triple: no second switch, the
-      // plain reminder still goes out; an already-reminded triple selects
-      // nothing at all.
-      const branchBefore = root.sessionManager.getBranch().length;
-      const sent2 = await request('send', { text: REMINDER, integration_check: 2 });
-      assert.ok(sent2.delivery === 'accepted');
-      assert.equal(setModelCalls.length, 1, 'a duplicate same-triple send never switches twice');
-      const td1 = { artifact_root: fixed.artifact_root, input_digest: fixed.input_digest, artifact_digest: fixed.artifact_digest };
-      const rk1 = createHash('sha256').update(JSON.stringify([td1.artifact_root, td1.input_digest, td1.artifact_digest])).digest('hex');
-      await writeProgState(buggy, fixed, 1, { manual_check_reminders: { [rk1]: { check: 2, message_id: 'acked-m1', at: '2026-10-01T00:00:00Z' } } });
-      await request('send', { text: REMINDER, integration_check: 2 });
-      assert.equal(setModelCalls.length, 1, 'an already-reminded triple (ACK recorded) selects nothing');
-      // (b2) Manual window queued: no switch AND no guidance on the message.
-      const v1b = await bumpVersion('v1b');
-      await writeProgState(buggy, v1b, 5, { next_check_manual: true });
-      await writeLedger(5);
-      const beforeManual = setModelCalls.length;
-      await request('send', { text: REMINDER, integration_check: 2 });
-      assert.equal(setModelCalls.length, beforeManual, 'no switch while the manual window is queued');
-      assert.ok(!lastDeliveredText().includes('integration 阶段'), 'no guidance while the manual window is queued');
-      // (c) Ledger mismatch on a fresh REAL version: no attempt at all, the
-      // plain reminder still goes out unchanged.
-      const v2 = await bumpVersion('v2');
-      await writeProgState(buggy, v2, 2);
-      await fs.writeFile(ledgerPath, JSON.stringify({ schema_version: 'orbit-resource-calls-v1', task_id: savedState.id, calls: {} }));
-      await request('send', { text: REMINDER, integration_check: 2 });
-      assert.equal(setModelCalls.length, 1, 'a missing ledger row refuses without an attempt');
-      assert.ok(lastDeliveredText().includes('action=check') && !lastDeliveredText().includes('integration 阶段'),
-        'the ordinary reminder is delivered without selection');
-      // (c2) Missing tag on a FRESH triple where every OTHER precondition is
-      // valid (full ledger, clean check, reminder window open): the tag alone
-      // separates selection from an ordinary reminder send. Restore the
-      // current model to a non-target first so the skips below prove TAG
-      // protection, not a same-model early exit.
-      root.model = originalRootModel;
-      const v2b = await bumpVersion('v2b');
-      await writeProgState(buggy, v2b, 6);
-      await writeLedger(6);
-      const beforePlain = setModelCalls.length;
-      await request('send', { text: REMINDER });
-      assert.equal(setModelCalls.length, beforePlain, 'an untagged send never selects');
-      // (c3) Invalid tag (check not found) on the SAME otherwise-valid triple.
-      await request('send', { text: REMINDER, integration_check: 99 });
-      assert.equal(setModelCalls.length, beforePlain, 'an invalid tag selects nothing');
-      // (c4) A tagged send on this valid triple DOES select (proves the two
-      // skips above were caused by the tag, not by a broken precondition).
-      await request('send', { text: REMINDER, integration_check: 2 });
-      assert.equal(setModelCalls.length, beforePlain + 1,
-        'a properly tagged send on an otherwise-valid triple selects exactly once');
-      // (d) SDK false on a fresh REAL version with the current model restored
-      // to a non-target: one classified attempt (own false-call counter),
-      // never retried, no phase granted.
-      root.model = originalRootModel;
-      const v3 = await bumpVersion('v3');
-      await writeProgState(buggy, v3, 3);
-      await writeLedger(3);
-      pi.setModel = async () => { falseSdkCalls += 1; orderLog.push('setModel:false'); return false; };
-      await request('send', { text: REMINDER, integration_check: 2 });
-      await request('send', { text: REMINDER, integration_check: 2 });
-      assert.equal(falseSdkCalls, 1, 'the unconfirmed switch is attempted once and never retried');
-      assert.ok(lastDeliveredText().includes('action=check'), 'selection failure still delivers the ordinary reminder');
-      const falseRecord = (await fs.readFile(collabPath, 'utf8')).split('\n').filter(Boolean)
-        .map(l => JSON.parse(l)).filter(e => e.kind === 'root_integration_model_selected' && e.ok === false).pop();
-      assert.ok(falseRecord && falseRecord.error.includes('without confirming'),
-        'the SDK failure is classified and recorded');
-      assert.equal(falseRecord.version_triple.artifact_digest, v3.artifact_digest);
-      assert.equal(root.model, originalRootModel, 'no fake rollback: the model stays as it was');
-      // (e) Root tool selection priority: after a confirmed tool switch on
-      // this task, a fresh REAL version never auto-switches again.
-      pi.setModel = async m => { setModelCalls.push(`${m.provider}/${m.id}`); root.model = m; return true; };
-      const beforeTool = setModelCalls.length;
-      const toolSwitch = await tool({ action: 'root-model', task: started.task_directory,
-        root_model: 'glm/x', phase: 'diagnosis', text: 'root prefers its own choice' });
-      assert.equal(toolSwitch.ok, true, 'the Root tool switch succeeds');
-      const v4 = await bumpVersion('v4');
-      await writeProgState(buggy, v4, 4);
-      await writeLedger(4);
-      await request('send', { text: REMINDER, integration_check: 2 });
-      assert.equal(setModelCalls.length, beforeTool + 1,
-        'a confirmed Root tool selection conservatively blocks later program attempts');
-    } finally {
-      pi.setModel = originalSetModel;
-      root.sendCustomMessage = originalSendCustom;
-      ctx.models.list = originalList;
-      if (originalResolve) ctx.models.resolve = originalResolve; else delete ctx.models.resolve;
-      root.model = originalRootModel;
-      await fs.writeFile(poolStub, originalPool);
-      await fs.writeFile(statePath, JSON.stringify(savedState));
-      if (savedLedger === '') await fs.rm(ledgerPath, { force: true });
-      else await fs.writeFile(ledgerPath, savedLedger);
-      await fs.writeFile(collabPath, savedCollab);
-      await fs.rm(markerFile, { force: true });
-    }
-  }
-
-  // 1f. Root-stage model selection (action=root-model). Self-contained local
-  // fixture: the block saves and restores pool/list/resolve/model/setModel;
-  // provides BOTH glm/x and kimi-code/k3-256k locally; two DIFFERENT exact
-  // targets (glm/x -> k3 -> glm/x) with real from/to, pool-out and repeat
-  // rejects, and the fixture root.model actually switches. Ownership of the
-  // trusted log destination (host.ownsTask before boundDir assignment) is a
-  // static handler boundary, asserted here only through the success path.
-  {
-    const k3 = { provider: 'kimi-code', id: 'k3-256k' };
-    const originalSetModel = pi.setModel;
-    const originalList = ctx.models.list;
-    const originalResolve = ctx.models.resolve;
-    const originalRootModel = root.model;
-    const originalPool = await fs.readFile(poolStub, 'utf8');
-    const setModelCalls = [];
-    try {
-      await fs.writeFile(poolStub, '#!/bin/sh\nprintf \'{"models":["glm/x","kimi-code/k3-256k"]}\n\'\n');
-      ctx.models.list = () => [model, k3];
-      ctx.models.resolve = spec =>
-        spec === 'kimi-code/k3-256k' ? k3 : spec === 'glm/x' ? model : undefined;
-      pi.setModel = async m => { setModelCalls.push(`${m.provider}/${m.id}`); root.model = m; return true; };
-      const collab = async () => {
-        const text = await fs.readFile(path.join(started.task_directory, 'collaboration.jsonl'), 'utf8')
-          .catch(() => '');
-        return text.split('\n').filter(Boolean).map(l => JSON.parse(l));
-      };
-      const entries = async kind => (await collab()).filter(e => e.kind === kind);
-      const listing = await tool({ action: 'root-model', task: started.task_directory });
-      assert.ok(listing.ok && Array.isArray(listing.available) && listing.available.includes('glm/x')
-        && listing.available.includes('kimi-code/k3-256k'),
-        'without root_model the action lists both exact pool∩catalog IDs');
-      const sw1 = await tool({ action: 'root-model', task: started.task_directory,
-        root_model: 'kimi-code/k3-256k', phase: 'diagnosis', text: 'hard provider error diagnosis' });
-      assert.ok(sw1.ok === true, `first switch must succeed, got: ${JSON.stringify(sw1)}`);
-      assert.equal(sw1.from, 'glm/x', 'from is the PRE-switch identity');
-      assert.equal(sw1.to, 'kimi-code/k3-256k');
-      assert.equal(root.model, k3, 'the fixture root model actually switched');
-      const sw2 = await tool({ action: 'root-model', task: started.task_directory,
-        root_model: 'glm/x', phase: 'integration', text: 'acceptance integration of the fix' });
-      assert.ok(sw2.ok === true, `second switch must succeed, got: ${JSON.stringify(sw2)}`);
-      assert.equal(sw2.from, 'kimi-code/k3-256k', 'the second switch sees the new current identity');
-      assert.equal(sw2.to, 'glm/x');
-      const repeat = await tool({ action: 'root-model', task: started.task_directory,
-        root_model: 'glm/x', phase: 'integration', text: 'same again' });
-      assert.equal(repeat.ok, false, 'the same model and phase is already active for this task');
-      const outOfPool = await tool({ action: 'root-model', task: started.task_directory,
-        root_model: 'not-a-pool/model', phase: 'integration', text: 'x' });
-      assert.equal(outOfPool.ok, false, 'an out-of-pool target is rejected');
-      assert.equal(setModelCalls.length, 2, 'pi.setModel called exactly once per confirmed switch');
-      const records = await entries('root_model_selection');
-      const successes = records.filter(r => r.ok === true);
-      assert.equal(successes.length, 2, 'two success records');
-      assert.ok(successes[0].from === 'glm/x' && successes[0].to === 'kimi-code/k3-256k');
-      assert.ok(successes[1].from === 'kimi-code/k3-256k' && successes[1].to === 'glm/x');
-      assert.ok(!records.some(r => r.task_dir && !r.task_dir.includes(started.task_directory)),
-        'no record was written to a foreign task dir');
-    } finally {
-      pi.setModel = originalSetModel;
-      ctx.models.list = originalList;
-      if (originalResolve) ctx.models.resolve = originalResolve; else delete ctx.models.resolve;
-      root.model = originalRootModel;
-      await fs.writeFile(poolStub, originalPool);
-    }
-  }
   const mistakenTools = await emit('tool_call', { toolName: 'task', toolCallId: 'native-tools-as-eval',
     fixture_no_unit: true, input: { task: 'Implement module', tools: ['read', 'write'] } }, ctx);
   assert.equal(mistakenTools.block, true);
@@ -1066,7 +793,7 @@ try {
   assert.equal(driftOutsideEntry.model_drift.actual, 'zenmux/x-ai/grok-4.6', 'drift records the actual member model');
   assert.ok(setStatuses.some(([id, s]) => id === driftOutside.input.name && s === 'aborted'),
     'a drifted in-pool member must be aborted at registration');
-  // The empty-pool case still permits the native default task model.
+  // An unconfigured empty pool preserves the legacy native @task fallback.
   const emptyPoolStub = path.join(agentRoot, 'pool-empty.sh');
   await fs.writeFile(emptyPoolStub, '#!/bin/sh\nprintf \'{"models":[]}\\n\'\n');
   await fs.chmod(emptyPoolStub, 0o755);
@@ -1075,6 +802,22 @@ try {
   const emptyPool = await emit('tool_call', { toolName: 'task', toolCallId: 'empty-pool',
     input: { agent: 'task', task: 'work' } }, ctx);
   assert.ok(emptyPool.input && !emptyPool.block, 'an empty candidate pool does not block a known-model @task dispatch');
+  const configuredEmptyStub = path.join(agentRoot, 'pool-configured-empty.sh');
+  await fs.writeFile(configuredEmptyStub, '#!/bin/sh\nprintf \'{"models":[],"configured":true,"role":"executor"}\\n\'\n');
+  await fs.chmod(configuredEmptyStub, 0o755);
+  process.env.ORBIT_CLI_BIN = configuredEmptyStub;
+  const configuredEmpty = await emit('tool_call', { toolName: 'task', toolCallId: 'configured-empty-pool',
+    fixture_no_unit: true, input: { agent: 'task', task: 'work' } }, ctx);
+  assert.equal(configuredEmpty.block, true, 'an explicitly configured empty executor pool blocks @task fallback');
+  assert.match(configuredEmpty.reason, /configured executor pool has no runnable candidates/);
+  const unavailableStub = path.join(agentRoot, 'pool-configured-unavailable.sh');
+  await fs.writeFile(unavailableStub, '#!/bin/sh\nprintf \'{"models":["missing/model"],"configured":true,"role":"executor"}\\n\'\n');
+  await fs.chmod(unavailableStub, 0o755);
+  process.env.ORBIT_CLI_BIN = unavailableStub;
+  const allUnavailable = await emit('tool_call', { toolName: 'task', toolCallId: 'configured-unavailable-pool',
+    fixture_no_unit: true, input: { agent: 'task', model: 'glm/x', task: 'work' } }, ctx);
+  assert.equal(allUnavailable.block, true, 'a configured executor pool with no session-runnable model blocks explicit model fallback');
+  assert.match(allUnavailable.reason, /configured executor pool has no runnable candidates/);
   process.env.ORBIT_CLI_BIN = savedCliBin;
   // Unknown effective model stays rejected.
   ctx.models.resolve = () => undefined;
@@ -1126,11 +869,17 @@ try {
     assert.equal(blockedFact?.kind, 'work_unit_tool_blocked', 'Root sees scope blocks from a distinct member extension factory');
     assert.equal(blockedFact.agent_id, liveRef.id);
     assert.equal(blockedFact.work_unit_id, unit.id);
+    // A native OMP /model change updates the session identity. The recorder
+    // must preserve the provider/model reported by the following real
+    // assistant receipt; this fixture checks identity plumbing only.
+    const userSelectedModel = { provider: 'kimi-code', id: 'k3-256k' };
+    root.model = userSelectedModel;
+    await root.emitNative({ type: 'model_changed', model: userSelectedModel });
+    await root.emitNative({ type: 'message_start', message: { role: 'assistant', provider: 'kimi-code', model: 'k3-256k' } });
+    await root.emitNative({ type: 'message_end', message: { role: 'assistant', provider: 'kimi-code', model: 'k3-256k',
+      stopReason: 'stop', usage: { input: 21, output: 4, cacheRead: 0, cacheWrite: 0 } } });
     // Model-shaped SDK events are scripted here; they verify the real host
     // subscriptions and durable accounting path, not model-backed acceptance.
-    await root.emitNative({ type: 'message_start', message: { role: 'assistant', provider: 'glm', model: 'x' } });
-    await root.emitNative({ type: 'message_end', message: { role: 'assistant', provider: 'glm', model: 'x',
-      stopReason: 'stop', usage: { input: 21, output: 4, cacheRead: 0, cacheWrite: 0 } } });
     for (const listener of liveMemberListeners)
       await listener({ type: 'message_start', message: { role: 'assistant', provider: 'glm', model: 'x' } });
     for (const listener of liveMemberListeners)
@@ -1140,6 +889,9 @@ try {
     const observations = JSON.parse(await fs.readFile(path.join(started.task_directory, 'native-model-calls.json'), 'utf8'));
     const receipts = Object.values(observations.calls);
     assert.equal(receipts.length, 2);
+    assert.equal(receipts.find(call => call.meta.role === 'root').ledger_receipt.provider, 'kimi-code');
+    assert.equal(receipts.find(call => call.meta.role === 'root').ledger_receipt.actual_model, 'k3-256k',
+      'the Root ledger records the model selected through native OMP /model');
     assert.equal(receipts.find(call => call.meta.role === 'member').ledger_receipt.work_unit_id, unit.id);
     assert.equal(receipts.find(call => call.meta.role === 'member').ledger_receipt.status, 'failed');
     assert.deepEqual(receipts.find(call => call.meta.role === 'member').ledger_receipt.usage, { input: 17 });
@@ -1196,73 +948,6 @@ try {
       'sidecar corruption remains visible while independently preserving the final receipt');
     await fs.rm(corruptDir, { recursive: true, force: true });
   }
-  // 2b-2. Root model switch boundary: the OLD model's in-flight call keeps
-  // its original identity; only the NEXT new-model call carries the declared
-  // phase. Rejection: in-flight check or next_check_manual blocks the switch.
-  {
-    const k3 = { provider: 'kimi-code', id: 'k3-256k' };
-    const originalSetModel = pi.setModel;
-    const originalList = ctx.models.list;
-    const originalResolve = ctx.models.resolve;
-    const originalRootModel = root.model;
-    const originalPool = await fs.readFile(poolStub, 'utf8');
-    const savedState = await taskState();
-    const setModelCalls = [];
-    try {
-      await fs.writeFile(poolStub, '#!/bin/sh\nprintf \'{"models":["glm/x","kimi-code/k3-256k"]}\n\'\n');
-      ctx.models.list = () => [model, k3];
-      ctx.models.resolve = spec =>
-        spec === 'kimi-code/k3-256k' ? k3 : spec === 'glm/x' ? model : undefined;
-      pi.setModel = async m => { setModelCalls.push(`${m.provider}/${m.id}`); root.model = m; return true; };
-      // Start an old-model call.
-      await root.emitNative({ type: 'message_start', message: { role: 'assistant', provider: 'glm', model: 'x' } });
-      // Switch mid-call via the Root tool.
-      const sw = await tool({ action: 'root-model', task: started.task_directory,
-        root_model: 'kimi-code/k3-256k', phase: 'diagnosis', text: 'hard error diagnosis' });
-      assert.ok(sw.ok === true, `switch must succeed, got: ${JSON.stringify(sw)}`);
-      // The old model's message_end still arrives with its original identity.
-      await root.emitNative({ type: 'message_end', message: { role: 'assistant', provider: 'glm', model: 'x',
-        stopReason: 'stop', usage: { input: 5, output: 1, cacheRead: 0, cacheWrite: 0 } } });
-      // The NEXT call uses the new model and carries the declared phase.
-      await root.emitNative({ type: 'message_start', message: { role: 'assistant', provider: 'kimi-code', model: 'k3-256k' } });
-      await root.emitNative({ type: 'message_end', message: { role: 'assistant', provider: 'kimi-code', model: 'k3-256k',
-        stopReason: 'stop', usage: { input: 7, output: 2, cacheRead: 0, cacheWrite: 0 } } });
-      await flushNativeCalls(started.task_directory);
-      const calls = Object.values(JSON.parse(await fs.readFile(path.join(started.task_directory, 'resource-calls.json'), 'utf8')).calls);
-      const oldCall = calls.find(c => c.usage && c.usage.input === 5);
-      const newCall = calls.find(c => c.usage && c.usage.input === 7);
-      assert.ok(oldCall, 'the old-model call was recorded');
-      assert.ok(newCall, 'the new-model call was recorded');
-      assert.equal(oldCall.actual_identity && oldCall.actual_identity.model, 'x',
-        'the old call keeps its original identity');
-      assert.equal(oldCall.phase, 'integration', 'the old call keeps its original phase attribution');
-      assert.equal(newCall.actual_identity && newCall.actual_identity.model, 'k3-256k',
-        'the new call carries the new identity');
-      assert.equal(newCall.phase, 'diagnosis', 'the new call carries the declared phase');
-      // Rejection: in-flight check window blocks the switch.
-      setModelCalls.length = 0;
-      await fs.writeFile(path.join(started.task_directory, 'state.json'),
-        JSON.stringify({ ...savedState, check_observations: { obs1: { status: 'in_flight', check: 99 } } }));
-      const inFlightReject = await tool({ action: 'root-model', task: started.task_directory,
-        root_model: 'glm/x', phase: 'integration', text: 'blocked by in-flight check' });
-      assert.equal(inFlightReject.ok, false, 'an in-flight check blocks the switch');
-      // Rejection: next_check_manual blocks the switch.
-      await fs.writeFile(path.join(started.task_directory, 'state.json'),
-        JSON.stringify({ ...savedState, next_check_manual: true }));
-      const manualReject = await tool({ action: 'root-model', task: started.task_directory,
-        root_model: 'glm/x', phase: 'integration', text: 'blocked by manual window' });
-      assert.equal(manualReject.ok, false, 'a manual final check window blocks the switch');
-      assert.equal(setModelCalls.length, 0, 'no setModel call was made during rejections');
-    } finally {
-      pi.setModel = originalSetModel;
-      ctx.models.list = originalList;
-      if (originalResolve) ctx.models.resolve = originalResolve; else delete ctx.models.resolve;
-      root.model = originalRootModel;
-      await fs.writeFile(poolStub, originalPool);
-      await fs.writeFile(path.join(started.task_directory, 'state.json'), JSON.stringify(savedState));
-    }
-  }
-
   const members = await membersFile();
   assert.equal(members.length, 3); // drifted in-pool member, this pool member, and the 1e hint-bound member
   const poolMember = members.find(m => m.thread_id === revised.input.name);
@@ -1737,6 +1422,10 @@ try {
     process.env.ORBIT_DELIVERY_ACK_MS = '600';
     const originalSend = root.sendCustomMessage;
     const originalStreaming = root.isStreaming;
+    const originalSetModel = pi.setModel;
+    const originalRootModel = root.model;
+    let setModelCalls = 0;
+    pi.setModel = async model => { setModelCalls += 1; root.model = model; return true; };
     const timers = [];
     try {
       // (a) Streaming Root: fast resolve while streaming ACKs via steer-queue,
@@ -1748,10 +1437,12 @@ try {
         return false;
       };
       const t0 = Date.now();
-      const queued = await request('send', { text: 'correction to streaming root' });
+      const queued = await request('send', { text: '终检提醒：请先按原始要求核对交付，再请求独立终检。' });
       assert.equal(queued.delivery, 'accepted');
       assert.equal(queued.via, 'steer-queue');
       assert.ok(Date.now() - t0 < 1500, 'streaming ACK must not wait for branch consumption');
+      assert.equal(setModelCalls, 0, 'delivering a final-check reminder never calls pi.setModel');
+      assert.equal(root.model, originalRootModel, 'delivering a final-check reminder preserves Root model');
 
       // (b) Idle Root with a slow initiated turn: marker lands in the branch
       //     while the send promise is still pending -> ACK via branch.
@@ -1790,6 +1481,8 @@ try {
       for (const timer of timers) clearTimeout(timer);
       root.sendCustomMessage = originalSend;
       root.isStreaming = originalStreaming;
+      pi.setModel = originalSetModel;
+      root.model = originalRootModel;
       delete process.env.ORBIT_DELIVERY_ACK_MS;
     }
   }
@@ -2124,10 +1817,31 @@ try {
       const out = await emit('before_agent_start', { prompt, systemPrompt: ['BASE'] }, statusCtx);
       return out ? out.systemPrompt.join('\n') : '';
     };
+    const savedPoolCli = process.env.ORBIT_CLI_BIN;
+    const statusPoolFixture = path.join(project, '.orbit', 'status-pool.sh');
+    let emptyPoolStatus;
+    try {
+      await fs.mkdir(path.dirname(statusPoolFixture), { recursive: true });
+      await fs.writeFile(statusPoolFixture, '#!/bin/sh\nprintf \'{"models":[],"configured":true,"role":"executor"}\\n\'\n');
+      await fs.chmod(statusPoolFixture, 0o755);
+      process.env.ORBIT_CLI_BIN = statusPoolFixture;
+      await request('model_catalog');
+      emptyPoolStatus = await statusTurn('configured empty pool');
+      await fs.writeFile(statusPoolFixture, '#!/bin/sh\nprintf \'{"models":["glm/x"]}\\n\'\n');
+      // lastKnownPool is refreshed by the explicit catalog read; the next
+      // status turn must observe the changed, unconfigured legacy pool.
+      await request('model_catalog');
+    } finally {
+      if (savedPoolCli === undefined) delete process.env.ORBIT_CLI_BIN;
+      else process.env.ORBIT_CLI_BIN = savedPoolCli;
+      await fs.rm(statusPoolFixture, { force: true });
+    }
     const injected = await emit('before_agent_start', { prompt: 'next user turn', systemPrompt: ['BASE'] }, statusCtx);
     assert.ok(injected?.systemPrompt?.some(part => part.includes('[orbit-task-status]')), 'an active bound task must inject a marked per-turn status block');
     const block = injected.systemPrompt.join('\n');
-    assert.ok(block.includes((await taskState()).id), 'the block must carry the task id');
+    assert.ok(block.includes((await taskState()).id) &&
+      emptyPoolStatus.includes('执行者池已配置为空') && block.includes('执行者池未配置，继承旧候选 1 个'),
+      'status distinguishes a configured empty executor pool from an unconfigured pool inheriting its legacy candidate');
     const activeStatus = statusCalls.at(-1);
     assert.equal(activeStatus?.[0], 'orbit', 'an active task refreshes the OMP status line');
     // A manual check starts after Root's completed reply; the durable record

@@ -1,9 +1,10 @@
-// ADR-009 picker (proposal B): keyboard multi-select over ctx.ui.custom().
-// Pure-component flows plus the /orbit-models command bridge against the REAL
-// model-candidates CLI (temporary XDG config; no provider traffic). The ask
-// observation seam (ask_interrupted / ask_resolved) is exercised through a
-// live session subscription after a real orbit start, mirroring how the root
-// `remember()` subscription observes it in production.
+// ADR-009 picker (proposal B): keyboard multi-select over ctx.ui.custom(),
+// scoped to ONE role pool per invocation (executor or checker). Pure-component
+// flows plus the /orbit-models command bridge against the REAL model-candidates
+// CLI (temporary XDG config; no provider traffic). The ask observation seam
+// (ask_interrupted / ask_resolved) is exercised through a live session
+// subscription after a real orbit start, mirroring how the root `remember()`
+// subscription observes it in production.
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -19,12 +20,17 @@ delete process.env.TYPESAFE_API_KEY;
 process.env.XDG_CONFIG_HOME = await fs.mkdtemp(path.join(os.tmpdir(), 'orbit-picker-xdg-'));
 const CLI_ARGS = ['--disable-gems', path.resolve('scripts/orbit'), 'model-candidates'];
 const runCli = (...args) => JSON.parse(execFileSync(process.env.ORBIT_RUBY, [...CLI_ARGS, ...args], { encoding: 'utf8' }));
+const rolePool = role => runCli('list', '--role', role);
+const tick = () => new Promise(resolve => setImmediate(resolve));
 
 const ENTRIES = [
   { id: 'zhipu/glm-5.2', available: true },
   { id: 'zhipu/glm-4.7', available: true },
   { id: 'old/pooled-1', available: false },
 ];
+const roleView = ({ role = 'executor', label = '执行者', scope = '受控任务的执行成员',
+  entries = ENTRIES, snapshot = [], configured = false, roleScoped = true, statusNote = null } = {}) =>
+  ({ role, label, scope, entries, snapshot, configured, roleScoped, statusNote });
 
 // 1. Key decoding: legacy + kitty CSI-u for the bound keys; unknowns never
 // leak into the query.
@@ -32,11 +38,16 @@ assert.equal(decodePickerKey('\x1b[A'), 'up');
 assert.equal(decodePickerKey('\x1bOB'), 'down');
 assert.equal(decodePickerKey('\r'), 'enter');
 assert.equal(decodePickerKey(' '), 'space');
+assert.equal(decodePickerKey('\t'), 'roleNext', 'tab switches the edited role');
+assert.equal(decodePickerKey('\x1b[Z'), 'rolePrev', 'shift+tab switches back');
+assert.equal(decodePickerKey('\x1b[C'), 'roleNext');
+assert.equal(decodePickerKey('\x1b[D'), 'rolePrev');
 assert.equal(decodePickerKey('\x7f'), 'backspace');
 assert.equal(decodePickerKey('\x1b'), 'escape');
 assert.equal(decodePickerKey('\x03'), 'escape', 'ctrl+c cancels like Esc');
 assert.equal(decodePickerKey('\x1b[5~'), 'pageUp');
 assert.equal(decodePickerKey('\x1b[13u'), 'enter', 'kitty enter');
+assert.equal(decodePickerKey('\x1b[9u'), 'roleNext', 'kitty tab');
 assert.equal(decodePickerKey('\x1b[127u'), 'backspace', 'kitty backspace');
 assert.equal(decodePickerKey('g'), 'text:g');
 assert.equal(decodePickerKey('Ω'), null, 'non-ascii input is ignored');
@@ -49,11 +60,13 @@ assert.equal(decodePickerKey(''), null);
   const commits = [];
   let outcome = null;
   const picker = createModelPicker({
-    entries: ENTRIES, snapshot: ['old/pooled-1'],
+    roles: [roleView({ snapshot: ['old/pooled-1'] })], role: 'executor',
     commit: async delta => { commits.push(delta); return { ok: true, models: ['zhipu/glm-5.2'] }; },
     done: result => { outcome = result; },
   });
   const rows = () => picker.render(100).join('\n');
+  assert.match(rows(), /编辑角色 执行者（executor）/, 'the edited role is named');
+  assert.match(rows(), /执行者池未单独配置：当前继承旧共享候选 1 个；另一未配置角色也继承旧列表/, 'an unconfigured role reports the inherited candidates, not an empty pool');
   assert.match(rows(), /已选 1 \/ 当前可选 2/, 'snapshot membership is the opening checkbox state');
   assert.match(rows(), /> \[ \] zhipu\/glm-5\.2/, 'cursor starts on the first selectable row');
   assert.match(rows(), /\[x\] old\/pooled-1\s+· 当前不可选，仅可移出/, 'a pooled-but-unselectable entry is listed as kept');
@@ -73,16 +86,17 @@ assert.equal(decodePickerKey(''), null);
   assert.match(rows(), /\[ \] old\/pooled-1/, 'an unavailable entry stays unchecked after the refusal');
   assert.match(rows(), /提示：old\/pooled-1 当前不可选，只能移出，不能新增/, 'adding an unavailable entry is refused with a reason');
   picker.handleInput('\r');
-  await new Promise(resolve => setImmediate(resolve));
-  assert.deepEqual(commits, [{ add: ['zhipu/glm-5.2'], remove: ['old/pooled-1'], base: ['old/pooled-1'] }],
-    'one Enter submits the whole net delta against the opening snapshot');
-  assert.equal(outcome.status, 'committed');
+  await tick();
+  assert.deepEqual(commits, [{ role: 'executor', add: ['zhipu/glm-5.2'], remove: ['old/pooled-1'], base: ['old/pooled-1'] }],
+    'one Enter submits ONE role-scoped net delta against the opening snapshot');
+  assert.deepEqual(outcome, { status: 'committed', role: 'executor', label: '执行者', models: ['zhipu/glm-5.2'] });
 }
 
 {
   const picker = createModelPicker({
-    entries: [{ id: 'kimi-code/k3-256k', available: true, evidenceStatus: 'absent', overviewStatus: 'fresh' }],
-    snapshot: ['kimi-code/k3-256k'], commit: async () => ({ ok: true }), done: () => {},
+    roles: [roleView({ entries: [{ id: 'kimi-code/k3-256k', available: true, evidenceStatus: 'absent', overviewStatus: 'fresh' }],
+      snapshot: ['kimi-code/k3-256k'] })],
+    role: 'executor', commit: async () => ({ ok: true }), done: () => {},
   });
   assert.match(picker.render(120).join('\n'), /kimi-code\/k3-256k.*证据 absent.*概述 fresh/,
     'a missing exact route fact and a fresh weak model overview remain visibly distinct');
@@ -93,7 +107,7 @@ assert.equal(decodePickerKey(''), null);
   const commits = [];
   let outcome = null;
   const picker = createModelPicker({
-    entries: ENTRIES, snapshot: ['old/pooled-1'],
+    roles: [roleView({ snapshot: ['old/pooled-1'] })], role: 'executor',
     commit: async delta => { commits.push(delta); return { ok: true }; },
     done: result => { outcome = result; },
   });
@@ -104,12 +118,12 @@ assert.equal(decodePickerKey(''), null);
 
   let noopOutcome = null;
   const noopPicker = createModelPicker({
-    entries: ENTRIES, snapshot: ['old/pooled-1'],
+    roles: [roleView({ snapshot: ['old/pooled-1'] })], role: 'executor',
     commit: async delta => { commits.push(delta); return { ok: true }; },
     done: result => { noopOutcome = result; },
   });
   noopPicker.handleInput('\r');
-  await new Promise(resolve => setImmediate(resolve));
+  await tick();
   assert.equal(noopOutcome.status, 'noop', 'no net change closes without writing');
   assert.equal(commits.length, 0);
   assert.deepEqual(pickerNetDelta(ENTRIES, new Set(['old/pooled-1']), new Set(['old/pooled-1'])),
@@ -122,7 +136,7 @@ assert.equal(decodePickerKey(''), null);
   const commits = [];
   let outcome = null;
   const picker = createModelPicker({
-    entries: ENTRIES, snapshot: ['old/pooled-1'],
+    roles: [roleView({ snapshot: ['old/pooled-1'] })], role: 'executor',
     commit: async delta => {
       commits.push(delta);
       if (commits.length === 1)
@@ -137,12 +151,12 @@ assert.equal(decodePickerKey(''), null);
   picker.handleInput('\x1b[B');
   picker.handleInput(' ');           // uncheck old/pooled-1 (a removal the refresh cannot satisfy)
   picker.handleInput('\r');
-  await new Promise(resolve => setImmediate(resolve));
+  await tick();
   assert.equal(outcome, null, 'a refused commit keeps the picker open');
   assert.match(picker.render(100).join('\n'), /保存失败：提交被拒绝：changed since the snapshot/, 'the refusal reason stays on screen');
   assert.match(picker.render(100).join('\n'), /\[x\] zhipu\/glm-5\.2/, 'the user\'s selection survives the refresh');
   picker.handleInput('\r');
-  await new Promise(resolve => setImmediate(resolve));
+  await tick();
   assert.equal(commits.length, 2, 'retry is possible without re-picking');
   assert.deepEqual(commits[1].base, ['old/pooled-1', 'zhipu/glm-5.2'], 'the retry is computed against the refreshed snapshot');
   assert.deepEqual(commits[1].remove, ['old/pooled-1'], 'the still-unsatisfied removal is the retry delta');
@@ -153,7 +167,8 @@ assert.equal(decodePickerKey(''), null);
 {
   const many = Array.from({ length: 30 }, (_, index) => ({ id: `p/m-${String(index).padStart(2, '0')}`, available: true }));
   const picker = createModelPicker({
-    entries: many, snapshot: [], commit: async () => ({ ok: true }), done: () => {}, listRows: 5,
+    roles: [roleView({ entries: many, snapshot: [] })], role: 'executor',
+    commit: async () => ({ ok: true }), done: () => {}, listRows: 5,
   });
   assert.match(picker.render(60).join('\n'), /还有 25 项（继续 ↓）/, 'the window is bounded');
   for (let n = 0; n < 6; n++) picker.handleInput('\x1b[B');
@@ -162,6 +177,81 @@ assert.equal(decodePickerKey(''), null);
   assert.match(picker.render(60).join('\n'), /> \[ \] p\/m-02/, 'pageUp moves up by a page');
   picker.handleInput('\x1b[5~');
   assert.match(picker.render(60).join('\n'), /> \[ \] p\/m-00/, 'a second pageUp reaches the top');
+}
+
+// 6. The first screen chooses the role; each row states that role's own pool
+// state, so an unconfigured role and an explicitly empty one never look alike.
+{
+  let outcome = null;
+  const picker = createModelPicker({
+    roles: [
+      roleView({ entries: [{ id: 'zhipu/glm-5.2', available: true }], snapshot: ['zhipu/glm-5.2'] }),
+      roleView({ role: 'checker', label: '检查者', scope: '独立检查者的首选型号',
+        entries: [{ id: 'zhipu/glm-5.2', available: true }], snapshot: [], configured: true }),
+    ],
+    commit: async () => ({ ok: true }), done: result => { outcome = result; },
+  });
+  const rows = () => picker.render(120).join('\n');
+  assert.match(rows(), /选择本次要编辑的角色/);
+  assert.match(rows(), /> 执行者（executor）.*未单独配置 · 继承旧共享候选 1 个/, 'an unconfigured role with inherited candidates says so');
+  assert.match(rows(), /检查者（checker）.*已配置 0 个候选（显式空池：不借用另一角色，也不回退 OMP 默认）/,
+    'an explicitly empty configured role is described as an empty pool');
+  picker.handleInput('\x1b[B');
+  picker.handleInput('\r');
+  assert.match(rows(), /编辑角色 检查者（checker）/, 'Enter opens the chosen role');
+  assert.match(rows(), /检查者池已配置为空：不借用另一角色候选，也不回退 OMP 默认。/);
+  assert.match(rows(), /\[ \] zhipu\/glm-5\.2/, 'the empty checker pool starts unchecked even though the executor pool has that model');
+  picker.handleInput('\r');
+  await tick();
+  assert.equal(outcome.status, 'noop', 'an untouched empty checker pool saves nothing');
+}
+
+// 7. Pending edits block the role switch instead of being carried across, and
+// one Enter commits exactly one role-scoped delta.
+{
+  const commits = [];
+  let outcome = null;
+  const picker = createModelPicker({
+    roles: [
+      roleView({ entries: [{ id: 'zhipu/glm-5.2', available: true }], snapshot: [], configured: true }),
+      roleView({ role: 'checker', label: '检查者', entries: [{ id: 'zhipu/glm-4.7', available: true }], snapshot: [], configured: true }),
+    ],
+    role: 'executor',
+    commit: async delta => { commits.push(delta); return { ok: true, models: delta.add }; },
+    done: result => { outcome = result; },
+  });
+  const rows = () => picker.render(120).join('\n');
+  assert.match(rows(), /执行者池已配置为空：不借用另一角色候选，也不回退 OMP 默认。/);
+  assert.match(rows(), /本次只保存 执行者池；检查者池保持已配置（不改动）。/, 'the untouched pool is named as unaffected');
+  picker.handleInput(' ');
+  picker.handleInput('\t');
+  assert.match(rows(), /提示：先保存或 Esc 取消 执行者池的改动，再切换角色/, 'an unsaved edit cannot be carried into the other pool');
+  assert.match(rows(), /编辑角色 执行者（executor）/, 'the picker stays on the edited role');
+  picker.handleInput('\r');
+  await tick();
+  assert.deepEqual(commits, [{ role: 'executor', add: ['zhipu/glm-5.2'], remove: [], base: [] }], 'one Enter = one role-scoped delta');
+  assert.deepEqual(outcome, { status: 'committed', role: 'executor', label: '执行者', models: ['zhipu/glm-5.2'] });
+}
+
+// 8. --role skips the chooser and edits only that pool.
+{
+  const commits = [];
+  let outcome = null;
+  const picker = createModelPicker({
+    roles: [
+      roleView({ snapshot: [] }),
+      roleView({ role: 'checker', label: '检查者', entries: [{ id: 'kimi-code/k3-256k', available: true }], snapshot: [] }),
+    ],
+    role: 'checker',
+    commit: async delta => { commits.push(delta); return { ok: true, models: delta.add }; },
+    done: result => { outcome = result; },
+  });
+  assert.match(picker.render(120).join('\n'), /编辑角色 检查者（checker）/, 'the named role opens directly');
+  picker.handleInput(' ');
+  picker.handleInput('\r');
+  await tick();
+  assert.deepEqual(commits, [{ role: 'checker', add: ['kimi-code/k3-256k'], remove: [], base: [] }]);
+  assert.equal(outcome.role, 'checker');
 }
 console.log('picker component flows: PASS');
 
@@ -227,67 +317,96 @@ const ctx = {
   },
 };
 const drive = keys => { for (const key of keys) activePicker.handleInput(key); };
-const open = async (keys, extra = {}) => {
+const open = async (keys, extra = {}, args = '') => {
   notifications.length = 0;
-  const pending = command.handler('', { ...ctx, ...extra });
+  const pending = command.handler(args, { ...ctx, ...extra });
   if (keys === null) return pending; // no ui.custom driven path
   drive(keys);
   return pending;
 };
+const agentFiles = async () => (await fs.readdir(path.join(agentRoot, 'agents'))).sort();
 
 installOmpExtension(pi, sdk);
 
-// 6. One Enter commits the whole selection through the real pool CLI and the
-// session agent mapping is re-synced afterwards.
+// 9. The role chooser then ONE Enter commits the whole executor selection
+// through the real pool CLI; the untouched checker role keeps inheriting the
+// legacy shared list, and the session agent mapping is re-synced.
 runCli('add', 'old/pooled-1');
-await open([' ', '\x1b[B', '\x1b[B', ' ', '\r']);
-assert.deepEqual(runCli('list').models, ['zhipu/glm-5.2'], 'the committed pool replaced the snapshot state atomically');
-assert.match(notifications.at(-1).text, /已保存候选池：zhipu\/glm-5\.2/, 'the final pool is shown');
+await open(['\r', ' ', '\x1b[B', '\x1b[B', ' ', '\r']);
+assert.deepEqual(rolePool('executor').models, ['zhipu/glm-5.2'], 'the executor delta landed atomically');
+assert.deepEqual(rolePool('checker').models, ['old/pooled-1'], 'the checker role still inherits the legacy list');
+assert.equal(rolePool('executor').configured, true);
+assert.equal(rolePool('checker').configured, false);
+assert.match(notifications.at(-1).text, /已保存候选池：执行者（executor）：zhipu\/glm-5\.2/, 'the final pool names the role');
 assert.match(notifications.at(-1).text, /orbit-m-zhipu-glm-5-2-[0-9a-f]{8}/, 'the synced session agent is named');
 assert.equal(notifications.at(-1).level, 'info');
+assert.ok((await agentFiles()).some(name => name.includes('glm-5-2')), 'an executor save materializes its member agent');
 
-// 7. Esc leaves the persisted pool untouched.
-runCli('remove', 'zhipu/glm-5.2');
-runCli('add', 'old/pooled-1');
-await open([' ', '\x1b']);
-assert.deepEqual(runCli('list').models, ['old/pooled-1'], 'cancel persists nothing');
+// 10. Esc leaves the persisted pool untouched.
+await open(['\r', '\x1b[B', ' ', '\x1b']);
+assert.deepEqual(rolePool('executor').models, ['zhipu/glm-5.2'], 'cancel persists nothing');
 assert.match(notifications.at(-1).text, /已取消/);
 
-// 8. Same-ID conflict from another session since the snapshot: the commit is
+// 11. Same-ID conflict from another session since the snapshot: the commit is
 // refused, the picker stays open with the reason, and the other session's
 // pool state is not overwritten.
-const pendingConflict = open([' ']);
-runCli('add', 'zhipu/glm-5.2'); // another Orbit session added the same id
+const pendingConflict = open(['\r', '\x1b[B', ' ']); // executor: check glm-4.7
+runCli('add', 'zhipu/glm-4.7', '--role', 'executor'); // another Orbit session added the same id
 drive(['\r']);
-await new Promise(resolve => setImmediate(resolve));
+await tick();
 assert.match(activePicker.render(120).join('\n'), /保存失败：提交被拒绝：.*changed since the snapshot/, 'the conflict reason is on screen');
 drive(['\x1b']);
 await pendingConflict;
-assert.deepEqual(runCli('list').models, ['old/pooled-1', 'zhipu/glm-5.2'],
-  'the other session\'s add survives and the local removal never landed');
+assert.deepEqual(rolePool('executor').models, ['zhipu/glm-5.2', 'zhipu/glm-4.7'],
+  'the other session\'s add survives and the local duplicate never landed');
 
-// 9. A would-be add that stopped being selectable is refused with a refreshed
+// 12. A would-be add that stopped being selectable is refused with a refreshed
 // list; nothing is written.
-runCli('remove', 'old/pooled-1');
-runCli('remove', 'zhipu/glm-5.2');
-const pendingStale = open(['\x1b[B', ' ']); // select glm-4.7 while it is still selectable
+runCli('remove', 'zhipu/glm-4.7', '--role', 'executor');
+const pendingStale = open(['\r', '\x1b[B', ' ']); // select glm-4.7 while it is still selectable
 models.pop(); // glm-4.7 leaves the session catalog mid-flight
 drive(['\r']);
-await new Promise(resolve => setImmediate(resolve));
+await tick();
 assert.match(activePicker.render(120).join('\n'), /保存失败：待新增模型已不在当前会话可选列表：zhipu\/glm-4\.7/, 'the stale add names the id');
-assert.deepEqual(runCli('list').models, [], 'a stale add writes nothing');
+assert.deepEqual(rolePool('executor').models, ['zhipu/glm-5.2'], 'a stale add writes nothing');
 drive(['\x1b']);
 await pendingStale;
 models.push({ provider: 'zhipu', id: 'glm-4.7' });
 
-// 10. Headless: without ctx.ui.custom the bare command still prints the text
-// list and keeps the per-item commands.
+// 13. A checker-pool save names its role, never re-syncs the executor member
+// agents, and never materializes an agent for a checker-only candidate.
+runCli('remove', 'zhipu/glm-5.2', '--role', 'executor'); // no CLI-side sync: the generated agent file stays
+await open(['\x1b[B', '\r', '\x1b[B', ' ', '\r']);      // chooser → checker, check glm-4.7
+assert.deepEqual(rolePool('checker').models, ['old/pooled-1', 'zhipu/glm-4.7']);
+assert.deepEqual(rolePool('executor').models, [], 'the executor pool was not touched');
+assert.match(notifications.at(-1).text, /已保存候选池：检查者（checker）：old\/pooled-1, zhipu\/glm-4\.7/);
+assert.match(notifications.at(-1).text, /执行者成员 Agent 未改动/);
+assert.ok((await agentFiles()).some(name => name.includes('glm-5-2')),
+  'a checker save does not re-sync (a resync would have dropped the now-unpooled executor agent)');
+assert.equal((await agentFiles()).filter(name => name.includes('glm-4-7')).length, 0,
+  'a checker-only candidate never becomes a member agent');
+
+// 14. Headless: without ctx.ui.custom the command prints both role sections
+// with their real state, and the per-item commands accept an explicit --role.
 const headless = await command.handler('', { ...ctx, ui: { notify: ctx.ui.notify } });
-assert.match(headless === undefined ? notifications.at(-1).text : '', /addable/, 'no-UI fallback prints the text list');
-assert.match(notifications.at(-1).text, /\/orbit-models add/);
+const text = headless === undefined ? notifications.at(-1).text : '';
+assert.match(text, /\[addable\]/, 'no-UI fallback prints the text list');
+assert.match(text, /\/orbit-models add <provider\/id> \[--role executor\|checker\]/);
+assert.match(text, /执行者（executor）已配置：0 个候选（显式空池：不借用另一角色候选，也不回退 OMP 默认）/);
+assert.match(text, /检查者（checker）已配置：2 个候选/);
+
+await command.handler('add zhipu/glm-5.2 --role checker', { ...ctx, ui: { notify: ctx.ui.notify } });
+assert.match(notifications.at(-1).text, /Added zhipu\/glm-5\.2 → 检查者池（checker）/, 'the role is named');
+assert.match(notifications.at(-1).text, /执行者成员 Agent 未改动/);
+assert.deepEqual(rolePool('checker').models, ['old/pooled-1', 'zhipu/glm-4.7', 'zhipu/glm-5.2']);
+assert.deepEqual(rolePool('executor').models, [], 'a role-scoped add never writes the other pool');
+
+await command.handler('add zhipu/glm-4.7', { ...ctx, ui: { notify: ctx.ui.notify } });
+assert.match(notifications.at(-1).text, /Added zhipu\/glm-4\.7 → 旧共享列表（无角色）/, 'a bare add stays on the legacy shared list');
+assert.match(notifications.at(-1).text, /Live session agents:/, 'the legacy shared scope still re-syncs member agents');
 
 // --- Native ask interruption observation ----------------------------------
-// 11. A real start binds the root session; a synthetic interrupt_skipped
+// 15. A real start binds the root session; a synthetic interrupt_skipped
 // ask end on that session lands in hub_events exactly once, and a later
 // non-error ask end from the same agent resolves it.
 const definition = {};

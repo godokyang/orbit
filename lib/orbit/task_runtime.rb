@@ -981,9 +981,6 @@ module Orbit
           next
         end
         begin
-          # The recorder's ledger_receipt already carries the final phase: the
-          # Root-declared phase for a root-model switch's next call, or
-          # role_execution otherwise. Trust it; fall back only if absent.
           resource_call_ledger.record_check(receipt, phase: receipt["phase"] || "#{meta['role']}_execution", role: meta["role"])
         rescue ResourceCallLedger::Error => error
           gaps << "#{id}: #{error.message}"
@@ -3775,10 +3772,8 @@ module Orbit
       # the wake send so the host can verify durable provenance at send time
       # (the outer save happens after this method returns — too late).
       save
-      # The integration_check tag marks this single program-purpose send; the
-      # host re-verifies every durable fact itself and the tag alone grants no
-      # selection authority. The reminder/message_id is recorded only AFTER the
-      # real delivery ACK below — never pre-written.
+      # The reminder/message_id is recorded only AFTER the real delivery ACK
+      # below — never pre-written.
       # Every valid manual-ready reminder carries the same integration
       # responsibility, decoupled from whether a model selection happens: the
       # Root must first re-verify the delivery against the ORIGINAL
@@ -3788,8 +3783,7 @@ module Orbit
       sent = @connection.send_message("Orbit 过程检查未发现当前交付缺口，但这不是手动终检，也不是任务完成。" \
                                       "请先主动按本任务的原始要求与规格核对当前交付，对照既有验证，对缺证或真实风险做必要可执行验证并修复；" \
                                       "完成后再调用 Orbit action=check, task=<当前任务目录>，结束本轮等待独立终检；" \
-                                      "收到有效通知后再申请停止。无需用户重复催办。",
-                                      integration_check: scope["number"])
+                                      "收到有效通知后再申请停止。无需用户重复催办。")
       @state["sent_message_ids"] << sent.fetch("id")
       @state["manual_check_reminders"][key] = { "check" => scope["number"], "message_id" => sent.fetch("id"),
                                                 "at" => Time.at(now).utc.iso8601 }
