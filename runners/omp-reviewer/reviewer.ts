@@ -25,7 +25,7 @@ import { toolWireSchema, validateToolArguments } from "@oh-my-pi/pi-ai";
 import { providerErrorFact } from "./provider-error.ts";
 import { parseProbeModels, probeModelAvailability, type CredentialAvailability } from "./model-probe";
 import { getBaseConfigRoot, getModelDbPath, getProfileRootDir, resolveProfileEnv, postmortem } from "@oh-my-pi/pi-utils";
-import { createConfinedTools, type ReviewerReadRoot, type SnapshotImageRead } from "./confined-tools.ts";
+import { CONFINED_READ_TOOL_LABEL, createConfinedTools, type ReviewerReadRoot, type SnapshotImageRead } from "./confined-tools.ts";
 import {
 	createCallBoundaryBinder,
 	matchAccountIdentity,
@@ -497,7 +497,7 @@ try {
 			const forbidden = FORBIDDEN_TOOLS.filter(name => session.getToolByName(name) !== undefined);
 			evidence.active_tools = active;
 			evidence.forbidden_tools_present = forbidden;
-			evidence.read_tool_is_confined = session.getToolByName("read")?.label === "Read (snapshot)";
+			evidence.read_tool_is_confined = session.getToolByName("read")?.label === CONFINED_READ_TOOL_LABEL;
 			evidence.private_registry = agentRegistry.list().map(ref => ref.id);
 			evidence.global_registry = AgentRegistry.global().list().map(ref => ref.id);
 			const toolProblems: string[] = [];

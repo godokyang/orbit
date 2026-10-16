@@ -13,6 +13,7 @@ const MAX_FILE_BYTES = 1_000_000;
 // tool result, so an unbounded screenshot would dominate the reviewer context.
 const MAX_IMAGE_BYTES = 4_000_000;
 const MAX_RESULTS = 300;
+export const CONFINED_READ_TOOL_LABEL = "Read (authorized sources)";
 
 // OMP accepts JSON Schema parameters, not live Zod objects. Keep the same
 // definitions for wire declarations and execution-time validation. Zod's
@@ -137,7 +138,7 @@ export function createConfinedTools(snapshotRoot: string, options: {
 
 	const read = {
 		name: "read",
-		label: "Read (authorized sources)",
+		label: CONFINED_READ_TOOL_LABEL,
 		description:
 			"Read a text file or list a directory inside the fixed review snapshot or another supplied read-only source. Results identify the absolute path and source label/version. URLs, internal URIs, unregistered paths and writes are unavailable.",
 		parameters: z.toJSONSchema(readParams),

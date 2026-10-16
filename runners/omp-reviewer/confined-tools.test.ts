@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { createConfinedTools } from "./confined-tools";
+import { CONFINED_READ_TOOL_LABEL, createConfinedTools } from "./confined-tools";
 
 test("reviewer tools expose required parameters and reject missing ones while accepting intent", async () => {
 	const snapshot = mkdtempSync(path.join(tmpdir(), "orbit-check-parameters-"));
@@ -16,6 +16,7 @@ test("reviewer tools expose required parameters and reject missing ones while ac
 			{ name: "glob", required: "pattern", args: { pattern: "*.txt" }, fields: ["pattern", "path"], match: /artifact\.txt$/ },
 		];
 		const tools = createConfinedTools(snapshot);
+		assert.equal(tools.find(tool => tool.name === "read")?.label, CONFINED_READ_TOOL_LABEL);
 		for (const entry of cases) {
 			const tool = tools.find(tool => tool.name === entry.name)!;
 			const schema = JSON.parse(JSON.stringify(tool.parameters));
