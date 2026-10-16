@@ -8,6 +8,7 @@ require "uri"
 require_relative "judgment"
 require_relative "model_quality_policy"
 require_relative "type_safe_judgment"
+require_relative "jev_input_compactor"
 
 module Orbit
   # A bounded semantic observation. Jev supplies probabilities; TaskRuntime
@@ -15,9 +16,19 @@ module Orbit
   # calls go through the unified JudgmentRequest/JudgmentResult model
   # (ADR-008 2026-09-26 supplement): the TypeSafe adapter owns transport and
   # response mapping only. Selection questions and their score keys are the
-  # ModelQualityPolicy versions; stuck, off_track and artifact_ready keep
-  # their previous wording. Check and stop gates are not decided here.
+  # ModelQualityPolicy versions; observation asks only stuck and off_track.
+  # Root requests final review; check and stop gates are not decided here.
   class JevAdvisor
+    ROOT_VERIFICATION_FIELDS = %w[
+      kind source tool_call_id tool status is_error async exit_code exit_code_source
+      at at_ms start_observed_at start_observed_at_ms start_observed_at_source
+      execution_cwd artifact_root input_digest artifact_root_at_completion artifact_digest
+      fingerprint_status artifact_matches input_matches targets targets_status control_targets
+      effect content_saved diff_saved output_saved scope coverage
+    ].freeze
+
+    SELECTION_PER_QUESTION_UTF8_UPPER_BOUND_BYTES = 32_768
+    SELECTION_REQUEST_UTF8_UPPER_BOUND_BYTES = 65_536
     ENDPOINT = TypeSafeJudgment::ENDPOINT
     MODEL = TypeSafeJudgment::DEFAULT_MODEL
     QUESTIONS = {
@@ -30,11 +41,6 @@ module Orbit
         "type" => "noul",
         "instructions" => "Is recent work likely outside or contrary to the latest effective user request? Normal investigation, tests and necessary setup can be relevant work.",
         "criteria" => { "true" => "Concrete recent activity appears unrelated or contrary to the request", "false" => "Activity appears relevant or the evidence is insufficient" }
-      },
-      "artifact_ready" => {
-        "type" => "noul",
-        "instructions" => "Would a full independent review of the current artifact now likely provide useful, current feedback? Consider whether the agent is actively changing it and the review would quickly become stale.",
-        "criteria" => { "true" => "A meaningful artifact checkpoint is available now", "false" => "The artifact is still too early or actively changing" }
       },
     }.freeze
 
@@ -70,12 +76,6 @@ module Orbit
     # from status projections, which keep only a compact latest summary.
     attr_reader :last_trace
 
-    AMENDMENT_BUDGET = 8000
-    AMENDMENT_TEXT_LIMIT = 1200
-    BASIS_BUDGET = 4000
-    BASIS_TEXT_LIMIT = 1500
-    BASIS_DOCUMENT_LIMIT = 3
-
     def self.for_project(project_root, env: ENV)
       return nil if File.exist?(File.join(project_root, ".orbit", "jev-disabled"))
 
@@ -107,18 +107,18 @@ module Orbit
     # No-pool second stage. Asks handoff_fit and member_task_fit only. The
     # state is projected first so speed, elapsed time and coarse price are not
     # selection inputs. The advisor does not gather evidence or invent facts.
-    def assess_delegation(state:)
+    def assess_delegation(state:, compaction: nil)
       post_questions(state: ModelQualityPolicy.project_selection_state(state), questions: DELEGATION_QUESTIONS,
-                     question_set_version: QUESTION_SET_VERSIONS.fetch("delegation"))
+                     question_set_version: QUESTION_SET_VERSIONS.fetch("delegation"), compaction: compaction)
     end
 
     # Per-candidate task fit. The returned quality key is the new task-fit
     # probability. There is no time score. Speed and coarse price are removed
     # from the state before the question is sent.
-    def assess_candidates(state:, candidates:)
+    def assess_candidates(state:, candidates:, compaction: nil)
       questions = ModelQualityPolicy.candidate_questions(candidates)
       result = post_questions(state: ModelQualityPolicy.project_selection_state(state), questions: questions,
-                              question_set_version: QUESTION_SET_VERSIONS.fetch("candidates"))
+                              question_set_version: QUESTION_SET_VERSIONS.fetch("candidates"), compaction: compaction)
       scores = candidates.each_index.to_h do |index|
         [index.to_s, { "quality" => result["scores"].fetch("candidate_#{index}_task_fit") }]
       end
@@ -128,13 +128,13 @@ module Orbit
     # Checker task fit only. Exact evidence and a catalog prior both stay in
     # the projected input; neither is added to the probability, and no time
     # score is returned.
-    def assess_checker_quality(state:, candidates:)
+    def assess_checker_quality(state:, candidates:, compaction: nil)
       list = Array(candidates)
       raise Error, "at least one checker candidate is required" if list.empty?
 
       questions = ModelQualityPolicy.checker_questions(list)
       result = post_questions(state: ModelQualityPolicy.project_selection_state(state), questions: questions,
-                              question_set_version: QUESTION_SET_VERSIONS.fetch("checker_quality"))
+                              question_set_version: QUESTION_SET_VERSIONS.fetch("checker_quality"), compaction: compaction)
       scores = list.each_with_index.to_h do |candidate, index|
         [candidate.fetch("model").to_s, { "quality" => result.fetch("scores").fetch("quality_#{index}") }]
       end
@@ -148,7 +148,12 @@ module Orbit
     # re-raises as JevAdvisor::Error on any unavailable result so existing
     # fail-closed callers keep their behavior. Checker question changes use a
     # distinct version while retaining the same validated wire shape.
-    def post_questions(state:, questions:, question_set_version:)
+    def post_questions(state:, questions:, question_set_version:, compaction: nil)
+      return recover_selection(state: state, questions: questions, question_set_version: question_set_version,
+                               compaction: compaction) { |selected_state|
+        post_questions(state: selected_state, questions: questions, question_set_version: question_set_version)
+      } if compaction
+
       @last_trace = nil
       request = JudgmentRequest.new(
         state: state, questions: self.class.model_questions(questions),
@@ -207,6 +212,84 @@ module Orbit
       raise Error, "TypeSafe assessment failed: #{error.class}"
     end
 
+    def recover_selection(state:, questions:, question_set_version:, compaction:)
+      material = compaction.fetch(:material).to_s
+      budget = compaction_output_budget(state: state, questions: questions,
+                                        replace: compaction.fetch(:replace))
+      compactor = JevInputCompactor.new(provider: judgment_provider, runner: JevCompactionRunner.new)
+      attempt_traces = []
+      original_judgment = nil
+      run_attempt = lambda do |text|
+        selected_state = if text == material
+                           state
+                         else
+                           ModelQualityPolicy.project_selection_state(compaction.fetch(:replace).call(text))
+                         end
+        begin
+          judgment = post_questions(state: selected_state, questions: questions, question_set_version: question_set_version)
+          original_judgment = judgment if text == material
+          judgment
+        rescue Error => error
+          original_judgment = error if text == material
+          error
+        ensure
+          attempt_traces << JSON.parse(JSON.generate(@last_trace)) if @last_trace
+        end
+      end
+      recovery = begin
+        compactor.recover(
+        purpose: compaction.fetch(:purpose), material: material, must_keep: compaction.fetch(:must_keep),
+        output_budget_bytes: budget, candidates: compaction.fetch(:candidates),
+        language: compaction[:language], content_type: compaction[:content_type],
+        overflow: lambda { |_outcome|
+          TypeSafeJudgment.max_tokens_exceeded?(@last_trace&.dig("provider_response"))
+        }
+        ) { |text| run_attempt.call(text) }
+      rescue JevInputCompactor::Error => error
+        # recover makes the original request before validating a compaction
+        # budget. A zero remainder means that explicit overflow cannot fit a retry.
+        raise unless budget.zero? && original_judgment
+
+        { "status" => "unavailable", "judgment" => original_judgment,
+          "first_judgment" => nil, "reason" => error.message,
+          "compaction" => { "status" => "unavailable", "reason" => "no selection capacity remains" } }
+      end
+      result = recovery["judgment"]
+      @last_trace["compaction"] = recovery["compaction"] if @last_trace.is_a?(Hash) && recovery["compaction"]
+      if @last_trace.is_a?(Hash) && recovery["compaction"] && attempt_traces.first
+        @last_trace["first_overflow_trace"] = attempt_traces.first
+      end
+      if recovery["status"] == "unavailable"
+        first = recovery["first_judgment"] || recovery["judgment"]
+        reason = recovery["reason"] || recovery.dig("compaction", "reason") || "JEV input compaction is unavailable"
+        raise Error.new("JEV input compaction is unavailable: #{reason}", receipt: first.receipt) if first.is_a?(Error)
+      end
+      raise result if result.is_a?(Error)
+
+      result
+    end
+
+    def compaction_output_budget(state:, questions:, replace:)
+      empty_state = ModelQualityPolicy.project_selection_state(replace.call(""))
+      wire = self.class.model_questions(questions)
+      wire = wire.transform_values do |question|
+        { "type" => "noul", "instructions" => question.fetch("instruction"),
+          "criteria" => { "true" => question.fetch("true_criterion"),
+                          "false" => question.fetch("false_criterion") } }
+      end
+      single = questions.keys.map do |id|
+        JSON.generate("model" => @model, "state" => empty_state,
+                      "questions" => { id => wire.fetch(id) }).bytesize
+      end.max || 0
+      total = JSON.generate("model" => @model, "state" => empty_state, "questions" => wire).bytesize
+      remaining = [[SELECTION_PER_QUESTION_UTF8_UPPER_BOUND_BYTES - single,
+                    SELECTION_REQUEST_UTF8_UPPER_BOUND_BYTES - total].min, 0].max
+      # JSON can encode one control byte as a six-byte escape. The output
+      # budget therefore reserves that worst-case expansion for the unknown
+      # compactor result. This bound only sizes a retry after explicit overflow.
+      remaining / 6
+    end
+
     # The frozen question constants use the TypeSafe wire shape
     # (type/instructions/criteria); the unified model carries the same wording
     # as instruction/true_criterion/false_criterion and the adapter maps it
@@ -219,37 +302,159 @@ module Orbit
       end
     end
 
-    def self.observation(inputs:, host:, members:, project_root:, artifact_digest:, elapsed_seconds:, member_options: nil, member_blocks: nil)
-      amendments, omitted = bounded_amendments(inputs.fetch("amendments", []))
-      basis, basis_omitted = bounded_basis(inputs.fetch("basis", []))
+    def self.observation(inputs:, host:, members:, project_root:, artifact_digest:, elapsed_seconds:,
+                         member_options: nil, member_blocks: nil, work_units: [], root_verifications: [],
+                         recent_check: nil, history_cursor: nil)
+      amendments = inputs.fetch("amendments", []).map { |entry| entry.fetch("text").to_s }
+      user_messages = Array(inputs["jev_user_messages"])
+      units = Array(work_units).select { |unit| unit.is_a?(Hash) }
       {
-        "instruction" => limit(inputs.fetch("instruction"), 4000),
-        "basis" => basis,
-        "basis_omitted" => basis_omitted,
+        "input_version" => ModelQualityPolicy::INPUT_VERSION,
+        "instruction" => inputs.fetch("instruction").to_s,
+        "basis_paths" => Array(inputs["basis"]).filter_map { |item| item["path"] if item.is_a?(Hash) },
         "amendments" => amendments,
-        "amendments_omitted" => omitted,
         # Newly observed native user text is sent verbatim, with its task
         # relation made explicit. Seeing a message does not amend the task.
-        "new_user_messages" => Array(inputs["jev_user_messages"]).map do |message|
+        "new_user_messages" => user_messages.map do |message|
           message.slice("id", "text", "task_relation", "observed_at")
         end,
         "member_options" => member_options,
         "member_blocks" => member_blocks_projection(member_blocks),
-        "host" => host.slice("status", "turn_id", "last_turn_id", "last_turn_status", "active_tools"),
-        "recent_observations" => observation_tail(host["observations"]),
-        "members" => members.last(5).map do |member|
-          { "status" => member["status"], "error" => limit(member["error"], 300),
-            "result_excerpt" => tail_text(JSON.generate(member["result"]), 1000) }
+        "host" => host.slice("status", "turn_id", "last_turn_id", "last_turn_status", "active_tools", "async_jobs"),
+        "recent_observations" => recent_execution(host["observations"], history_cursor),
+        "members" => members.map do |member|
+          member.slice("thread_id", "agent_id", "id", "agent", "requested_name", "kind", "adapter", "parent_id",
+                       "model", "status", "work_unit_id", "tool_call_id", "error", "started_at", "finished_at",
+                       "result", "result_source", "result_delivery", "settled_at", "registry_status", "activity")
         end,
+        "work_units" => units.map do |unit|
+          unit.slice("id", "artifact_root", "status", "objective", "requirements", "scope", "acceptance", "dependencies",
+                     "member_id", "dispatches", "result", "verification", "execution")
+        end,
+        "root_verifications" => root_verifications_projection(root_verifications, host["observations"]),
+        "recent_check" => recent_check,
         "artifact_digest" => artifact_digest,
-        "changes" => git_changes(project_root),
+        "changes" => scoped_changes(project_root, units, artifact_root: host["artifact_root"]),
         "elapsed_seconds" => elapsed_seconds.to_i
       }
     end
 
-    def self.limit(value, size)
-      text = value.to_s
-      text.length > size ? "#{text[0, size]}…[truncated]" : text
+    # JEV needs to know what Root verified and whether those checks still match
+    # this input/artifact version. The native receipt remains intact for the
+    # checker; this projection deliberately excludes command/script and output
+    # bodies from the observation judgment.
+    def self.root_verifications_projection(receipts, observations)
+      intents = Array(observations).flat_map do |entry|
+        next [] unless entry.is_a?(Hash)
+
+        Array(entry["tool_calls"]).filter_map do |call|
+          next unless call.is_a?(Hash)
+
+          id = call["id"].to_s
+          next if id.empty?
+
+          [id, call["declared_intent"].to_s.strip.empty? ? "unknown" : call["declared_intent"]]
+        end
+      end.to_h
+
+      Array(receipts).filter_map do |receipt|
+        next unless receipt.is_a?(Hash) && receipt["source"] == "omp_native_tool_result"
+
+        projected = receipt.slice(*ROOT_VERIFICATION_FIELDS)
+        call_id = receipt["tool_call_id"].to_s
+        projected["intent"] = call_id.empty? ? "unknown" : intents.fetch(call_id, "unknown")
+        projected
+      end
+    end
+
+    # Process supervision needs the actual native intent and tool result state,
+    # not Root prose, shell/eval bodies, or tool output. Keep complete records
+    # supplied by OMP and preserve its omission markers.
+    def self.recent_execution(observations, cursor = nil)
+      source = Array(observations)
+      results = source.select { |entry|
+        entry.is_a?(Hash) && %w[command prior_command].include?(entry["kind"]) &&
+          entry["tool_call_id"].is_a?(String) && !entry["tool_call_id"].empty?
+      }.to_h { |entry| [entry["tool_call_id"], entry] }
+      operations = source.flat_map do |entry|
+        next [] unless entry.is_a?(Hash)
+
+        Array(entry["tool_calls"]).filter_map do |call|
+          next unless call.is_a?(Hash)
+
+          projection = call.slice("id", "name", "declared_intent", "target", "started_at", "finished_at",
+                                  "duration_ms", "status")
+          result = results[projection["id"]]
+          projection["status"] = result["status"] if result && result["status"]
+          { "kind" => "tool_call", "turn_id" => entry["turn_id"], "message_id" => entry["message_id"],
+            "tool_call" => projection }
+        end
+      end
+      known_ids = operations.filter_map { |entry| entry.dig("tool_call", "id") }
+      gaps = source.select do |entry|
+        entry.is_a?(Hash) && %w[omitted_older_history history_gap].include?(entry["kind"])
+      end
+      if cursor.is_a?(Hash)
+        cursor_id = cursor["tool_call_id"]
+        cursor_index = operations.index { |entry| entry.dig("tool_call", "id") == cursor_id } if cursor_id
+        if cursor_index
+          operations = operations.drop(cursor_index + 1)
+          gaps.reject! { |entry| entry["kind"] == "omitted_older_history" }
+        else
+          gaps << { "kind" => "history_gap", "reason" => cursor_id ?
+            "the last checked tool call is outside the available OMP operation window" :
+            "the saved checker cursor has no native tool call id" }
+        end
+      end
+      unmatched_results = results.keys.reject { |id| known_ids.include?(id) }
+      if unmatched_results.any?
+        gaps << { "kind" => "operation_gap", "count" => unmatched_results.length,
+                  "reason" => "tool results have no matching native tool calls in available history" }
+      end
+      omitted = [operations.length - 20, 0].max
+      retained = operations.last(20)
+      retained.unshift({ "kind" => "omitted_older_operations", "count" => omitted,
+                         "count_basis" => "native tool call ids" }) if omitted.positive?
+      retained.unshift(*gaps)
+      retained
+    end
+
+    def self.scoped_changes(root, units, artifact_root: nil)
+      scopes = Hash.new { |hash, key| hash[key] = { "paths" => [], "labels" => [] } }
+      Array(units).each do |unit|
+        next unless unit.is_a?(Hash)
+
+        workspace = unit["artifact_root"].to_s
+        label = unit.dig("scope", "label") || unit.dig("scope", "name") || unit["id"] || "work_unit"
+        if workspace.empty?
+          scopes[[nil, "work_unit_allowed_paths"]]["labels"] << label
+          next
+        end
+        group = scopes[[workspace, "work_unit_allowed_paths"]]
+        group["labels"] << label
+        group["paths"].concat(Array(unit.dig("scope", "allowed_paths")).map(&:to_s).reject(&:empty?))
+      end
+      root_workspace = artifact_root.to_s.empty? ? root.to_s : artifact_root.to_s
+      root_workspace = nil if root_workspace.empty?
+      scopes[[root_workspace, "root_bound_artifact_root"]]["labels"] << "root_execution"
+
+      { "groups" => scopes.map do |(workspace, scope), details|
+          paths = details["paths"].uniq
+          entry = { "scope" => workspace ? scope : "work_unit_root_unknown",
+                    "scope_labels" => details["labels"].uniq }
+          entry["artifact_root"] = workspace if workspace
+          entry["paths"] = paths if scope == "work_unit_allowed_paths"
+          if workspace && (scope == "root_bound_artifact_root" || paths.any?)
+            args = scope == "root_bound_artifact_root" ? [] : paths
+            entry["status"] = git_read(workspace, ["status", "--short", "--untracked-files=normal", "--", *args], 4000)
+            entry["diff_stat"] = git_read(workspace, ["diff", "--no-ext-diff", "--no-textconv", "--stat", "HEAD", "--", *args], 4000)
+          else
+            entry["status"] = "unknown"
+            entry["diff_stat"] = "unknown"
+            entry["reason"] = workspace ? "no_allowed_paths_declared" : "artifact_root_unavailable"
+          end
+          entry
+        end }
     end
 
     def self.member_blocks_projection(blocks)
@@ -261,84 +466,6 @@ module Orbit
         "classes" => classes.last(8).map do |entry|
           entry.slice("tool", "reason", "count", "agents", "units", "dispatches", "dispatches_omitted", "first_at", "last_at", "stalled")
         end }
-    end
-
-    # Newest effective amendments are kept under a character budget. When
-    # older ones do not fit, the omitted range is explicit: Jev must not treat
-    # missing earlier context as evidence that work went off track.
-    def self.bounded_amendments(amendments, budget: AMENDMENT_BUDGET)
-      selected = []
-      remaining = budget
-      amendments.reverse_each do |entry|
-        text = limit(entry.fetch("text"), AMENDMENT_TEXT_LIMIT)
-        break if text.length > remaining
-
-        selected.unshift(text)
-        remaining -= text.length
-      end
-      omitted = amendments.length - selected.length
-      omitted_info = if omitted.positive?
-                       { "count" => omitted, "included_range" => "#{omitted + 1}-#{amendments.length}",
-                         "note" => "Older effective user changes were omitted by the input budget; " \
-                                   "missing earlier context is not evidence of going off track." }
-                     end
-      [selected, omitted_info]
-    end
-
-    def self.bounded_basis(documents)
-      remaining = BASIS_BUDGET
-      included = []
-      truncated_paths = []
-      documents.first(BASIS_DOCUMENT_LIMIT).each_with_index do |document, index|
-        path = document["path"] || File.basename(document.fetch("source", "basis-#{index + 1}"))
-        text = document.fetch("text").to_s
-        allowance = [BASIS_TEXT_LIMIT, remaining].min
-        truncated = text.length > allowance
-        excerpt = if truncated
-                    marker = "…[truncated]"
-                    text[0, allowance - marker.length] + marker
-                  else
-                    text
-                  end
-        included << { "path" => path, "text" => excerpt }
-        truncated_paths << path if truncated
-        remaining -= excerpt.length
-      end
-      omitted_count = documents.length - included.length
-      omitted_info = if omitted_count.positive? || !truncated_paths.empty?
-                       { "count" => omitted_count, "truncated_paths" => truncated_paths,
-                         "note" => "Specified task documents were truncated or omitted by the input budget; " \
-                                   "missing text is not evidence that a requirement is absent." }
-                     end
-      [included, omitted_info]
-    end
-
-    def self.observation_tail(observations)
-      return tail_text(JSON.generate(observations), 5000) unless observations.is_a?(Array)
-
-      remaining = 5000
-      latest = []
-      observations.reverse_each do |item|
-        break if remaining < 200
-
-        text = tail_text(JSON.generate(item), [remaining, 1800].min)
-        latest.unshift(text)
-        remaining -= text.length
-      end
-      { "omitted_older_entries" => observations.length - latest.length, "latest_entries_json" => latest }
-    end
-
-    def self.tail_text(value, size)
-      return value if value.length <= size
-
-      prefix = "[older content truncated]…"
-      "#{prefix}#{value[-(size - prefix.length), size - prefix.length]}"
-    end
-
-    def self.git_changes(root)
-      status = git_read(root, ["status", "--short", "--untracked-files=normal"], 2000)
-      diff = git_read(root, ["diff", "--no-ext-diff", "--no-textconv", "--unified=0", "HEAD", "--"], 4000)
-      { "status" => status, "diff_excerpt" => diff }
     end
 
     def self.git_read(root, args, limit)

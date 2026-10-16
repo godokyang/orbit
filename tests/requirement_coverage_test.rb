@@ -220,7 +220,55 @@ module RequirementCoverageTest
   end
 
 
+  def unread_items_reuse_exact_evidence_but_counterevidence_revokes_it
+    with_coverage do |store|
+      report = coverage()
+      store.record(check_id: "1", kind: "artifact", role: "reviewer", coverage: report, **binding)
+      report["items"][0].merge!("status" => "unverified", "gap_kind" => "not_checked", "evidence" => "Unread this round")
+      store.record(check_id: "2", kind: "artifact", role: "reviewer", coverage: report, **binding)
+      assert(store.status(**binding)["ready"] && store.status(**binding)["items"][0]["verified_by_check"] == "1",
+             "unread same-version item retains actual evidence and source")
+      %w[evidence_missing defect].each_with_index do |gap, i|
+        report["items"][0]["gap_kind"] = gap
+        store.record(check_id: "gap-#{i}", kind: "artifact", role: "reviewer", coverage: report, **binding)
+        report["items"][0]["gap_kind"] = "not_checked"
+        store.record(check_id: "unread-#{i}", kind: "artifact", role: "reviewer", coverage: report, **binding)
+        assert(!store.status(**binding)["ready"], "counterevidence is a barrier to older passes")
+      end
+      store.record(check_id: "fixed", kind: "artifact", role: "reviewer", coverage: coverage(), **binding)
+      store.record(check_id: "finding", kind: "artifact", role: "reviewer", coverage: report,
+                   invalidates_prior: true, **binding)
+      assert(!store.status(**binding)["ready"], "real findings revoke prior evidence globally")
+      store.record(check_id: "fixed-again", kind: "artifact", role: "reviewer", coverage: coverage(), **binding)
+      assert(store.status(**binding)["ready"], "explicit new verification restores qualification")
+    end
+  end
+
+  def unread_items_never_inherit_across_bindings_or_requirement_identity
+    with_coverage do |store|
+      store.record(check_id: "1", kind: "artifact", role: "reviewer", coverage: coverage(), **binding)
+      report = coverage()
+      report["items"][0].merge!("status" => "unverified", "gap_kind" => "not_checked", "ref" => "same-ref")
+      [binding(artifact: "art-2"), binding(digest: "in-2"), binding(root: "/other")].each_with_index do |version, i|
+        store.record(check_id: "changed-#{i}", kind: "artifact", role: "reviewer", coverage: report, **version)
+        assert(!store.status(**version)["ready"], "changed versions require explicit new verification")
+      end
+      report["items"][0]["requirement"] = "Different behavior"
+      store.record(check_id: "renamed", kind: "artifact", role: "reviewer", coverage: report, **binding)
+      assert(!store.status(**binding)["ready"], "ref and similar text never substitute requirement identity")
+      report["items"][0]["status"] = "verified"
+      begin
+        store.record(check_id: "invalid", kind: "artifact", role: "reviewer", coverage: report, **binding)
+        raise "verified with gap_kind must be rejected"
+      rescue Orbit::RequirementCoverage::Error
+        # A gap classification cannot coexist with verified.
+      end
+    end
+  end
+
   def run
+    unread_items_reuse_exact_evidence_but_counterevidence_revokes_it
+    unread_items_never_inherit_across_bindings_or_requirement_identity
     long_requirement_text_is_stored_verbatim_but_still_bounded
     coverage_above_old_fixed_item_limit_is_preserved
     complete_verified_coverage_releases_the_current_binding

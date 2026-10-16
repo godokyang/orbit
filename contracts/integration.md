@@ -1,6 +1,6 @@
 # Orbit 集成合同
 
-合同版本：1.5
+合同版本：1.6
 
 面向把 Orbit 当作外部执行与检查服务的集成方（例如 Loom）。本合同只冻结下面列出的命令、返回字段与结果 schema；这些之外的一切（包括 `status --json` 里的其他字段）都是 Orbit 内部实现，随时可变。产品语义以 [任务运行合同](task-runtime.md) 和 [检查结果 schema](check-result.schema.json) 为准，本文件与它们冲突时以它们为准并修正本文件。机器可读形式见 [integration.json](integration.json)，`orbit capabilities --json` 与契约测试都读取它，决定理由见 [ADR-010](../docs/adr/010-integration-contract.md)。
 
@@ -16,7 +16,7 @@
 `orbit capabilities --json` 只读、不连接会话、不调用模型、不读任务，返回：
 
 ```json
-{ "integration_contract": { "name": "orbit-integration", "version": "1.5", "major": 1 },
+{ "integration_contract": { "name": "orbit-integration", "version": "1.6", "major": 1 },
   "orbit": { "version": "<软件版本，仅供显示>" },
   "capabilities": { "<能力名>": { "since": "<引入该能力的合同版本>", "...": "该能力的限制" } } }
 ```
@@ -29,6 +29,7 @@
 | `export` | `orbit export TASK --output FILE` 返回 §3 的字段；归档内 `task/state.json` 带有 1.0 的持久冻结字段与已记录的 revision/updated_at；1.3 的 attention/latest_check 为 status 只读投影 |
 | `stop_receipt` | 停止回执：`stop --json` 只表示入队，已确认停止只看 `stop_confirmation.confirmed` |
 | `start_external_refs` | `start` 可带 `--external-ref`；`max_refs`、`max_length` 为强制上限；`inherited_on_resume=false` |
+| `check_coverage_continuation` | 1.6 起：未核实项可选 `gap_kind` 区分尚未检查、缺少必要证据及缺陷；已核实项可选 `verified_by_check` 标注来源检查号；跨版本不自动继承资格 |
 | `check_coverage_ref` | 检查结果的每个覆盖项可带 `ref`；`max_length` 为 schema 上限；`blank_is_omitted=true`（1.1 起）表示空串或纯空白按未提供处理 |
 | `resume_from` | `start --resume-from`；`from_status` 列出可接续的旧任务终态（`paused` 与 `needs_user`）；`requires=native_user_message` |
 
@@ -69,6 +70,7 @@
 | `requirement_coverage.current`、`.complete`、`.ready`、`.gap` | after_check |
 | `requirement_coverage.items[].requirement/status/evidence/scope` | after_check |
 | `requirement_coverage.items[].ref` | when_reported |
+| `requirement_coverage.items[].gap_kind`、`.verified_by_check` | when_reported（1.6 起） |
 | `external_refs` | when_provided |
 | `continuation.previous_task` | when_resumed |
 | `continuation.wake.status`、`continuation.wake.message_id` | when_wake_requested |
@@ -77,6 +79,8 @@
 `status` 取值：`starting`、`running`、`complete`、`paused`、`needs_user`、`failed`、`stop_unconfirmed`；终态为除前两项外的其余五个。`complete` 的含义见任务运行合同（独立检查与实际收尾均通过），不等于集成方自己的业务完成。已确认停止只看 `stop_confirmation.confirmed == true`；`stop_unconfirmed` 与 `failed` 不保证资源已停止，调用方不得据此放行第二写者。
 
 `requirement_coverage.items` 是检查者逐要求的枚举与证据，`ready=false` 时 `gap` 说明原因；缺失、重复或对不上的项由调用方按自己的规则判未验证，Orbit 不替调用方匹配。
+
+`gap_kind` 仅用于 unverified，取值为 `not_checked`（检查者尚未核查）、`evidence_missing`（缺少必要证据）、`defect`（发现缺陷）。未提供时原因未知，不能从 evidence 自由文本推导。`verified_by_check` 是已核实结论的来源检查号字符串，不改变当前覆盖的版本门；同版本尚未检查项可沿用未被撤销的有效结论，新缺证或反证可以撤销。输入、产物或工作区变化后不能直接沿用完成资格。原 status、scope、任务状态和 attention 枚举保持不变。
 
 ### 持久变更标记（1.3）
 
@@ -187,3 +191,5 @@ Root 原生调用、原生成员派发/实际请求、检查者/复核者在调�
 - 1.4（追加能力）：`resume_from.from_status` 增加已确认停止的 `needs_user`；旧记录仍是已停止终态，续接建立新任务边界且不恢复旧成员、检查或用量。
 - 1.5：只读 `session_binding` 投影（provider/session_id/session_file/launch_message_id/launch_message_source）：稳定启动边界与宿主报告的会话文件路径，缺失为 null；prompt-file 启动的投递边界由运行程序在 attach 投递成功时持久记录，旧记录不借内部字段回填；既有内部字段含义与 status 取值不变。
 - 1.5（追加）：可选 `resume_wake` 与 `continuation.wake` 回执，绑定后投递一次程序来源续接消息；默认行为、启动边界及既有状态取值不变。
+
+- 1.6：新增检查覆盖缺口分类与来源检查号；未检查项由检查流程续查，保留当前版本独立终检及实际停止门。

@@ -7,6 +7,7 @@ require "rbconfig"
 require "socket"
 require_relative "../lib/orbit/task_record"
 require_relative "../lib/orbit/task_runtime"
+require_relative "../lib/orbit/task_view"
 require_relative "../lib/orbit/omp_entry"
 require_relative "../lib/orbit/jev_advisor"
 require_relative "../lib/orbit/jev_setup"
@@ -170,6 +171,31 @@ module CliTest
     text = cli("status", "--details", record.path)
     assert(text.include?("检查状态：手动终检已排队（不是任务完成）") && text.include?("下一动作：手动检查已排队"),
            "a manual next check is queued, not a completed task")
+
+    view_state = record.state.merge("review_continuation" => { "status" => "queued" },
+      "requirement_coverage" => { "current" => true, "ready" => false, "complete" => true, "verified" => 1,
+        "items" => [{ "requirement" => "必要行为", "status" => "unverified", "gap_kind" => "not_checked" }] })
+    assert(Orbit::TaskView.check_activity_line(view_state).include?("续查已排队（尚未开始") &&
+           Orbit::TaskView.next_action(view_state).include?("无需重复交卷") &&
+           Orbit::TaskView.requirement_coverage_line(view_state).include?("待检查 1 项；缺少必要证据 0 项"),
+           "unfinished inspection is shown as checker work, not missing delivery")
+    view_state["review"] = { "blocked" => { "type" => "selection_undecided" } }
+    assert(Orbit::TaskView.check_activity_line(view_state).include?("检查模型受阻") &&
+           Orbit::TaskView.next_action(view_state).include?("显式重选"), "model blocking takes precedence over a continuation queue")
+    view_state.delete("review")
+    view_state["review_continuation"]["status"] = "stalled"
+    view_state["next_check_manual"] = false
+    assert(Orbit::TaskView.next_action(view_state).include?("处理检查无进展的原因") &&
+           Orbit::TaskView.check_activity_line(view_state).include?("已停止自动续查"), "a stalled review names Root's diagnostic responsibility even with a timer")
+    view_state["next_check_manual"] = true
+    assert(Orbit::TaskView.check_activity_line(view_state).include?("手动终检已排队") &&
+           Orbit::TaskView.next_action(view_state) == "手动检查已排队", "an explicit request can restart a stalled review")
+    view_state["review_continuation"]["status"] = "finished"
+    view_state["next_check_manual"] = false
+    view_state["requirement_coverage"]["items"][0]["gap_kind"] = "evidence_missing"
+    assert(Orbit::TaskView.next_action(view_state).include?("补充检查列出的必要证据"), "missing evidence requests specific Root work")
+    view_state["status"] = "complete"
+    assert(Orbit::TaskView.next_action(view_state) == "无", "historical gaps never restart a completed task")
 
     record.save(record.state.merge("next_check_trigger" => "rebind", "next_check_basis" => "工作区重新绑定", "next_check_manual" => false))
     text = cli("status", "--details", record.path)

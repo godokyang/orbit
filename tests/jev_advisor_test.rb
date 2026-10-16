@@ -30,6 +30,7 @@ module JevAdvisorTest
     JSON.generate("model" => model, "answers" => answers, "usage" => { "input_tokens" => 12 })
   end
 
+  # Legacy extra answers must be ignored; they are never requested or scored.
   STAGE_ONE_ANSWERS = {
     "stuck" => noul(0.1), "off_track" => noul(0.2),
     "artifact_ready" => noul(0.3), "delegatable" => noul(0.9)
@@ -85,7 +86,7 @@ module JevAdvisorTest
 
   def run
     check_delegation_question_text
-    check_stage_one_questions_unchanged
+    check_stage_one_process_questions
     check_candidate_assessment_round_trip
     check_stage_one_request_and_parsing
     check_stage_two_request_state_and_parsing
@@ -159,16 +160,15 @@ module JevAdvisorTest
     end
   end
 
-  # Scheduling questions stay. The old delegatable key is not asked, so the
-  # runtime's 0.6 gate cannot consume the new serial handoff wording.
-  def check_stage_one_questions_unchanged
+  # Observation retains only process questions; handoff and final review are separate.
+  def check_stage_one_process_questions
     questions = Orbit::JevAdvisor::QUESTIONS
-    check(questions.keys.sort == %w[artifact_ready off_track stuck], "stage one keeps the three scheduling questions")
+    check(questions.keys.sort == %w[off_track stuck], "observation asks only stuck and off_track")
     check(!questions.key?("delegatable"), "stage one does not ask the old delegatable question")
     check(questions["stuck"]["instructions"].include?("Do not infer this from elapsed time alone"),
           "stuck still refuses an elapsed-only inference")
-    check(Orbit::JevAdvisor::QUESTION_SET_VERSIONS.fetch("observation") == "jev-observation-2",
-          "the observation set version records removal of the old handoff question")
+    check(Orbit::JevAdvisor::QUESTION_SET_VERSIONS.fetch("observation") == "jev-observation-4",
+          "the observation set version records removal of artifact readiness")
     check(Orbit::JevAdvisor::DELEGATION_QUESTIONS["handoff_fit"]["instructions"] == HANDOFF_TEXT,
           "serial handoff is the delegation question")
   end
@@ -178,14 +178,14 @@ module JevAdvisorTest
       advisor = Orbit::JevAdvisor.new(api_key: "test-key", endpoint: endpoint)
       result = advisor.assess(state: { "instruction" => "stage one" })
       sent = requests.first
-      check(sent["questions"].keys.sort == %w[artifact_ready off_track stuck],
-            "stage one sends only its three scheduling questions")
+      check(sent["questions"].keys.sort == %w[off_track stuck],
+            "observation never asks JEV to approve artifact readiness")
       check(!sent["questions"].key?("delegatable") && !sent["questions"].key?("handoff_fit"),
             "stage one does not ask the handoff question")
       check(sent["state"] == { "instruction" => "stage one" } && sent["model"] == "jev-latest",
             "the caller's bounded state passes through unchanged")
-      check(result["scores"] == { "stuck" => 0.1, "off_track" => 0.2, "artifact_ready" => 0.3 },
-            "stage one parses exactly its own answers and ignores a delegatable answer")
+      check(result["scores"] == { "stuck" => 0.1, "off_track" => 0.2 },
+            "stage one ignores legacy readiness and delegation answers")
       check(result["model"] == "jev-test" && result["usage"] == { "input_tokens" => 12 }, "model and usage are returned")
       check(advisor.last_trace.dig("request", "state") == sent["state"] &&
             advisor.last_trace.dig("request", "questions") == sent["questions"] &&
@@ -230,7 +230,7 @@ module JevAdvisorTest
       advisor = Orbit::JevAdvisor.new(api_key: "test-key", endpoint: endpoint)
       one = advisor.assess(state: { "instruction" => "stage one" })
       two = advisor.assess_delegation(state: { "instruction" => "stage two" })
-      check(one["scores"].keys.sort == %w[artifact_ready off_track stuck],
+      check(one["scores"].keys.sort == %w[off_track stuck],
             "stage one scores contain only stage one answers")
       check(two["scores"].keys.sort == %w[handoff_fit member_task_fit],
             "stage two scores contain only stage two answers")
@@ -279,6 +279,38 @@ module JevAdvisorTest
       )
       check(observation.fetch("new_user_messages") == [message],
             "new user text reaches Jev verbatim with its relation labeled")
+
+      command = "SECRET_COMMAND_BODY"
+      output = "SECRET_TOOL_OUTPUT"
+      receipts = [
+        { "kind" => "root_verification", "source" => "omp_native_tool_result", "tool_call_id" => "call-known",
+          "tool" => "bash", "status" => "completed", "exit_code" => 0, "at" => "2026-10-16T00:00:02Z",
+          "execution_cwd" => root, "artifact_root" => root, "input_digest" => "input-v1",
+          "artifact_root_at_completion" => root, "artifact_digest" => "artifact-v2", "artifact_matches" => true,
+          "input_matches" => false, "scope" => "root", "coverage" => { "tests" => "partial" },
+          "command" => command, "output" => output },
+        { "kind" => "root_verification", "source" => "omp_native_tool_result", "tool_call_id" => "call-unknown",
+          "tool" => "write", "status" => "failed", "at" => "2026-10-16T00:00:03Z",
+          "command" => command, "output" => output }
+      ]
+      projected = Orbit::JevAdvisor.observation(
+        inputs: { "instruction" => "verify" },
+        host: { "status" => "active", "artifact_root" => root, "observations" => [
+          { "tool_calls" => [{ "id" => "call-known", "declared_intent" => "check the installed CLI" }] }
+        ] },
+        members: [], project_root: root, artifact_digest: "digest", elapsed_seconds: 1,
+        root_verifications: receipts
+      ).fetch("root_verifications")
+      serialized = JSON.generate(projected)
+      check(projected.length == 2 && projected[0]["intent"] == "check the installed CLI" &&
+            projected[1]["intent"] == "unknown" && !serialized.include?(command) && !serialized.include?(output) &&
+            projected[0].slice("input_digest", "artifact_digest", "input_matches", "artifact_matches",
+                               "scope", "coverage") == {
+                                 "input_digest" => "input-v1", "artifact_digest" => "artifact-v2",
+                                 "input_matches" => false, "artifact_matches" => true,
+                                 "scope" => "root", "coverage" => { "tests" => "partial" }
+                               },
+            "observation verification projection keeps trusted metadata and version matches without command/output bodies")
     end
   end
 
@@ -356,23 +388,21 @@ module JevAdvisorTest
             "the fixture reproduces the real byte-budget cut through a multibyte character")
 
       state = Orbit::JevAdvisor.observation(
-        inputs: { "instruction" => "orbit" }, host: { "status" => "running", "observations" => [] },
+        inputs: { "instruction" => "orbit" }, host: { "status" => "running", "artifact_root" => root, "observations" => [] },
         members: [], project_root: root, artifact_digest: "sha256:fixture", elapsed_seconds: 6
       )
-      excerpt = state["changes"]["diff_excerpt"]
-      check(excerpt.encoding == Encoding::UTF_8 && excerpt.valid_encoding?,
-            "the git excerpt is valid UTF-8 after the byte-budget cut")
-      check(excerpt.bytesize.between?(3997, 4000) && excerpt.include?("中文"),
-            "the excerpt keeps the byte budget and the cut content; only the split character is dropped")
-      check(raw.start_with?(excerpt.b), "the excerpt is byte-identical to the git output before the cut")
-      check(state["changes"]["status"] == " M notes.md\n", "an untruncated git read still passes through unchanged")
+      changes = state.dig("changes", "groups").find { |group| group["scope"] == "root_bound_artifact_root" }
+      summary = changes["diff_stat"]
+      check(summary.encoding == Encoding::UTF_8 && summary.valid_encoding? && summary.include?("notes.md"),
+            "the bounded git summary remains valid UTF-8 and identifies the changed artifact")
+      check(changes["status"] == " M notes.md\n", "an untruncated git read still passes through unchanged")
 
       with_fixture([payload(STAGE_ONE_ANSWERS)]) do |endpoint, requests|
         result = Orbit::JevAdvisor.new(api_key: "test-key", endpoint: endpoint).assess(state: state)
         check(result["scores"]["stuck"] == 0.1,
               "a diff cut at the byte budget no longer degrades the assessment to JSON::GeneratorError")
-        check(requests.first["state"]["changes"]["diff_excerpt"].valid_encoding?,
-              "the assessment request carries the excerpt as valid JSON text")
+        check(requests.first.dig("state", "changes", "groups").first["diff_stat"].valid_encoding?,
+              "the assessment request carries the bounded summary as valid JSON text")
       end
     end
 
@@ -385,15 +415,16 @@ module JevAdvisorTest
 
       raw = git_bytes(root, "diff", "--no-ext-diff", "--no-textconv", "--unified=0", "HEAD", "--")
       state = Orbit::JevAdvisor.observation(
-        inputs: { "instruction" => "orbit" }, host: { "status" => "running", "observations" => [] },
+        inputs: { "instruction" => "orbit" }, host: { "status" => "running", "artifact_root" => root, "observations" => [] },
         members: [], project_root: root, artifact_digest: "sha256:fixture", elapsed_seconds: 6
       )
-      excerpt = state["changes"]["diff_excerpt"]
-      check(excerpt.b == raw.byteslice(0, 4000) && !excerpt.valid_encoding?,
-            "invalid bytes inside the git output are preserved, not silently replaced or dropped")
-      expect_error("content that is invalid beyond the cut still degrades Jev instead of being scrubbed") do
-        Orbit::JevAdvisor.new(api_key: "test-key", endpoint: URI("http://127.0.0.1:1/v1/systemone"))
-                          .assess(state: state)
+      changes = state.dig("changes", "groups").find { |group| group["scope"] == "root_bound_artifact_root" }
+      check(changes["status"].include?("legacy.txt") && changes["diff_stat"].valid_encoding?,
+            "git metadata identifies the changed path without sending invalid file contents")
+      with_fixture([payload(STAGE_ONE_ANSWERS)]) do |endpoint, requests|
+        Orbit::JevAdvisor.new(api_key: "test-key", endpoint: endpoint).assess(state: state)
+        check(requests.first.dig("state", "changes", "groups").first["diff_stat"].valid_encoding?,
+              "binary file contents do not enter the JEV request")
       end
     end
   end

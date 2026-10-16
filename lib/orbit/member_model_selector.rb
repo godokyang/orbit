@@ -31,7 +31,7 @@ module Orbit
   # limitation; it does not drop concrete candidates. Question text, versions
   # and release thresholds are unchanged.
   class MemberModelSelector
-    VERSION = "orbit-member-selection-v2"
+    VERSION = "orbit-member-selection-v3"
     # Distinguishes "no release injected" (production: read the reviewed file)
     # from an injected release, including an injected nil.
     UNSET = Object.new
@@ -451,13 +451,97 @@ module Orbit
         "candidates" => candidates.map do |item|
           option = { "agent" => item["agent"], "provider" => item["identity"]["provider"],
                      "model" => item["identity"]["model"], "identity" => item["identity"],
-                     "capability_facts" => item["facts"] }
+                     "capability_facts" => capability_facts_without_duplicate_prior(item["facts"]) }
           # Both evidence classes are handed over together whenever both exist.
           option["evidence"] = item["evidence"] if item["evidence"]
           option["model_overview_prior"] = item["model_overview_prior"] if item["model_overview_prior"]
           option
         end
       )
+    end
+
+    # Catalog benchmark values are already carried once as the separately
+    # labeled model_overview_prior. Keep catalog identity, structural route
+    # context, provenance, eligibility, conflicts, and holds here, but remove
+    # the duplicate benchmark/prior payload from capability_facts.
+    def capability_facts_without_duplicate_prior(value)
+      return value unless value.is_a?(Hash)
+
+      facts = value.dup
+      catalog = facts["catalog"]
+      return facts unless catalog.is_a?(Hash)
+
+      catalog = catalog.dup
+      catalog.delete("prior")
+      catalog_facts = catalog["facts"]
+      if catalog_facts.is_a?(Hash)
+        catalog_facts = catalog_facts.dup
+        catalog_facts.delete("metrics")
+        catalog_facts.delete("benchmarks")
+        catalog["facts"] = catalog_facts
+      end
+      facts["catalog"] = catalog
+      facts
+    end
+
+    def member_compaction(prepared, body)
+      unit = body.fetch("work_unit")
+      context = unit["context"]
+      material_parts = Array(context).map(&:to_s).reject(&:empty?).uniq
+      dependencies = Array(body["dependency_context"]).select { |entry| entry.is_a?(Hash) }
+      dependencies.each do |dependency|
+        %w[result verification].each do |field|
+          text = dependency[field].to_s
+          material_parts << "dependency #{dependency['id']} #{field}:\n#{text}" unless text.empty?
+        end
+      end
+      material = material_parts.join("\n\n")
+      return nil if material.empty?
+
+      # The background context is the only compressed field. Required task
+      # facts are supplied as their actual content and remain in structured
+      # outer fields, including decisions and dependency results.
+      required = []
+      {
+        "objective" => unit["objective"], "requirements" => unit["requirements"],
+        "acceptance" => unit["acceptance"], "decisions" => unit["decisions"],
+        "scope paths" => unit.dig("scope", "allowed_paths"),
+        "effective instruction" => body["instruction"], "amendments" => body["amendments"]
+      }.each do |role, values|
+        Array(values).each do |value|
+          text = value.to_s.strip
+          required << { "role" => role, "text" => text } unless text.empty?
+        end
+      end
+      dependencies.each do |dependency|
+        id = dependency["id"].to_s.strip
+        required << { "role" => "dependency id", "text" => id } unless id.empty?
+      end
+      candidates = prepared["candidates"].filter_map do |item|
+        identity = item["identity"]
+        facts = item["facts"]
+        next unless identity.is_a?(Hash) && facts.is_a?(Hash)
+
+        { "model" => "#{identity['provider']}/#{identity['model']}",
+          "context_limit_tokens" => facts.dig("execution_eligibility", "context", "configured_limit"),
+          "capability" => facts.slice("catalog", "execution_eligibility", "eligibility"),
+          "identity" => identity }
+      end
+      return nil if candidates.empty?
+
+      replace = lambda do |text|
+        compacted = JSON.parse(JSON.generate(body))
+        compacted.fetch("work_unit").delete("context")
+        Array(compacted["dependency_context"]).each do |dependency|
+          dependency.delete("result")
+          dependency.delete("verification")
+        end
+        compacted["selection_compacted_material"] = text
+        compacted
+      end
+      { purpose: "member_selection", material: material, must_keep: required,
+        candidates: candidates, replace: replace, language: "unknown",
+        content_type: %w[work_unit_background dependency_results] }
     end
 
     def assessment(prepared)
@@ -537,7 +621,10 @@ module Orbit
     def judge(prepared, result, release)
       body = judgment_body(prepared, prepared["candidates"])
       projection = projection_for(prepared)
-      delegation = judge_call(phase: "delegation") { @advisor.assess_delegation(state: body) }
+      compaction = member_compaction(prepared, body)
+      delegation = judge_call(phase: "delegation") do
+        @advisor.assess_delegation(state: body, compaction: compaction)
+      end
       result["jev_traces"] ||= []
       result["jev_traces"] << delegation.delete("trace") if delegation["trace"]
       result["judgments"] << delegation["receipt"]
@@ -555,7 +642,7 @@ module Orbit
       end
 
       candidates_call = judge_call(phase: "candidates") do
-        @advisor.assess_candidates(state: body, candidates: body["candidates"])
+        @advisor.assess_candidates(state: body, candidates: body["candidates"], compaction: compaction)
       end
       result["jev_traces"] << candidates_call.delete("trace") if candidates_call["trace"]
       result["judgments"] << candidates_call["receipt"]

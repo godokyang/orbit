@@ -118,14 +118,18 @@ module Orbit
       # default only when absent, never overwriting persisted schedule state.
       @state["next_check_trigger"] ||= "timer"
       @state["next_check_manual"] ||= false
+      if @state.dig("review_continuation", "status") == "running"
+        # A new runtime has no live checker handle; the existing observation
+        # recovery path will account for the abandoned attempt at restart.
+        @state["review_continuation"]["status"] = "queued"
+      end
       @running_check = nil
       @last_delivery_checked = nil
       @first_change_checked = false
       @stop_requested = false
       @artifact_digest = nil
       @last_artifact_probe_at = 0
-      @last_full_check_digest = nil
-      @jev_last_at = Time.now.to_f - 15
+      @jev_last_at = nil
       @jev_next_at = Time.now.to_f + 5
       @jev_signature = nil
       @jev_process_streak = 0
@@ -414,6 +418,7 @@ module Orbit
       return unless collect_amendments
       observe_continuation_progress(host)
       refresh_completion_readiness!(now)
+      refresh_review_continuation!(now)
       if @running_check
         begin
           @check_result ||= @checker.poll
@@ -522,8 +527,6 @@ module Orbit
           end
         end
         case decision
-        when :artifact
-          @first_change_checked = true if start_check(host, now, trigger: "jev_artifact")
         when :process
           start_check(host, now, kind: "process", trigger: "jev_process")
         when :unavailable
@@ -615,7 +618,6 @@ module Orbit
     def reset_artifact_observation!
       @artifact_digest = nil
       @last_artifact_probe_at = 0
-      @last_full_check_digest = nil
     end
 
     def current_workspace
@@ -771,21 +773,28 @@ module Orbit
         Array(@state["jev_user_messages"]).map { |message| [message["id"], message["text"]] },
         blocks_fingerprint
       ]))
-      # Time and noisy progress counters do not constitute a new observation.
-      # Preserve the cooldown for actual changes, but never pay twice for an
-      # unchanged observation (including after an unavailable judgment).
-      return nil if now < @jev_next_at || signature == @jev_signature
+      # The first observation remains due shortly after startup. Thereafter
+      # every five minutes refreshes the judgment, even when the input is
+      # unchanged. The event loop does not reach this method while a checker
+      # is running, so a missed slot is naturally not replayed.
+      return nil if now < @jev_next_at
+      units = work_units.list
+      verification_scope = { "digest" => artifact_digest }
       observation = JevAdvisor.observation(
         inputs: @record.inputs(@state).merge("jev_user_messages" => Array(@state["jev_user_messages"])),
         host: host, members: @state["members"],
         project_root: artifact_root, artifact_digest: artifact_digest,
         elapsed_seconds: now - Time.parse(@state.fetch("created_at")).to_f,
-        member_options: delegation_options, member_blocks: member_block_summary
+        member_options: delegation_options, member_blocks: member_block_summary,
+        work_units: units,
+        root_verifications: root_verifications_for(host, verification_scope, @record.input_digest(@state)),
+        recent_check: recent_check_observation(artifact_digest),
+        history_cursor: @state["jev_history_cursor"]
       )
       result = @advisor.assess(state: observation)
       @jev_unavailable = false
       @jev_last_at = now
-      @jev_next_at = now + 60
+      @jev_next_at = now + 300
       @jev_signature = signature
       scores = result.fetch("scores")
       judgment = result.slice("provider", "model", "question_set_version", "usage", "call_id", "requested_model", "status")
@@ -800,11 +809,7 @@ module Orbit
       @jev_process_streak = process_score >= 0.65 ? @jev_process_streak + 1 : 0
       decision = nil
       decision_reason = "scores did not meet a check trigger"
-      if scores.fetch("artifact_ready") >= 0.8 && artifact_digest != @initial_digest &&
-         artifact_digest != @last_full_check_digest
-        decision = :artifact
-        decision_reason = "artifact_ready met the existing threshold for a changed, unchecked artifact"
-      elsif (process_score >= 0.85 || @jev_process_streak >= 2) && signature != @jev_last_process_trigger
+      if (process_score >= 0.85 || @jev_process_streak >= 2) && signature != @jev_last_process_trigger
         @jev_last_process_trigger = signature
         decision = :process
         decision_reason = "stuck/off_track met the existing process-check threshold"
@@ -814,7 +819,7 @@ module Orbit
     rescue JevAdvisor::Error => error
       @jev_unavailable = true
       @jev_last_at = now
-      @jev_next_at = now + 60
+      @jev_next_at = now + 300
       @jev_signature = signature
       @jev_process_streak = 0
       judgment = consume_jev_failure(error, "jev_stage1")
@@ -825,6 +830,26 @@ module Orbit
       )
       save
       :unavailable
+    end
+
+    def recent_check_observation(artifact_digest)
+      entry = Array(@state["checks"]).reverse.find { |check| check.is_a?(Hash) && check["result"].is_a?(Hash) }
+      return nil unless entry
+
+      current_input = @record.input_digest(@state)
+      current = entry["stale"] != true && entry["artifact_root"] == artifact_root &&
+        entry["artifact_digest"] == artifact_digest && entry["input_digest"] == current_input
+      { "number" => entry["number"], "role" => entry["role"], "kind" => entry["kind"],
+        "started_at" => entry["started_at"], "finished_at" => entry["finished_at"],
+        "selection_version" => entry["selection_version"], "selection_signature" => entry["selection_signature"],
+        "selection_input_version" => entry["selection_input_version"],
+        "selection_question_set_version" => entry["selection_question_set_version"],
+        "verdict" => entry.dig("result", "verdict"), "result" => entry["result"],
+        "stale" => !current, "stale_reasons" => Array(entry["stale_reasons"]),
+        "artifact_root" => entry["artifact_root"], "artifact_digest" => entry["artifact_digest"],
+        "input_digest" => entry["input_digest"], "coverage" => @state["requirement_coverage"] }
+    rescue StandardError
+      nil
     end
 
     # Keep a call-scoped copy of the actual payload and normalized provider
@@ -1537,12 +1562,8 @@ module Orbit
     end
 
     def member_selection_state(artifact_digest, host, unit: nil)
-      state = @record.inputs(@state).merge(
-        "workspace" => @state["workspace"], "input_digest" => @record.input_digest(@state),
-        "artifact_digest" => artifact_digest,
-        "user_boundary" => @state["last_user_message_id"],
-        "user_message_id" => host["last_turn_user_message_id"] || @state["last_user_message_id"]
-      )
+      state = { "workspace" => @state["workspace"], "input_digest" => @record.input_digest(@state),
+                "artifact_root" => artifact_root }
       state["dependency_context"] = dependency_context(unit) if unit
       state
     end
@@ -1563,11 +1584,9 @@ module Orbit
 
         result = dep["result"].to_s
         verification = dep["verification"].to_s
-        # Bounded prefix for size plus the full-content digest, so a change
-        # beyond the prefix still invalidates the basis (OMP1 consumes both).
         { "id" => dep["id"], "status" => dep["status"],
-          "result" => result[0, 500], "result_sha256" => Digest::SHA256.hexdigest(result),
-          "verification" => verification[0, 500],
+          "result" => result, "result_sha256" => Digest::SHA256.hexdigest(result),
+          "verification" => verification,
           "verification_sha256" => Digest::SHA256.hexdigest(verification) }
       end
     end
@@ -3012,6 +3031,18 @@ module Orbit
     end
 
     def start_check(host, now, kind: "artifact", trigger:, manual: false)
+      refresh_review_continuation!(now)
+      continuation = @state["review_continuation"]
+      if kind == "artifact" && !manual && continuation && continuation["status"] == "stalled"
+        schedule_check(now + @interval, "检查续查无进展，等待 Root 处理诊断", trigger: "timer")
+        save
+        return false
+      end
+      if trigger == "coverage_continuation"
+        return false unless continuation && continuation["status"] == "queued"
+
+        manual = continuation["manual"] == true
+      end
       # EXP-12: an adjudicator result is a RULING addressed to Root, never an
       # automatic decision. The program records it with its own basis and with
       # whatever changed during the check, hands it to Root, and waits for
@@ -3035,8 +3066,15 @@ module Orbit
           @record.event("checker_model_block_cleared", "reason" => "selection inputs changed")
         else
           @record.event("check_request_blocked", "type" => block["type"], "manual" => manual) if manual
-          @state["next_check_manual"] = false
-          schedule_check(now + @interval, "检查模型不可用：等待 OMP 模型状态变化或 Root 重选", trigger: "timer")
+          if role == "reviewer" && continuation && continuation["status"] == "queued" &&
+             %w[coverage_continuation model_fallback].include?(trigger)
+            schedule_check(now + @interval, "续查模型不可用：保留原链，等待模型恢复或 Root 重选",
+                           trigger: "coverage_continuation", manual: continuation["manual"] == true, kind: "artifact")
+          else
+            @state["next_check_manual"] = false
+            schedule_check(now + @interval, "检查模型不可用：等待 OMP 模型状态变化或 Root 重选", trigger: "timer")
+          end
+          save
           return false
         end
       end
@@ -3060,11 +3098,10 @@ module Orbit
         @record.event("check_abandoned_recovered", "key" => key, "check" => prior["check"])
         prior = nil
       end
-      if !manual && trigger != "model_fallback" && prior
+      if !manual && !%w[model_fallback coverage_continuation].include?(trigger) && prior
         # The same observation was already checked or is being checked: do not
         # pay for another model call. The agreed interval replaces the due
         # timer so an unchanged observation cannot retry every tick.
-        @last_full_check_digest = digest if kind == "artifact"
         @record.event("check_duplicate_skipped", "key" => key, "trigger" => trigger,
                       "previous_check" => prior["check"], "previous_status" => prior["status"],
                       "previous_stale" => prior["stale"])
@@ -3102,9 +3139,25 @@ module Orbit
         "number" => number, "role" => role, "kind" => kind, "artifact_root" => artifact_root,
         "observation_key" => key, "trigger_cause" => trigger, "manual" => manual,
         "snapshot" => snapshot, "input_digest" => input_digest, "host_digest" => host_digest(host),
+        "selection_version" => @state.dig("review", "selection", "version"),
+        "selection_signature" => @state.dig("review", "selection", "signature"),
+        "selection_input_version" => ModelQualityPolicy::INPUT_VERSION,
+        "selection_question_set_version" => @state.dig("review", "selection", "question_set_version"),
         "dispute" => @state["dispute"],
         "started_at" => Time.at(now).utc.iso8601
       }
+      if continuation && %w[queued running].include?(continuation["status"]) &&
+         %w[coverage_continuation model_fallback].include?(trigger) && role == "reviewer"
+        scope["review_continuation"] = continuation.dup
+      end
+      cursor_call = Array(host["observations"]).reverse_each.filter_map do |observation|
+        next unless observation.is_a?(Hash)
+
+        Array(observation["tool_calls"]).reverse_each.find do |call|
+          call.is_a?(Hash) && call["id"].is_a?(String) && !call["id"].empty?
+        end
+      end.first
+      @state["jev_history_cursor"] = cursor_call ? { "tool_call_id" => cursor_call["id"] } : nil
       scope["snapshot_archive"] = snapshot_archive if snapshot_archive
       @record.write("checks/#{number}/scope.json", JSON.pretty_generate(scope))
       @checker.start(
@@ -3116,6 +3169,8 @@ module Orbit
           "root_verifications" => root_verifications_for(host, snapshot, input_digest),
           "task_git" => task_git, "findings" => @state.fetch("findings"),
           "recent_events" => recent_events, "check_history" => check_history_for(snapshot), "recheck" => clues,
+          "requirement_coverage" => requirement_coverage_status,
+          "review_continuation" => scope["review_continuation"],
           "execution_members" => @state["members"],
           "member_blocks" => member_block_summary,
           "takeover" => takeover_context_projection,
@@ -3133,6 +3188,11 @@ module Orbit
         }, output_dir: directory, role: role
       )
       @running_check = scope
+      if scope["review_continuation"] || (manual && role == "reviewer" && continuation &&
+                                         %w[queued stalled].include?(continuation["status"]))
+        continuation.merge!("status" => "running", "current_check" => number)
+        @record.event("review_continuation_started", "check" => number, "origin_check" => continuation["origin_check"])
+      end
       # Resumed historical tasks adopt the new gate only when they actually
       # run a current check; old completed records are not retroactively passed.
       @state["coverage_required"] = true
@@ -3141,7 +3201,6 @@ module Orbit
         "status" => "in_flight", "check" => number, "stale" => nil,
         "trigger_cause" => trigger, "manual" => manual, "started_at" => Time.at(now).utc.iso8601
       }
-      @last_full_check_digest = snapshot.fetch("digest") if kind == "artifact"
       @state.delete("observation_pending")
       @record.event("check_started", "number" => number, "role" => role, "kind" => kind,
                     "trigger" => trigger, "manual" => manual, "model" => @state.dig("review", "model"),
@@ -3178,17 +3237,28 @@ module Orbit
       contexts = needs.filter_map { |item| item["required_context_tokens"] }
       requirements["required_context_tokens"] = contexts.max unless contexts.empty?
       requirements["require_measurement_date"] = true if needs.any? { |item| item["require_measurement_date"] == true }
-      inputs.merge("workspace" => @state["workspace"], "review_role" => role,
-                   "acceptance" => units.empty? ? inputs.fetch("instruction") : units.map { |unit| unit["acceptance"] },
-                   "acceptance_source" => units.empty? ? "task_instruction" : "work_units",
-                   "model_requirements" => requirements,
-                   "work_units" => units.map { |unit| unit.slice("id", "objective", "requirements", "acceptance", "status", "result", "verification") })
+      { "workspace" => @state["workspace"], "review_role" => "reviewer",
+        "acceptance" => effective_checker_instruction, "acceptance_source" => "task_instruction_and_registered_amendments",
+        "task_overview" => @state.dig("review", "task_overview"),
+        "project_scale" => @state.dig("review", "project_scale"),
+        "model_requirements" => requirements, "input_digest" => current }
     rescue WorkUnitStore::Error => error
       raise CheckerModelSelector::Error, "work-unit selection context is unreadable: #{error.message}"
     end
 
     def apply_checker_selection!(role, now)
       previous = @state.dig("review", "selection")
+      excluded = (Array(@state.dig("review", "failed_models", "models")) +
+                  Array(@state.dig("review", "auth_or_quota_models"))).uniq
+      if @state.dig("review", "fixed_for_task") == true &&
+         @state.dig("review", "explicit_model").to_s.empty? && previous.is_a?(Hash) &&
+         previous["version"] == CheckerModelSelection::DECISION_VERSION &&
+         previous["model"].is_a?(String) && !previous["model"].strip.empty? && !excluded.include?(previous["model"]) &&
+         checker_model_still_available?(previous["model"])
+        ModelAuthorization.check!(previous["model"], @allowed_models)
+        @checker.select_model!(previous["model"]) if @checker.respond_to?(:select_model!)
+        return true
+      end
       model, selection = checker_selector.select(
         explicit: @state.dig("review", "explicit_model"),
         instruction: effective_checker_instruction,
@@ -3200,9 +3270,10 @@ module Orbit
         # merged in separately and never cleared by that path (see
         # handle_check_failure). review-model's own select call passes no
         # exclusions, so an explicit Root choice is never blocked by it.
-        excluded: (Array(@state.dig("review", "failed_models", "models")) +
-                   Array(@state.dig("review", "auth_or_quota_models"))).uniq
+        excluded: excluded
       )
+      selection["fixed_for_task"] = true
+      @state["review"]["fixed_for_task"] = true
       persist_jev_call(nil, trace: checker_selector.last_jev_trace,
                        decision: "checker_model_selection",
                        reason: selection["notice"] || "checker model selected from available task candidates",
@@ -3242,6 +3313,13 @@ module Orbit
       false
     end
 
+    def checker_model_still_available?(model)
+      catalog = @connection.model_catalog
+      catalog.is_a?(Hash) && Array(catalog["available"]).include?(model)
+    rescue StandardError
+      false
+    end
+
     # Q20: the checker selection judges the currently effective task, so the
     # original instruction and every recorded amendment pass complete with
     # explicit separators (never compressed); a revision changes the selector
@@ -3263,7 +3341,9 @@ module Orbit
       kind = @checker.respond_to?(:failure_kind) ? @checker.failure_kind : "unavailable"
       basis = @checker.respond_to?(:failure_basis) ? @checker.failure_basis : "unknown"
       @state.fetch("checks") << scope.slice("number", "role", "kind", "started_at", "observation_key",
-                                            "trigger_cause", "manual", "artifact_root", "input_digest").merge(
+                                            "trigger_cause", "manual", "artifact_root", "input_digest",
+                                            "selection_version", "selection_signature", "selection_input_version",
+                                            "selection_question_set_version").merge(
         "artifact_digest" => scope.dig("snapshot", "digest"),
         "result" => { "verdict" => "check_failed", "error" => error.message,
                       "failure_kind" => kind, "failure_basis" => basis },
@@ -3310,6 +3390,9 @@ module Orbit
       # scheduling path clears next_check_kind back to the artifact default.
       schedule_check(now, "检查失败后尝试其他 OMP 型号", trigger: "model_fallback",
                      manual: scope["manual"], kind: scope["kind"])
+      if scope["review_continuation"] && @state.dig("review_continuation", "status") == "running"
+        @state["review_continuation"]["status"] = "queued"
+      end
       save
     end
 
@@ -3366,7 +3449,16 @@ module Orbit
       end
       @record.event("review_model_recorded", "model" => model, "reason" => command["reason"].to_s,
                     "in_pool" => selection["in_pool"])
-      schedule_check(now, "Root 重选 OMP 检查模型", trigger: "review_model", manual: true)
+      refresh_review_continuation!(now)
+      continuation = @state["review_continuation"]
+      if continuation && continuation["status"] == "queued"
+        # Model recovery changes neither the review's origin nor its progress.
+        # In particular, selecting a model cannot promote an automatic chain.
+        schedule_check(now, "Root 重选 OMP 检查模型，继续原核查",
+                       trigger: "coverage_continuation", manual: continuation["manual"] == true, kind: "artifact")
+      else
+        schedule_check(now, "Root 重选 OMP 检查模型", trigger: "review_model", manual: true)
+      end
       save
     end
 
@@ -3455,6 +3547,136 @@ module Orbit
       groups.transform_values { |paths| paths.uniq.sort.first(REVIEW_FOCUS_LIMIT) }
     end
 
+    # A continuation belongs to one review binding, never to a later revision.
+    # Revoking it also revokes its inherited manual qualification, without
+    # cancelling a new explicit manual request already queued by Root.
+    def refresh_review_continuation!(now)
+      continuation = @state["review_continuation"]
+      return unless continuation && %w[queued running stalled].include?(continuation["status"])
+      return if continuation["input_digest"] == @record.input_digest(@state) &&
+                continuation["artifact_root"] == artifact_root &&
+                continuation["artifact_digest"] == fingerprint_artifact
+
+      continuation.merge!("status" => "invalidated", "reason" => "version_changed")
+      @record.event("review_continuation_invalidated", "origin_check" => continuation["origin_check"])
+      if %w[coverage_continuation model_fallback].include?(@state["next_check_trigger"])
+        @state["next_check_manual"] = false
+        schedule_check(now, "续查绑定版本已变化，重新观察", trigger: "version_change")
+      end
+      save
+    end
+
+    # Reading unfinished material is the checker's work. Only an explicitly
+    # classified, finding-free gap can take this route; no text heuristics and
+    # no empty-findings inference can create a verified item or readiness.
+    def route_review_continuation(scope, result, current_digest, now)
+      return false unless scope["kind"] == "artifact" && scope["role"] == "reviewer"
+
+      previous = @state["review_continuation"]
+      resumed = scope["review_continuation"]
+      if previous && previous["status"] == "running"
+        previous["status"] = "finished"
+        @record.event("review_continuation_finished", "check" => scope["number"],
+                      "origin_check" => previous["origin_check"])
+      end
+      return false unless %w[continue correct complete].include?(result["verdict"]) &&
+                          result.fetch("findings").empty? && @state["recheck"].nil? &&
+                          @state["findings"].values.none? { |finding| finding["status"] == "open" }
+
+      coverage = requirement_coverage_status
+      return false unless coverage["current"]
+
+      delivery_items = coverage["items"].select { |item| item.fetch("scope", "delivery") == "delivery" }
+      gaps = delivery_items.reject { |item| item["status"] == "verified" }
+      # An inherited evidence pass cannot manufacture the separate delivery
+      # judgment when this checker explicitly says it has not inspected it.
+      if gaps.empty? && !result.dig("delivery", "ready")
+        gaps = Array(result.dig("coverage", "items")).select do |item|
+          item.fetch("scope", "delivery") == "delivery" && item["status"] == "unverified"
+        end
+      end
+      if gaps.any? { |item| %w[evidence_missing defect].include?(item["gap_kind"]) }
+        notify_coverage_action(scope, gaps, current_digest)
+        return true
+      end
+      return false if gaps.empty? || gaps.any? { |item| item["gap_kind"] != "not_checked" }
+
+      pending = gaps.map { |item| { "requirement" => item["requirement"], "scope" => item.fetch("scope", "delivery") } }
+      verified = delivery_items.select { |item| item["status"] == "verified" }
+                               .map { |item| { "requirement" => item["requirement"], "scope" => item.fetch("scope", "delivery") } }
+      known = resumed ? Array(resumed["verified_requirements"]) : []
+      no_progress = resumed && (verified - known).empty? ? resumed["no_progress_count"].to_i + 1 : 0
+      continuation = {
+        "status" => no_progress >= 2 ? "stalled" : "queued",
+        "origin_check" => resumed ? resumed["origin_check"] : scope["number"],
+        "previous_check" => scope["number"], "manual" => scope["manual"] == true,
+        "input_digest" => scope["input_digest"], "artifact_digest" => current_digest,
+        "artifact_root" => scope["artifact_root"], "pending_requirements" => pending,
+        "verified_requirements" => (known + verified).uniq, "no_progress_count" => no_progress
+      }
+      @state["review_continuation"] = continuation
+      @state.delete("pending_finalization")
+      @state["completion_readiness"] = {
+        "status" => "not_ready", "reason" => "独立检查尚未读完，检查流程负责续查",
+        "check" => scope["number"], "input_digest" => scope["input_digest"],
+        "artifact_root" => scope["artifact_root"], "artifact_digest" => current_digest, "coverage" => coverage
+      }
+      if continuation["status"] == "stalled"
+        @record.event("review_continuation_stalled", "check" => scope["number"],
+                      "origin_check" => continuation["origin_check"], "pending_requirements" => pending)
+        # Persist the send attempt so recovery cannot repeatedly wake Root.
+        continuation["diagnostic_attempted"] = true
+        save
+        begin
+          sent = @connection.send_message("Orbit 检查续查连续两轮没有新增有效核验，已停止自动续查，任务仍运行且未通过。" \
+            "待检查项：#{pending.map { |item| item['requirement'] }.join('；')}。" \
+            "请处理检查材料入口或检查者阻断，再显式请求检查；这不表示产物有缺陷，也不要求重新交卷。")
+          continuation["diagnostic_message_id"] = sent.fetch("id")
+          @state["sent_message_ids"] << sent.fetch("id")
+        rescue Connection::Error => error
+          continuation["diagnostic_error"] = error.message
+          @record.event("review_continuation_diagnostic_failed", "check" => scope["number"], "reason" => error.message)
+        end
+      else
+        schedule_check(now + result.fetch("next_check_seconds"), "检查者继续核验尚未检查项",
+                       trigger: "coverage_continuation", manual: continuation["manual"], kind: "artifact")
+        @record.event("review_continuation_queued", "check" => scope["number"],
+                      "origin_check" => continuation["origin_check"], "manual" => continuation["manual"])
+      end
+      true
+    end
+
+    def notify_coverage_action(scope, gaps, current_digest)
+      key = Digest::SHA256.hexdigest(JSON.generate([
+        scope["input_digest"], scope["artifact_root"], current_digest,
+        gaps.map { |item| item.slice("requirement", "scope", "gap_kind", "evidence") }
+      ]))
+      return if @state.dig("completion_readiness", "coverage_notice_key") == key
+
+      defect = gaps.any? { |item| item["gap_kind"] == "defect" }
+      reason = defect ? "独立检查发现缺陷，请修复后请求终检" : "独立检查缺少必要证据，请补充后请求终检"
+      @state.delete("pending_finalization")
+      @state["completion_readiness"] = {
+        "status" => "not_ready", "reason" => reason, "check" => scope["number"],
+        "input_digest" => scope["input_digest"], "artifact_root" => scope["artifact_root"],
+        "artifact_digest" => current_digest, "coverage_notice_key" => key,
+        "coverage_notice_delivery" => "attempted"
+      }
+      save
+      sent = @connection.send_message("Orbit #{reason}（不是用户新要求）：" +
+        gaps.reject { |item| item["gap_kind"] == "not_checked" }
+            .map { |item| "#{item['requirement']}：#{item['evidence']}" }.join("；"))
+      @state["sent_message_ids"] << sent.fetch("id")
+      @state["completion_readiness"].merge!("coverage_notice_delivery" => "sent",
+                                           "coverage_notice_message_id" => sent.fetch("id"))
+      @record.event("requirement_coverage_action_requested", "check" => scope["number"],
+                    "reason" => reason, "message_id" => sent.fetch("id"))
+    rescue Connection::Error => error
+      @state["completion_readiness"].merge!("coverage_notice_delivery" => "unconfirmed",
+                                           "coverage_notice_error" => error.message)
+      @record.event("requirement_coverage_action_unconfirmed", "check" => scope["number"], "reason" => error.message)
+    end
+
     def requirement_coverage_status
       return { "ready" => false, "gap" => @state["requirement_coverage_error"] } if @state["requirement_coverage_error"]
 
@@ -3492,6 +3714,7 @@ module Orbit
       ] }
       RequirementCoverage.new(record: @record).record(check_id: scope["number"].to_s,
         role: scope["role"], kind: scope["kind"], coverage: coverage, stale: stale,
+        invalidates_prior: !Array(result["findings"]).empty?,
         input_digest: scope["input_digest"], artifact_digest: scope.dig("snapshot", "digest"),
         artifact_root: scope["artifact_root"])
       if scope["kind"] == "artifact" && scope["role"] == "reviewer" && !stale
@@ -3516,7 +3739,10 @@ module Orbit
       stale_reasons << "host" if host_digest_stale?(scope, host)
       stale_reasons << "dispute" if @state["dispute"] != scope["dispute"]
       stale = !stale_reasons.empty?
-      @state["checks"] << scope.slice("number", "role", "kind", "started_at", "observation_key", "trigger_cause", "manual").merge(
+      @state["checks"] << scope.slice("number", "role", "kind", "started_at", "observation_key", "trigger_cause", "manual",
+                                      "review_continuation",
+                                      "selection_version", "selection_signature", "selection_input_version",
+                                      "selection_question_set_version").merge(
         "result" => result, "stale" => stale, "stale_reasons" => stale_reasons,
         "artifact_root" => scope["artifact_root"], "artifact_digest" => scope.dig("snapshot", "digest"),
         "input_digest" => scope["input_digest"],
@@ -3560,6 +3786,12 @@ module Orbit
         schedule_check(now + @interval, "过程检查换型完成，回到常规观察", trigger: "timer")
       end
       if stale
+        if scope["review_continuation"] && @state.dig("review_continuation", "status") == "running"
+          @state["review_continuation"].merge!("status" => "invalidated",
+            "reason" => stale_reasons.include?("dispute") ? "dispute_changed" : "version_changed",
+            "stale_reasons" => stale_reasons)
+          @record.event("review_continuation_invalidated", "check" => scope["number"], "stale_reasons" => stale_reasons)
+        end
         # A moving workspace cannot be approved or interrupted using an old
         # finding. Keep actionable stale findings as reconciliation clues; the
         # next applicable check re-verifies them and corrections then reach
@@ -3645,6 +3877,10 @@ module Orbit
                       "input_digest" => scope["input_digest"])
       end
       accepted_findings = record_proposed_findings(scope, result.fetch("findings"), current_digest, now)
+      if route_review_continuation(scope, result, current_digest, now)
+        save
+        return
+      end
       notify_finalization_ready(scope, result, host, current_digest, now)
       remind_manual_final_check(scope, result, host, current_digest, now)
       retire_overturned_readiness(scope, result, current_digest)
@@ -4410,6 +4646,10 @@ module Orbit
     end
 
     def synchronize_terminal_readiness(status)
+      if (continuation = @state["review_continuation"]) && %w[queued running stalled].include?(continuation["status"])
+        continuation.merge!("status" => "invalidated",
+          "reason" => status == "stop_unconfirmed" ? "stop_unconfirmed" : "task_stopped")
+      end
       previous = @state["completion_readiness"] || {}
       @state["completion_readiness"] = previous.merge(
         "status" => status == "complete" ? "complete" : status == "stop_unconfirmed" ? "stop_unconfirmed" : "stopped",

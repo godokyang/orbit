@@ -50,12 +50,39 @@ module Orbit
     BILLING_ROUTES = %w[direct_api subscription_quota unknown].freeze
     # Bump when the canonical signature material changes, so a selection
     # recorded under older material is never reused as if nothing changed.
-    SIGNATURE_VERSION = "orbit-checker-selection-signature-v8"
+    SIGNATURE_VERSION = "orbit-checker-selection-signature-v9"
     # Distinguishes "no release injected" (production: read the reviewed file)
     # from an explicitly injected release, including an injected nil.
     UNSET = Object.new
 
     attr_reader :last_jev_trace
+
+    # Counts names in the project's version-control index. It exposes project
+    # scale and common file types without opening or sending file contents.
+    def self.project_scale(project_root)
+      bytes = IO.popen(["git", "-C", project_root.to_s, "ls-files", "-z"], err: File::NULL, &:read)
+      return { "status" => "unavailable", "scope" => "git ls-files" } unless $?.success?
+
+      paths = bytes.split("\0").reject(&:empty?)
+      counts = Hash.new(0)
+      paths.each do |path|
+        base = File.basename(path)
+        extension = File.extname(base).downcase
+        kind = if base.start_with?(".") && extension.empty?
+                 "dotfile"
+               elsif extension.empty?
+                 "no_extension"
+               else
+                 extension
+               end
+        counts[kind] += 1
+      end
+      { "status" => "available", "scope" => "tracked paths from git ls-files",
+        "tracked_file_count" => paths.length,
+        "common_file_types" => counts.sort_by { |kind, count| [-count, kind] }.first(12).to_h }
+    rescue Errno::ENOENT, IOError, SystemCallError
+      { "status" => "unavailable", "scope" => "git ls-files" }
+    end
 
     def initialize(connection:, project_root:, pool: ModelCandidatePool.new,
                    evidence_cache: ModelEvidenceCache.new, advisor: nil, probe: nil,
@@ -484,7 +511,7 @@ module Orbit
 
     def judgment_candidate(prepared, model)
       entry = { "model" => model, "identity" => prepared.dig("identities", model),
-                "capability_facts" => prepared.dig("facts", model) }
+                "capability_facts" => capability_facts_without_duplicate_prior(prepared.dig("facts", model)) }
       if prepared["evidence"].key?(model)
         entry["evidence"] = prepared["evidence"][model]
       end
@@ -493,6 +520,29 @@ module Orbit
       end
 
       entry
+    end
+
+    # The model overview prior is labeled separately in the projected JEV
+    # state. Keep structural route facts, provenance, limits, conflicts and
+    # unknowns here without repeating the same benchmark payload.
+    def capability_facts_without_duplicate_prior(value)
+      return value unless value.is_a?(Hash)
+
+      facts = value.dup
+      catalog = facts["catalog"]
+      return facts unless catalog.is_a?(Hash)
+
+      catalog = catalog.dup
+      catalog.delete("prior")
+      catalog_facts = catalog["facts"]
+      if catalog_facts.is_a?(Hash)
+        catalog_facts = catalog_facts.dup
+        catalog_facts.delete("metrics")
+        catalog_facts.delete("benchmarks")
+        catalog["facts"] = catalog_facts
+      end
+      facts["catalog"] = catalog
+      facts
     end
 
     def overview_diagnostics
@@ -573,9 +623,11 @@ module Orbit
           gate_note = judgment_gate(prepared, projected_state)
           if gate_note.nil?
             begin
+              compaction = checker_compaction(prepared, judgment_state, judged)
               judgment = jev_advisor.assess_checker_quality(
                 state: judgment_state,
-                candidates: judged.map { |candidate| judgment_candidate(prepared, candidate) }
+                candidates: judged.map { |candidate| judgment_candidate(prepared, candidate) },
+                compaction: compaction
               )
               @last_jev_trace = jev_advisor.last_trace if jev_advisor.respond_to?(:last_trace)
             rescue StandardError => error
@@ -693,10 +745,66 @@ module Orbit
     # choose receives that same projection.
     def quality_body(prepared, judged)
       context = prepared["state"].is_a?(Hash) ? prepared["state"] : {}
+      instruction = prepared["instruction"].to_s
+      work_unit = context["work_unit"]
+      acceptance = work_unit.is_a?(Hash) ? work_unit["acceptance"] : context["acceptance"]
+      acceptance_text = acceptance.is_a?(Array) ? acceptance : [acceptance]
+      if !instruction.empty? && acceptance_text.map(&:to_s).reject(&:empty?) == [instruction]
+        if work_unit.is_a?(Hash)
+          context = context.merge("work_unit" => work_unit.merge("acceptance" => []))
+        else
+          context = context.merge("acceptance" => [])
+        end
+      end
       context.merge(
-        "instruction" => prepared["instruction"].to_s,
+        "instruction" => instruction,
         "candidates" => judged.map { |candidate| judgment_candidate(prepared, candidate) }
       )
+    end
+
+    def checker_compaction(prepared, body, judged)
+      # Only optional explanatory overview is compressible. The task request,
+      # acceptance and work-unit constraints remain in their structured fields.
+      overview = body["task_overview"]
+      overview_text = overview.is_a?(Array) ? overview.map(&:to_s).reject(&:empty?).uniq.join("\n") : overview.to_s
+      return nil if overview_text.strip.empty?
+
+      required = []
+      add_required = lambda do |role, value|
+        Array(value).each do |item|
+          text = item.to_s.strip
+          required << { "role" => role, "text" => text } unless text.empty?
+        end
+      end
+      add_required.call("effective task instruction", body["instruction"])
+      add_required.call("top-level acceptance", body["acceptance"])
+      unit = body["work_unit"].is_a?(Hash) ? body["work_unit"] : {}
+      %w[objective requirements decisions acceptance escalation].each do |field|
+        add_required.call("work-unit #{field}", unit[field])
+      end
+      add_required.call("scope allowed paths", unit.dig("scope", "allowed_paths"))
+
+      candidates = judged.filter_map do |model|
+        facts = prepared.dig("facts", model)
+        identity = prepared.dig("identities", model)
+        next unless facts.is_a?(Hash) && identity.is_a?(Hash)
+
+        { "model" => model,
+          "context_limit_tokens" => facts.dig("execution_eligibility", "context", "configured_limit"),
+          "capability" => facts.slice("catalog", "execution_eligibility", "eligibility"),
+          "identity" => identity }
+      end
+      return nil if candidates.empty?
+
+      replace = lambda do |text|
+        compacted = JSON.parse(JSON.generate(body))
+        compacted.delete("task_overview")
+        compacted["selection_compacted_material"] = text
+        compacted
+      end
+      { purpose: "checker_selection", material: overview_text, must_keep: required,
+        candidates: candidates, replace: replace, language: "unknown",
+        content_type: ["optional_task_overview"] }
     end
 
     def choose_state(prepared)

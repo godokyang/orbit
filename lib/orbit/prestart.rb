@@ -29,7 +29,7 @@ module Orbit
     # Deterministic classification rules; bump when wording or patterns move.
     RULE_VERSION = "orbit-entry-rules-3"
     QUESTION_SET_VERSION = "orbit-entry-3"
-    INPUT_VERSION = "orbit-entry-input-2"
+    INPUT_VERSION = "orbit-entry-input-3"
     DECISION_VERSION = "orbit-entry-decision-2"
     CALIBRATION_RELATIVE_PATH = ".orbit/jev-entry.json"
     PROMPT_BUDGET = 8000
@@ -174,12 +174,17 @@ module Orbit
     end
 
     def excerpt(text)
-      JevAdvisor.limit(text.to_s, EXCERPT_LIMIT)
+      value = text.to_s
+      value.length > EXCERPT_LIMIT ? "#{value[0, EXCERPT_LIMIT]}…[truncated]" : value
     end
 
     private
 
     def decide_uncertain(text)
+      if text.to_s.length > PROMPT_BUDGET
+        return outcome("uncertain", "root_decides",
+                       "the current user message exceeds the reviewed entry input budget; Root decides without truncation")
+      end
       calibration = load_calibration
       return outcome("uncertain", "root_decides", calibration) if calibration.is_a?(String)
       if calibration.nil?
@@ -264,9 +269,7 @@ module Orbit
     def entry_state(text)
       {
         "input_version" => INPUT_VERSION,
-        "instruction" => JevAdvisor.limit(text.to_s, PROMPT_BUDGET),
-        "instruction_truncated" => text.to_s.length > PROMPT_BUDGET,
-        "git" => JevAdvisor.git_changes(@project_root)
+        "instruction" => text.to_s
       }
     end
 
@@ -403,8 +406,7 @@ module Orbit
       state = sample["state"]
       return false unless state.is_a?(Hash) && state["input_version"] == PrestartClassifier::INPUT_VERSION &&
                           state["instruction"].is_a?(String) && !state["instruction"].strip.empty? &&
-                          state["instruction"].length <= PrestartClassifier::PROMPT_BUDGET &&
-                          [true, false].include?(state["instruction_truncated"]) && state["git"].is_a?(Hash)
+                          state["instruction"].length <= PrestartClassifier::PROMPT_BUDGET
 
       judgment = sample["judgment"]
       return false unless judgment.is_a?(Hash) && judgment["schema_version"] == JudgmentResult::SCHEMA_VERSION &&

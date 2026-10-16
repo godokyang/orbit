@@ -500,12 +500,21 @@ module Orbit
     # whether the user must do anything. Internal verdict tokens stay only as
     # the verdict value itself, never as the state name.
     def check_activity_line(state)
+      if %w[starting running].include?(state["status"]) && state.dig("review", "blocked").is_a?(Hash) && !check_in_flight?(state)
+        return "检查状态：检查模型受阻，尚未开始（由当前助手处理，任务未通过）"
+      end
+      if %w[starting running].include?(state["status"]) && state.dig("requirement_coverage", "current") &&
+         state.dig("review_continuation", "status") == "stalled" && !check_in_flight?(state) && !manual_check_queued?(state)
+        return "检查状态：续查没有进展，已停止自动续查（由当前助手处理检查阻塞，任务未通过）"
+      end
       activity = check_activity(state)
       case activity
       when "running"
         "检查状态：独立检查进行中（等待结果即可，无需重复请求检查）"
       when "queued"
-        if %w[starting running].include?(state["status"]) && state["next_check_manual"] == true
+        if state.dig("review_continuation", "status") == "queued" && state.dig("requirement_coverage", "current")
+          "检查状态：剩余事项续查已排队（尚未开始，无需重新交卷）"
+        elsif %w[starting running].include?(state["status"]) && state["next_check_manual"] == true
           "检查状态：手动终检已排队（不是任务完成）"
         else
           "检查状态：自动检查已安排（尚未开始，任务未完成）"
@@ -623,11 +632,24 @@ module Orbit
         return "等待当前助手结束回复，Orbit 随后核对是否完成"
       end
       return "重新绑定工作区" if rebind_action?(state)
+      return "由独立检查者继续核查，等待结果；当前助手无需重复交卷" if check_in_flight?(state)
+      return "由当前助手核对检查模型的可用性或显式重选；检查尚未开始" if state.dig("review", "blocked").is_a?(Hash)
+      continuation = state["review_continuation"]
+      if continuation.is_a?(Hash) && state.dig("requirement_coverage", "current")
+        return "由当前助手处理检查无进展的原因；无需仅为续查重新交卷，任务尚未通过" if continuation["status"] == "stalled" && !manual_check_queued?(state)
+        return "由独立检查者续查剩余事项（已排队，尚未开始）；当前助手无需重复交卷" if continuation["status"] == "queued"
+      end
       return "手动检查已排队" if manual_check_queued?(state)
       findings = state["findings"]
       open = findings.is_a?(Hash) && findings.each_value.any? { |finding| finding.is_a?(Hash) && finding["status"] == "open" }
       clues = state.dig("recheck", "findings")
       return "先处理检查问题，再请求终检" if open || (clues.is_a?(Array) && !clues.empty?)
+      coverage = state["requirement_coverage"]
+      if coverage.is_a?(Hash) && coverage["current"] && !coverage["ready"]
+        pending = Array(coverage["items"]).select { |item| item.fetch("scope", "delivery") == "delivery" && item["status"] == "unverified" }
+        return "由当前助手修复检查指出的缺陷，再请求终检" if pending.any? { |item| item["gap_kind"] == "defect" }
+        return "由当前助手补充检查列出的必要证据，再请求终检" if pending.any? { |item| item["gap_kind"] == "evidence_missing" }
+      end
       ready = state["completion_readiness"]
       if ready.is_a?(Hash)
         return "当前助手调用 Orbit stop(intent=complete) 并结束本轮" if ready["status"] == "ready"
@@ -799,8 +821,16 @@ module Orbit
         "任务执行中：完成申请已入队，Orbit 正在核对停止；等待结果，无需用户操作。"
       elsif ready.is_a?(Hash) && ready["status"] == "ready"
         "当前版本可申请完成：停止收尾由助手完成；无需用户操作。"
-      elsif check_in_flight?(state) || manual_check_queued?(state)
-        "任务执行中：独立检查进行中或已排队，等待结果即可；无需用户操作。"
+      elsif check_in_flight?(state)
+        "任务执行中：独立检查正在核查，等待结果即可；无需用户操作。"
+      elsif state.dig("review", "blocked").is_a?(Hash)
+        "任务尚未通过：检查模型受阻，由当前助手处理；尚未开始检查。"
+      elsif state.dig("review_continuation", "status") == "stalled" && state.dig("requirement_coverage", "current") && !manual_check_queued?(state)
+        "任务尚未通过：续查没有进展，由当前助手处理检查阻塞；无需用户操作。"
+      elsif state.dig("review_continuation", "status") == "queued" && state.dig("requirement_coverage", "current")
+        "任务执行中：剩余事项续查已排队，尚未开始；无需重新交卷或用户操作。"
+      elsif manual_check_queued?(state)
+        "任务执行中：独立终检已排队，尚未开始；无需用户操作。"
       else
         "任务执行中：执行、检查与修复由助手继续处理；需要你提供材料或做决定时，任务会明确停为「需要用户处理」。"
       end
@@ -811,6 +841,17 @@ module Orbit
       return "要求覆盖：历史记录未提供逐项覆盖" unless state["coverage_required"] || coverage
       return "要求覆盖：尚未取得完整逐项证据" unless coverage.is_a?(Hash)
       return "要求覆盖：当前版本 #{coverage['verified']} 项交付要求已核验（检查者枚举完整；生命周期另经终检与停止门核实）" if coverage["ready"]
+
+      if coverage["current"]
+        pending = Array(coverage["items"]).select { |item| item.fetch("scope", "delivery") == "delivery" && item["status"] == "unverified" }
+        counts = pending.group_by { |item| item["gap_kind"] }.transform_values(&:length)
+        if counts.keys.any? { |kind| %w[not_checked evidence_missing defect].include?(kind) }
+          unknown = pending.length - %w[not_checked evidence_missing defect].sum { |kind| counts.fetch(kind, 0) }
+          return "要求覆盖：已核验 #{coverage['verified']} 项；待检查 #{counts.fetch('not_checked', 0)} 项；" \
+                 "缺少必要证据 #{counts.fetch('evidence_missing', 0)} 项；缺陷 #{counts.fetch('defect', 0)} 项；原因未知 #{unknown} 项" \
+                 "#{coverage['complete'] ? '' : '；验收项尚未枚举完整'}"
+        end
+      end
 
       "要求覆盖：尚未确认 — #{coverage['gap'] || '有未核验要求或枚举不完整'}"
     end

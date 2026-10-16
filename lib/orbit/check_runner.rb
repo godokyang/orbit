@@ -59,6 +59,15 @@ module Orbit
     CONTEXT_DELIVERY_TEXT_CAP = 4_000
     CONTEXT_EVENT_CAP = 500
     CONTEXT_MEMBER_RESULT_CAP = 600
+    # Earlier-check coverage delivered to the checker as a starting map. Its
+    # requirement text is identity the runtime matches on, so it is delivered
+    # whole at the contract's own representation bound; the earlier evidence is
+    # a pointer, so it is bounded harder than ordinary history strings. Any cut
+    # keeps the ordinary `…[length:sha256]` marker.
+    CONTEXT_COVERAGE_REQUIREMENT_CAP = 1_000
+    CONTEXT_COVERAGE_TEXT_CAP = 240
+    # Omission identities stay bounded: a prefix plus the length/sha256 marker.
+    CONTEXT_COVERAGE_IDENTIFIER_CAP = 80
     CONTEXT_CAPS = {
       string_cap: CONTEXT_STRING_CAP,
       list_limit: 40,
@@ -74,7 +83,9 @@ module Orbit
       # Work-unit records and their declared authorization/requirement lists.
       work_unit_limit: 40,
       declared_list_limit: 64,
-      omitted_id_limit: 50
+      omitted_id_limit: 50,
+      # Merged coverage items and pending review requirements per check.
+      prior_coverage_item_limit: 64
     }.freeze
     # Ordered budget pressure at the hard byte cap: each level is cumulative
     # and drops data that cannot still change a verdict before newer findings,
@@ -88,7 +99,7 @@ module Orbit
     ].freeze
     CONTEXT_KEYS = %w[
       root root_verifications task_delivery task_git review_focus findings recent_events check_history recheck execution_members work_units decisions dispute
-      estimate hard_deadline elapsed_seconds project_rules uncopied_entries review_sources
+      estimate hard_deadline elapsed_seconds project_rules uncopied_entries review_sources requirement_coverage review_continuation
     ].freeze
     # Declared authorization and requirement lists inside a work unit. A silent
     # tail cut would turn a complete declaration into an apparently narrower
@@ -174,7 +185,8 @@ module Orbit
           coverage_evidence_max: item_properties.dig("evidence", "maxLength"),
           coverage_ref_max: item_properties.dig("ref", "maxLength"),
           coverage_statuses: item_properties.dig("status", "enum"),
-          coverage_scopes: item_properties.dig("scope", "enum")
+          coverage_scopes: item_properties.dig("scope", "enum"),
+          coverage_gap_kinds: item_properties.dig("gap_kind", "enum")
         }
         # maxItems is optional JSON Schema metadata. Its absence means the
         # array has no schema-level upper bound; only minItems is required.
@@ -324,7 +336,8 @@ module Orbit
                "when that layer already trimmed the log. Growing lists keep " \
                "their newest entries, and " \
                "context_compression, findings_omitted, recheck_omitted, review_focus_omitted, " \
-               "work_units_omitted and " \
+               "work_units_omitted, requirement_coverage.items_omitted, " \
+               "review_continuation[*]_omitted and " \
                "check_history.recent_omitted record what was trimmed. The original instruction, amendments " \
                "and named basis above are complete and are not compressed.\n\n" \
                "`work_units` is the authorization record. Each unit's declared scope lists " \
@@ -450,6 +463,88 @@ module Orbit
                                  "boundary or overreach can be judged from it" }
     end
 
+    # Earlier-check coverage is decision memory for the same input and
+    # artifact version, not a history tail: the checker needs every
+    # requirement and its current status to continue earlier work instead of
+    # revoking it by omission. A delivered requirement keeps its full text (the
+    # contract bounds it at 1000 characters) and pressure shrinks the delivered
+    # entry count instead; everything dropped is named by count, a sha256 over
+    # the full identities and bounded prefixes, never by the long texts.
+    def compress_requirement_coverage(coverage, caps)
+      return nil unless coverage.is_a?(Hash)
+
+      projection = coverage.each_with_object({}) do |(key, value), fields|
+        next if key.to_s == "items"
+
+        fields[key.to_s] = bound_value(value, caps)
+      end
+      items = coverage["items"].is_a?(Array) ? coverage["items"] : []
+      kept, omitted = bounded_newest(items, caps[:prior_coverage_item_limit])
+      projection["items"] = kept.map { |item| compress_requirement_entry(item, caps) }
+      projection["items_omitted"] = coverage_omission_record(omitted, caps) if omitted.any?
+      projection
+    end
+
+    # One delivered requirement entry: requirement text stays whole, every
+    # other string is a bounded pointer or status fact.
+    def compress_requirement_entry(entry, caps)
+      return bound_value(entry, caps, string_cap: CONTEXT_COVERAGE_TEXT_CAP) unless entry.is_a?(Hash)
+
+      entry.sort_by { |key, _| key.to_s }.to_h do |key, value|
+        name = key.to_s
+        cap = if name == "requirement"
+                [caps[:string_cap], CONTEXT_COVERAGE_REQUIREMENT_CAP].max
+              else
+                [caps[:string_cap], CONTEXT_COVERAGE_TEXT_CAP].min
+              end
+        [name, bound_value(value, caps, string_cap: cap)]
+      end
+    end
+
+    # What an earlier check left pending or already established for this
+    # version. Both lists keep their newest entries within the bound and
+    # requirement texts stay whole; any forced cut is named.
+    def compress_review_continuation(continuation, caps)
+      return nil unless continuation.is_a?(Hash)
+
+      continuation.each_with_object({}) do |(key, value), fields|
+        name = key.to_s
+        next unless value.is_a?(Array)
+
+        kept, omitted = bounded_newest(value, caps[:prior_coverage_item_limit])
+        fields[name] = kept.map { |entry| compress_requirement_entry(entry, caps) }
+        fields["#{name}_omitted"] = coverage_omission_record(omitted, caps) if omitted.any?
+      end.tap do |fields|
+        continuation.each do |key, value|
+          next if value.is_a?(Array)
+
+          fields[key.to_s] = bound_value(value, caps)
+        end
+      end
+    end
+
+    def bounded_newest(entries, limit)
+      max = [limit, 1].max
+      kept = entries.last(max)
+      [kept, entries[0...(entries.length - kept.length)]]
+    end
+
+    # Omission identity is bounded: count, a sha256 over the full identities,
+    # and the ordinary prefix+length/sha256 marker per listed id.
+    def coverage_omission_record(entries, caps)
+      full = entries.map { |entry| coverage_full_identifier(entry) }
+      { "count" => full.length,
+        "ids_sha256" => Digest::SHA256.hexdigest(JSON.generate(full)),
+        "ids" => full.last(caps[:omitted_id_limit]).map { |id| bound_string(id, CONTEXT_COVERAGE_IDENTIFIER_CAP) } }
+    end
+
+    def coverage_full_identifier(item)
+      return item.to_s unless item.is_a?(Hash)
+
+      text = item["requirement"].to_s
+      text.empty? ? item.keys.sort.join(",") : text
+    end
+
     # Bounded check-history projection. The current-input anchor and a bounded
     # recent window survive; everything dropped is reported as a count, so an
     # important older check is never silently replaced by a bare absence.
@@ -514,6 +609,10 @@ module Orbit
       end
       history = compress_check_history(context["check_history"], caps)
       compressed["check_history"] = history if history
+      coverage = compress_requirement_coverage(context["requirement_coverage"], caps)
+      compressed["requirement_coverage"] = coverage if coverage
+      continuation = compress_review_continuation(context["review_continuation"], caps)
+      compressed["review_continuation"] = continuation if continuation
       recheck, recheck_omitted = compress_recheck(context["recheck"], caps)
       compressed["recheck"] = recheck
       compressed["recheck_omitted"] = recheck_omitted if recheck_omitted
@@ -1041,11 +1140,15 @@ module Orbit
         "Return coverage with exactly complete (boolean) and items (one or more entries). Each item has " \
         "requirement (distinct non-empty text, at most 1000 characters), scope (delivery or lifecycle), status (verified or unverified), " \
         "and evidence (at most 1000 characters; verified needs concrete non-empty evidence), plus an optional " \
-        "ref (at most 200 characters). Set ref only when the instruction, amendments or named basis already " \
+        "ref (at most 200 characters) and an optional gap_kind (one of: #{self.class.result_structure[:coverage_gap_kinds].join(', ')}). Set ref only when the instruction, amendments or named basis already " \
         "label that requirement with an identifier (for example a standard number the requester assigned): copy " \
-        "it exactly as written and never invent, normalize or infer one; omit the ref key when there is no such label (never write an empty string). Enumerate each " \
-        "requirement from the original instruction, effective amendments and named basis, including referenced " \
-        "specification files that are available in the read-only artifact sources. complete=true means you have enumerated them all; do not " \
+        "it exactly as written and never invent, normalize or infer one; omit the ref key when there is no such label (never write an empty string). Enumerate every acceptance requirement within the effective " \
+        "delivery scope from the original instruction, effective amendments and named basis, including referenced " \
+        "specification files that are available in the read-only artifact sources. Process instructions still " \
+        "govern how the work is judged, but unless the instruction explicitly asks for a process audit they " \
+        "are not a checklist of separate proof items to read and re-establish one by one. Documentation, " \
+        "permission, resource-release and reporting obligations the instruction itself makes part of the " \
+        "delivery are acceptance requirements in scope and are never waved through. complete=true means you have enumerated all of them; do not " \
         "silently omit requirements. Mark unread, untested or otherwise unsupported requirements unverified " \
         "and explain the gap. delivery covers artifacts, integration, requested test execution and answer content. " \
         "lifecycle covers only this final review, the subsequent completion/confirmed stop and the subsequent " \
@@ -1066,7 +1169,44 @@ module Orbit
         "Local unit evidence does not replace whole-task integration. " \
         "Process checks and adjudication may report their limited scope but cannot grant delivery coverage. " \
         "If the scope cannot be completely enumerated within the output bound, complete=false. Missing or " \
-        "incomplete coverage cannot grant final completion."
+        "incomplete coverage cannot grant final completion.\n\n" \
+        "Set gap_kind only on an unverified item, to say why it is not verified; never on a verified one. " \
+        "not_checked means this check did not look at that requirement's existing evidence this round, or it " \
+        "is a future obligation: the earlier material may still stand. evidence_missing means you looked and " \
+        "the evidence the requirement needs is absent or insufficient, including a required test execution " \
+        "or run artifact that does not exist — this read-only session never runs tests, so a missing required " \
+        "run is evidence_missing and never not_checked. defect means you inspected it and found a real " \
+        "problem; raise that problem as a finding with the same concrete evidence and the action it needs. " \
+        "An item you leave without gap_kind stays unclassified, and no class is inferred from your evidence " \
+        "text or from an earlier record.\n\n" \
+        "The program record's requirement_coverage is the merged projection of earlier valid checks on this " \
+        "same input and artifact version, kept per requirement text and scope; a verification carried forward " \
+        "names the check that established it (verified_by_check). Treat it as your starting map, not as " \
+        "proof. Repeat each requirement's text and scope as they are listed, and do not revoke an earlier " \
+        "valid verification merely because this check did not re-read that material: report status " \
+        "unverified with gap_kind not_checked, and the runtime keeps the standing verification for an " \
+        "unchanged requirement and scope. Re-read a carried item before changing it, and report verified only " \
+        "with your own current evidence, or evidence_missing/defect when that is what you actually found. " \
+        "Earlier checks on a different input or artifact version never grant eligibility by themselves: you " \
+        "may inspect them, and if you conclude they still apply to the current version, report verified as " \
+        "your own current judgment and say in that item's evidence which earlier check and why it still " \
+        "applies. review_continuation describes this run against that coverage: its status " \
+        "(queued, running, stalled, finished or invalidated), the origin and previous check, whether it " \
+        "was manual, and the requirements earlier checks left pending or already established for this " \
+        "same version. Continue the pending requirements first, treat the established ones as the map " \
+        "above, and say in reason when the recorded status shows work really has not progressed. Its " \
+        "digests are the version the earlier checks ran on: if they do not match the current input or " \
+        "artifact, nothing in it grants eligibility here. Requirement text in that map and in the " \
+        "continuation lists is delivered whole, but an entry may still show a `…[length:sha256]` marker " \
+        "or be named only under an *_omitted count with bounded ids: that text was cut here. Re-read that " \
+        "requirement from the original instruction, amendments or named basis before judging or repeating " \
+        "it, and never write a marker or an abbreviated requirement back into a requirement field. " \
+        "complete=true still means THIS review " \
+        "enumerated every acceptance requirement in scope itself.\n\n" \
+        "Judge the delivery the instruction actually asks for. Weigh each in-scope requirement on the " \
+        "evidence that actually bears on it — user-visible functional behavior, key security boundaries and " \
+        "the real executions it needs — and re-audit the whole process history only when the instruction " \
+        "explicitly asks for a process audit."
     end
 
     def delivery_rules_note
@@ -1287,7 +1427,7 @@ module Orbit
         extra = item.is_a?(Hash) && rules[:coverage_item_closed] ? item.keys - rules[:coverage_item_properties] : []
         missing = item.is_a?(Hash) ? rules[:coverage_item_required] - item.keys : []
         unless item.is_a?(Hash) && extra.empty? && missing.empty?
-          problems << "coverage.items[#{index}] must contain requirement, status, evidence and optional scope and ref"
+          problems << "coverage.items[#{index}] must contain requirement, status, evidence and optional scope, ref and gap_kind"
           next
         end
         requirement, evidence = item.values_at("requirement", "evidence")
@@ -1313,6 +1453,15 @@ module Orbit
           ref = item["ref"]
           unless ref.is_a?(String) && ref.length <= rules[:coverage_ref_max] && (blank_coverage_ref?(ref) || !ref.match?(/\p{Cc}/))
             problems << "coverage.items[#{index}].ref must be a string of at most #{rules[:coverage_ref_max]} characters without control characters (empty or whitespace-only counts as omitted)"
+          end
+        end
+        # gap_kind classifies why an item is not verified. Only the schema's
+        # own enum values are accepted, and only on an unverified item: a
+        # verified item carries evidence, not a gap class, and the program
+        # never reads a class out of evidence text or an earlier record.
+        if item.key?("gap_kind")
+          unless item["status"] == "unverified" && rules[:coverage_gap_kinds].include?(item["gap_kind"])
+            problems << "coverage.items[#{index}].gap_kind must be one of #{rules[:coverage_gap_kinds].join(', ')} and requires an unverified item"
           end
         end
       end

@@ -124,6 +124,14 @@
                 ],
                 "description": "Delivery requirements, including actual tests, must be verified; future final-check, closing-report and confirmed-stop obligations remain listed and are verified by runtime lifecycle gates. Missing scope keeps the earlier delivery-only interpretation."
               },
+              "gap_kind": {
+                "enum": [
+                  "not_checked",
+                  "evidence_missing",
+                  "defect"
+                ],
+                "description": "Optional classification of why an item is not verified, and valid only with status unverified: not_checked means this check did not look at that requirement's existing evidence this round (or it is a future obligation), so earlier material may still stand; evidence_missing means the check looked and the evidence the requirement needs is absent or insufficient, including a required test execution or run artifact that does not exist (a read-only check never runs tests, so a missing required run is evidence_missing and never not_checked); defect means the check inspected it and found a real problem (raised as a finding too). An item without it stays unclassified, and no class is ever inferred from evidence text or from an earlier record. Any other value, or a value on a verified item, is a contract violation like any other field."
+              },
               "ref": {
                 "type": "string",
                 "maxLength": 200,

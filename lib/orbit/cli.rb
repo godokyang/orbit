@@ -405,6 +405,7 @@ module Orbit
         opts.on("--thread ID") { |value| options[:thread] = value }
         opts.on("--socket PATH") { |value| options[:socket] = value }
         opts.on("--review-model MODEL") { |value| options[:model] = value }
+        opts.on("--task-overview TEXT") { |value| options[:task_overview] = value }
         opts.on("--message-id ID") { |value| options[:message_id] = value }
         opts.on("--prompt-file FILE") { |value| options[:prompt_file] = value }
         opts.on("--basis FILE") { |value| options[:basis] << value }
@@ -488,8 +489,17 @@ module Orbit
           ModelAuthorization.check!(connection.configured_model, allowed_models)
         end
         explicit_review_model = options[:model]
+        overview = options[:task_overview] || resumed&.dig(:state, "review", "task_overview")
+        project_scale = resumed&.dig(:state, "review", "project_scale") ||
+          CheckerModelSelector.project_scale(File.realpath(options[:project]))
+        selection_context = { "acceptance" => selection_instruction, "acceptance_source" => "task_instruction",
+                              "task_overview" => overview, "project_scale" => project_scale,
+                              "workspace" => resumed&.dig(:state, "workspace") ||
+                                WorkspaceBinding.bind(project_root: File.realpath(options[:project])),
+                              "review_role" => "reviewer" }
         options[:model], options[:selection], options[:jev_trace] = select_checker_model(
-          options[:model], connection, options[:project], selection_instruction, allowed_models: allowed_models
+          options[:model], connection, options[:project], selection_instruction,
+          allowed_models: allowed_models, state: selection_context
         )
       ensure
         connection.close
@@ -505,7 +515,8 @@ module Orbit
           TaskRecord.create(
             project_root: options[:project], instruction: instruction, source: source,
             connection: connection_record,
-            review: { "model" => options[:model], "interval_seconds" => options[:interval], "selection" => options[:selection] }.merge(
+            review: { "model" => options[:model], "interval_seconds" => options[:interval], "selection" => options[:selection],
+                      "task_overview" => overview, "project_scale" => project_scale, "fixed_for_task" => true }.merge(
               explicit_review_model ? { "explicit_model" => options[:model] } : {}
             ),
             basis: options[:basis], estimate: options[:estimate], takeover: takeover,
@@ -681,9 +692,9 @@ module Orbit
     # every later check apply exactly the same rules (pool ∩ session catalog,
     # reviewed task-fit judgment and actual model facts, then isolated resolvability
     # order). See CheckerModelSelector for the full contract.
-    def select_checker_model(explicit, connection, project, instruction, allowed_models: nil)
+    def select_checker_model(explicit, connection, project, instruction, allowed_models: nil, state: {})
       selector = CheckerModelSelector.new(connection: connection, project_root: project, allowed_models: allowed_models)
-      model, selection = selector.select(explicit: explicit, instruction: instruction, selected_for: "start")
+      model, selection = selector.select(explicit: explicit, instruction: instruction, selected_for: "start", state: state)
       [model, selection, selector.last_jev_trace]
     end
 

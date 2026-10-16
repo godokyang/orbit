@@ -1,6 +1,6 @@
 {
   "contract": "orbit-integration",
-  "version": "1.5",
+  "version": "1.6",
   "major": 1,
   "description": "Machine-readable form of contracts/integration.md. Versioned independently of the software version. Within one major version entries are only added, never changed or removed; a breaking change raises the major version and is named in the release notes. `orbit capabilities --json` serves `capabilities` from this file and the contract test reads `commands` and `status_fields` from it.",
   "status_values": [
@@ -78,6 +78,8 @@
     { "path": "requirement_coverage.items[].evidence", "present": "after_check" },
     { "path": "requirement_coverage.items[].scope", "present": "after_check" },
     { "path": "requirement_coverage.items[].ref", "present": "when_reported" },
+    { "path": "requirement_coverage.items[].gap_kind", "present": "when_reported" },
+    { "path": "requirement_coverage.items[].verified_by_check", "present": "when_reported" },
     { "path": "external_refs", "present": "when_provided" },
     { "path": "continuation.previous_task", "present": "when_resumed" },
     {"path": "continuation.wake.status", "present": "when_wake_requested"},
@@ -119,6 +121,7 @@
       "max_length": 256,
       "inherited_on_resume": false
     },
+    "check_coverage_continuation": {"since": "1.6", "gap_field": "gap_kind", "gap_values": ["not_checked", "evidence_missing", "defect"], "gap_status": "unverified", "verified_source_field": "verified_by_check", "legacy_gap": "unknown", "cross_version_automatic_reuse": false},
     "check_coverage_ref": {
       "since": "1.0",
       "max_length": 200,

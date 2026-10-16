@@ -12,6 +12,8 @@
 | OMP 单宿主协作决定 | [ADR-008](adr/008-omp-native-collaboration-base.md) |
 | 用户自选模型池决定 | [ADR-009](adr/009-user-selected-model-pool.md) |
 | Agent 自主判断与程序职责 | [ADR-011](adr/011-agent-autonomy-and-runtime-responsibility.md)；阶段一与 Loom 协同的当前验证边界见交接 |
+| JEV 输入、观察节奏与按需压缩的决定 | [ADR-012](adr/012-jev-purpose-specific-input-and-compaction.md)；行为规则见任务运行合同，实现和验证见交接 |
+| 终检范围、结论沿用与续查职责 | [ADR-013](adr/013-final-review-scope-and-continuation.md)；实施状态见总待办 |
 | 当前阶段与待办 | [唯一总待办](plan/agent-autonomy-implementation.md) |
 | 当前交接 | [交接](plan/handoff.md) |
 | 当前限制与未测范围 | [未完成事项](plan/debt-ledger.md) |

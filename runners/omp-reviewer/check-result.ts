@@ -52,6 +52,7 @@ export interface CheckResultStructure {
 	coverageRefMax: number;
 	coverageStatuses: string[];
 	coverageScopes: string[];
+	coverageGapKinds: string[];
 }
 
 export function deriveCheckResultStructure(schema: Record<string, any>): CheckResultStructure {
@@ -94,6 +95,7 @@ export function deriveCheckResultStructure(schema: Record<string, any>): CheckRe
 		coverageRefMax: itemProperties.ref?.maxLength,
 		coverageStatuses: itemProperties.status?.enum,
 		coverageScopes: itemProperties.scope?.enum,
+		coverageGapKinds: itemProperties.gap_kind?.enum,
 	};
 	// maxItems is optional JSON Schema metadata. Its absence leaves only the
 	// required minimum; the reviewer does not invent an upper bound.
@@ -203,7 +205,7 @@ function coverageProblems(structure: CheckResultStructure, coverage: unknown): s
 		const itemExtra = structure.coverageItemClosed ? itemKeys.filter(key => !structure.coverageItemProperties.includes(key)) : [];
 		const itemMissing = structure.coverageItemRequired.filter(key => !itemKeys.includes(key));
 		if (!isObject || itemExtra.length || itemMissing.length) {
-			problems.push("each coverage item must contain requirement, status, evidence and optional scope and ref");
+			problems.push("each coverage item must contain requirement, status, evidence and optional scope, ref and gap_kind");
 			continue;
 		}
 		const entry = item as Record<string, unknown>;
@@ -228,6 +230,14 @@ function coverageProblems(structure: CheckResultStructure, coverage: unknown): s
 		if ("ref" in entry && (typeof entry.ref !== "string" || codePointLength(entry.ref) > structure.coverageRefMax ||
 			(entry.ref.trim() && /\p{Cc}/u.test(entry.ref)))) {
 			problems.push(`coverage ref must be a string of at most ${structure.coverageRefMax} characters without control characters (empty or whitespace-only counts as omitted)`);
+		}
+		// gap_kind classifies why an item is not verified. Only the schema's own
+		// enum values are accepted, and only on an unverified item: a verified
+		// item carries evidence, not a gap class, and the program never reads a
+		// class out of evidence text or an earlier record.
+		if ("gap_kind" in entry &&
+			!(entry.status === "unverified" && structure.coverageGapKinds.includes(entry.gap_kind as string))) {
+			problems.push(`coverage gap_kind must be one of ${structure.coverageGapKinds.join(", ")} and requires an unverified item`);
 		}
 	}
 	return problems;

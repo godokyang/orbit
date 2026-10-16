@@ -173,6 +173,8 @@ module IntegrationContractTest
     schema = JSON.parse(File.read(File.join(ROOT, "contracts/check-result.schema.json")))
     ref = schema.dig("properties", "coverage", "properties", "items", "items", "properties", "ref")
     assert(capabilities.dig("check_coverage_ref", "max_length") == ref.fetch("maxLength"), "declared ref bound is the schema bound")
+    gap = schema.dig("properties", "coverage", "properties", "items", "items", "properties", "gap_kind")
+    assert(capabilities.dig("check_coverage_continuation", "gap_values") == gap.fetch("enum"), "declared gap categories match the checker schema")
     assert(capabilities.dig("start_external_refs", "max_length") == Orbit::TaskRecord::EXTERNAL_REF_MAX &&
            capabilities.dig("start_external_refs", "max_refs") == Orbit::TaskRecord::EXTERNAL_REFS_MAX, "declared external ref limits are enforced limits")
     assert(CONTRACT.fetch("status_values").sort == %w[complete failed needs_user paused running starting stop_unconfirmed],
@@ -203,7 +205,7 @@ module IntegrationContractTest
                  "delivery" => { "ready" => true, "reason" => "delivered answer is visible" },
                  "coverage" => { "complete" => true, "items" => [
                    checked("S12 exact cents", "verified", "artifact.txt read", ref: "S12"),
-                   checked("S13 reject empty", "unverified", "", ref: "S13"),
+                   checked("S13 reject empty", "unverified", "missing necessary rejection evidence", ref: "S13", gap_kind: "evidence_missing"),
                    checked("closing report", "unverified", "", scope: "lifecycle", ref: "  ")
                  ] } }
       normalized = Orbit::CheckRunner.new(model: CHOSEN, executable: "unused").send(:validate_result, result)
@@ -219,6 +221,9 @@ module IntegrationContractTest
       assert(refs == { "S12 exact cents" => "S12", "S13 reject empty" => "S13", "closing report" => nil },
              "each reported ref is returned on its own coverage item and an unlabelled item has none")
       assert(status.dig("requirement_coverage", "ready") == false, "an unverified delivery item keeps the delivery unready")
+      items = status.dig("requirement_coverage", "items")
+      assert(items[0]["verified_by_check"].is_a?(String) && items[1]["gap_kind"] == "evidence_missing" &&
+             !items[0].key?("gap_kind"), "public coverage preserves the verified source and the specific unverified reason")
 
       receipt = orbit_json("stop", dir, "--json")
       assert(receipt["status"] == "queued" && !receipt.key?("stop_confirmation"), "stop --json is only a queued receipt")

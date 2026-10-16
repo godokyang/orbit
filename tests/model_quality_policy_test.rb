@@ -178,9 +178,9 @@ module ModelQualityPolicyTest
            record["candidate_gate"] == "candidate_task_fit" &&
            record["combination_proven_by_prior_per_question_releases"] == false &&
            raw["decision_version"] == "orbit-quality-decision-3" && loaded.is_a?(String) &&
-           loaded.include?("do not prove the two-stage combination") &&
-           policy::DELEGATION_QUESTION_SET == "jev-delegation-4" && policy::CANDIDATE_QUESTION_SET == "jev-candidates-4",
-           "decision 4 records the combination change and leaves the decision-3 raw release inactive")
+           loaded.include?("does not authorize") && policy.ranking_release(raw).nil? &&
+           policy::DELEGATION_QUESTION_SET == "jev-delegation-5" && policy::CANDIDATE_QUESTION_SET == "jev-candidates-5",
+           "a release with the old decision version cannot authorize the current combination")
   end
 
   def unreleased_scores_and_cheap_cost_keep_input_order
@@ -249,6 +249,10 @@ module ModelQualityPolicyTest
     checker = projected_state["task_context"].reject { |key, _| key == "work_unit" }.merge(
       "acceptance" => ["CLI result matches requirements"], "review_role" => "reviewer")
     assert(policy.profile_for(checker) == SCOPE, "bound review artifacts qualify without inventing a work unit")
+    deduplicated_checker = checker.merge("instruction" => "CLI result matches requirements",
+                                         "acceptance" => [])
+    assert(policy.profile_for(deduplicated_checker) == SCOPE,
+           "a deduplicated checker profile derives from the complete instruction without restoring duplicate acceptance")
     assert(!policy.ranking_release(reviewed.merge("provider" => nil, "model" => nil)), "nil identity cannot match nil metadata")
     assert(!policy.ranking_release(reviewed.merge("thresholds" => { "candidate_task_fit" => 0 })), "forged gates stay unreleased")
     altered = document

@@ -223,7 +223,7 @@ class RuntimeAdvisor
       "scores" => @scores, "usage" => { "input_tokens" => 10, "output_tokens" => 3 } }
   end
 
-  def assess_delegation(state:)
+  def assess_delegation(state:, compaction: nil)
     @delegation_calls << state
     raise @delegation_failure if @delegation_failure
 
@@ -231,7 +231,7 @@ class RuntimeAdvisor
       "scores" => @delegation_scores, "usage" => { "input_tokens" => 20, "output_tokens" => 4 } }
   end
 
-  def assess_candidates(state:, candidates:)
+  def assess_candidates(state:, candidates:, compaction: nil)
     @candidate_calls << { "state" => state, "candidates" => candidates }
     @on_candidate_call&.call
     { "provider" => "typesafe", "model" => "jev-test", "question_set_version" => Orbit::ModelQualityPolicy::QUESTION_SET_VERSIONS.fetch("candidates"),
@@ -781,14 +781,14 @@ fixture(interval: 300) do |root, record, host, checker, _runtime|
   host.working("progress")
   unit = declared_unit(record)
   selector = RuntimeMemberSelector.new
-  advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1, "artifact_ready" => 0.1)
+  advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1)
   runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor, member_selector: selector)
   now = Time.now.to_f
   runtime.tick(now: now + 6)
   request = selector.calls.first
   assert(request["work_unit"]["id"] == unit["id"] && request["work_unit"]["acceptance"] == unit["acceptance"] &&
-         request["state"]["instruction"] == record.inputs["instruction"] && request["state"]["workspace"] == record.state["workspace"],
-         "selection receives the actual work unit, instruction and workspace")
+         !request["state"].key?("instruction") && request["state"]["workspace"] == record.state["workspace"],
+         "selection keeps the actual work unit and workspace separate from task instruction text")
   hint = record.state["delegation_hint"]
   assert(hint["work_unit_id"] == unit["id"] && host.messages.last.include?("orbit-unit: #{unit['id']}") &&
          !host.messages.last.match?(/parallel_gain|end-to-end time|cost tier/), "new advice names the unit and has no time/tier score")
@@ -840,7 +840,7 @@ fixture(interval: 300, host_class: RuntimeBoundaryHost) do |root, record, host, 
   host.working("progress")
   unit = declared_unit(record)
   selector = RuntimeMemberSelector.new
-  advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1, "artifact_ready" => 0.1)
+  advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1)
   runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor, member_selector: selector)
   now = Time.now.to_f
   runtime.tick(now: now + 6)
@@ -870,7 +870,7 @@ fixture(interval: 300, host_class: RuntimeBoundaryHost) do |root, record, host, 
   host.working("progress")
   unit = declared_unit(record)
   selector = RuntimeMemberSelector.new
-  advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1, "artifact_ready" => 0.1)
+  advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1)
   runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor, member_selector: selector)
   now = Time.now.to_f
   runtime.tick(now: now + 6)
@@ -882,8 +882,8 @@ fixture(interval: 300, host_class: RuntimeBoundaryHost) do |root, record, host, 
   assert(record.state["last_user_message_id"] == posted["id"] &&
          record.state["unassigned_user_message_id"] == posted["id"],
          "the real user message moves the boundary and stays an unassigned amendment")
-  assert(runtime.send(:resource_call_ledger).calls.length == 4,
-         "a real user boundary move allows a fresh paid two-phase assessment")
+  assert(runtime.send(:resource_call_ledger).calls.length == 2,
+         "a new user boundary updates inputs without accelerating the five-minute JEV schedule")
   member = { "thread_id" => "orbit-revised-member", "tool_call_id" => "revised-call",
              "model" => "opencode-go/deepseek-v4.1-flash" }
   Orbit::WorkUnitStore.new(record).bind(unit["id"], member_id: member["thread_id"], tool_call_id: member["tool_call_id"],
@@ -899,7 +899,7 @@ fixture(interval: 300, host_class: RuntimeBoundaryHost) do |root, record, host, 
   host.working("progress")
   declared_unit(record)
   selector = RuntimeMemberSelector.new
-  advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1, "artifact_ready" => 0.1)
+  advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1)
   runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor, member_selector: selector)
   now = Time.now.to_f
   runtime.tick(now: now + 6)
@@ -917,7 +917,7 @@ fixture(interval: 300) do |root, record, _host, checker, _runtime|
   host = RuntimePoolHost.new(root)
   host.working("progress")
   declared_unit(record)
-  advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1, "artifact_ready" => 0.1)
+  advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1)
   selector = Orbit::MemberModelSelector.new(connection: host, project_root: root,
     pool: StubCandidatePool.new(["opencode-go/deepseek-v4.1-flash"]), evidence_cache: evidence_cache(root), advisor: advisor, release: nil)
   # The real selector owns the assessment; the OMP1 scheduling seam
@@ -967,7 +967,7 @@ fixture(interval: 300) do |root, record, host, checker, _runtime|
   host.working("progress")
   declared_unit(record)
   selector = RuntimeMemberSelector.new
-  advisor = RuntimeAdvisor.new("stuck" => 0.95, "off_track" => 0.1, "artifact_ready" => 0.1)
+  advisor = RuntimeAdvisor.new("stuck" => 0.95, "off_track" => 0.1)
   runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor, member_selector: selector)
   runtime.tick(now: Time.now.to_f + 6)
   assert(checker.calls.last[:role] == "process_reviewer" && selector.calls.empty? && host.messages.empty?,
@@ -1411,7 +1411,7 @@ end
 # Pending artifact clues belong only to the next artifact review: a process
 # check must neither receive, deliver, nor clear them.
 fixture(interval: 300) do |root, record, host, checker, _runtime|
-  advisor = RuntimeAdvisor.new("stuck" => 0.95, "off_track" => 0.1, "artifact_ready" => 0.1)
+  advisor = RuntimeAdvisor.new("stuck" => 0.95, "off_track" => 0.1)
   runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor)
   now = Time.now.to_f
   runtime.tick(now: now)
@@ -1457,7 +1457,7 @@ fixture(interval: 300) do |_root, record, host, checker, runtime|
          "an artifact check ignores a host-only digest change")
   runtime.tick(now: now + 61)
   assert(checker.calls.length == 1, "short checker suggestions do not restart full checks while Root executes")
-  runtime.tick(now: now + 310)
+  runtime.tick(now: now + 311)
   assert(checker.calls.length == 1, "an unchanged timer does not trigger a full check during Root execution")
   host.finish("new-delivery")
   runtime.tick(now: now + 311)
@@ -1467,7 +1467,7 @@ end
 # A process check still expires when only the host digest changes. An artifact
 # completion uses the same rule and is not blocked by that host change.
 fixture(interval: 300) do |root, record, host, checker, _runtime|
-  advisor = RuntimeAdvisor.new("stuck" => 0.95, "off_track" => 0.1, "artifact_ready" => 0.1)
+  advisor = RuntimeAdvisor.new("stuck" => 0.95, "off_track" => 0.1)
   runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor)
   now = Time.now.to_f
   host.working("progress")
@@ -1713,7 +1713,7 @@ fixture(host_class: RuntimeBoundaryHost) do |_root, record, host, checker, _runt
   record.save(state)
   host.instance_variable_get(:@state)["status"] = "active"
   message = host.post_user_message("Is the rollout note also expected?")
-  advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1, "artifact_ready" => 0.1)
+  advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1)
   runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor)
   runtime.tick(now: Time.now.to_f + 10)
   seen = advisor.calls.last.fetch("new_user_messages")
@@ -1943,7 +1943,7 @@ end
 # switches observed via checker.calls roles and recorded check kinds.
 fixture do |_root, record, host, _checker, _runtime|
   now = Time.now.to_f
-  advisor = RuntimeAdvisor.new("stuck" => 0.95, "off_track" => 0.1, "artifact_ready" => 0.1)
+  advisor = RuntimeAdvisor.new("stuck" => 0.95, "off_track" => 0.1)
   selector = StubCheckerSelector.new("zhipu/glm-5")
   checker = RuntimeSelectingChecker.new
   runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker,
@@ -1993,7 +1993,7 @@ end
 
 fixture do |_root, record, host, _checker, _runtime|
   now = Time.now.to_f
-  advisor = RuntimeAdvisor.new("stuck" => 0.95, "off_track" => 0.1, "artifact_ready" => 0.1)
+  advisor = RuntimeAdvisor.new("stuck" => 0.95, "off_track" => 0.1)
   selector = StubCheckerSelector.new("zhipu/glm-5")
   checker = RuntimeSelectingChecker.new
   runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker,
@@ -2659,17 +2659,17 @@ fixture do |_root, record, _host, checker, _runtime|
   assert(host.stop_calls.zero? && checker.calls.empty?, "rejected attachment has no execution authority")
 end
 
-# Jev can defer an early first-change review; an unchanged timer while Root
-# executes does not pay for a full check, but a completed turn still does.
+# JEV cannot request artifact review while Root is working, even if an old
+# response includes a high readiness score. Root delivery still triggers review.
 fixture do |root, record, host, checker, _runtime|
   host.send_message("Working")
-  advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1, "artifact_ready" => 0.1)
+  advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1, "artifact_ready" => 1.0)
   runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor)
   now = Time.now.to_f
   runtime.tick(now: now + 1)
   File.write(File.join(root, "artifact.txt"), "work in progress")
   runtime.tick(now: now + 10)
-  assert(advisor.calls.length == 1 && checker.calls.empty?, "low readiness defers only the early file-change check")
+  assert(advisor.calls.length == 1 && checker.calls.empty?, "process-only observation does not launch artifact review for file changes")
   runtime.tick(now: now + 61)
   assert(checker.calls.empty?, "pure elapsed time does not launch a full check while Root is active")
   host.finish("completed-artifact")
@@ -2680,7 +2680,7 @@ end
 
 fixture do |_root, record, host, checker, _runtime|
   host.send_message("Working")
-  advisor = RuntimeAdvisor.new("stuck" => 0.95, "off_track" => 0.1, "artifact_ready" => 0.1)
+  advisor = RuntimeAdvisor.new("stuck" => 0.95, "off_track" => 0.1)
   runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor)
   advisor.on_call = -> { runtime.request_stop }
   now = Time.now.to_f
@@ -2693,23 +2693,24 @@ end
 # A changing host during the HTTP call must still respect the assessment debounce.
 fixture(interval: 300) do |_root, _record, host, checker, _runtime|
   host.send_message("Working")
-  advisor = RuntimeAdvisor.new("stuck" => 0.95, "off_track" => 0.1, "artifact_ready" => 0.1)
+  advisor = RuntimeAdvisor.new("stuck" => 0.95, "off_track" => 0.1)
   advisor.on_call = -> { host.finish("during-#{advisor.calls.length}"); host.send_message("New work during assessment") }
   runtime = Orbit::TaskRuntime.new(record: _record, connection: host, checker: checker, advisor: advisor)
   now = Time.now.to_f
+  runtime.instance_variable_set(:@next_check, now + 600)
   runtime.tick(now: now + 10)
   runtime.tick(now: now + 11)
   runtime.tick(now: now + 69)
   assert(advisor.calls.length == 1, "changed observations cannot request Jev again each tick")
   assert(checker.calls.empty?, "a stale Jev decision does not start a checker")
-  runtime.tick(now: now + 70)
+  runtime.tick(now: now + 310)
   assert(advisor.calls.length == 2, "changed observations may be reassessed after the scheduled cooldown")
 end
 
 # Jev only summons a focused checker; its verdict cannot complete the task.
 fixture do |_root, record, host, checker, _runtime|
   host.send_message("Working")
-  advisor = RuntimeAdvisor.new("stuck" => 0.95, "off_track" => 0.1, "artifact_ready" => 0.1)
+  advisor = RuntimeAdvisor.new("stuck" => 0.95, "off_track" => 0.1)
   runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor)
   now = Time.now.to_f
   runtime.tick(now: now + 1)
@@ -2725,7 +2726,7 @@ end
 # TypeSafe failure returns to the existing first-change path.
 fixture do |root, record, host, checker, _runtime|
   host.send_message("Working")
-  advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1, "artifact_ready" => 0.1)
+  advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1)
   receipt = Orbit::JudgmentResult.unavailable(
     provider: "typesafe", reason: "service unavailable", actual_model: "jev-failure-fixture",
     usage: { "input_tokens" => 11, "output_tokens" => 2 }
@@ -2755,24 +2756,36 @@ Dir.mktmpdir("orbit-jev-config-") do |root|
 end
 
 Dir.mktmpdir("orbit-jev-observation-") do |root|
-  observations = 8.times.map { |index| { "kind" => "command", "output" => "old-#{index}-" + ("x" * 1000) } }
-  observations << { "kind" => "command", "output" => "latest critical command failure" }
+  observations = 8.times.map do |index|
+    { "kind" => "prior_agent_message", "tool_calls" => [{ "id" => "call-#{index}", "name" => "read",
+      "declared_intent" => "Read task source #{index}", "target" => "src/#{index}.rb", "status" => "completed" }],
+      "text" => "Root prose must not enter operations" }
+  end
+  observations << { "kind" => "prior_agent_message", "message_id" => "m-9", "tool_calls" => [{ "id" => "call-9",
+    "name" => "eval", "declared_intent" => "Run focused regression", "target" => "unknown",
+    "status" => "not_observed" }], "text" => "Root reply text must be excluded" }
+  observations << { "kind" => "prior_command", "message_id" => "result-9", "tool_call_id" => "call-9",
+                    "tool" => "eval", "status" => "failed", "aggregated_output" => "latest critical command failure" }
   amendments = 14.times.map { |index| { "text" => "decision-#{index}" } }
   state = Orbit::JevAdvisor.observation(
     inputs: { "instruction" => "Implement TASK.md", "basis" => [{ "path" => "basis/0-TASK.md",
               "text" => "Implement the parser and the independent HTML renderer." }], "amendments" => amendments },
-    host: { "status" => "active", "observations" => observations },
+    host: { "status" => "active", "async_jobs" => { "running" => [] }, "observations" => observations },
     members: 10.times.map { |index| { "status" => "done", "result" => "member-#{index}-" + ("y" * 10_000) } },
     project_root: root, artifact_digest: "digest", elapsed_seconds: 90
   )
   recent = state.fetch("recent_observations")
-  assert(recent.fetch("latest_entries_json").last.include?("latest critical command failure"), "newest event survives the Jev input bound")
-  assert(recent.fetch("omitted_older_entries").positive?, "older omissions are explicit")
-  assert(state.fetch("amendments").first == "decision-0", "earlier effective user decisions are available to Jev")
-  assert(state.fetch("basis").first.fetch("text").include?("independent HTML renderer") && state["basis_omitted"].nil?,
-         "a task defined in a basis document is available to Jev")
-  assert(state.fetch("members").length == 5 && JSON.generate(state.fetch("members")).length < 6000,
-         "member results remain bounded before leaving Orbit")
+  assert(recent.length == 9 && recent.last.dig("tool_call", "status") == "failed",
+         "recent operations merge result status by native tool call id")
+  assert(!JSON.generate(recent).include?("latest critical command failure"), "tool output bodies stay out of observation input")
+  assert(!JSON.generate(recent).include?("old-0-") && recent.none? { |item| item.key?("text") || item.key?("agent_text") },
+         "Root replies and tool output are excluded from initial observations")
+  assert(state.fetch("amendments").length == amendments.length, "effective amendments remain complete")
+  assert(state.fetch("basis_paths") == ["basis/0-TASK.md"] && !JSON.generate(state).include?("independent HTML renderer"),
+         "basis sources remain identifiable without sending document bodies")
+  assert(state.fetch("members").length == 10 && state.fetch("members").all? { |member| member["status"] == "done" },
+         "member status facts remain available alongside task-scoped results")
+  assert(state.dig("host", "async_jobs", "running").empty?, "the native background-job snapshot is retained")
 
   many = 30.times.map { |index| { "text" => "amendment-#{index}-" + ("z" * 1200) } }
   bounded = Orbit::JevAdvisor.observation(
@@ -2781,27 +2794,9 @@ Dir.mktmpdir("orbit-jev-observation-") do |root|
     members: [], project_root: root, artifact_digest: "digest", elapsed_seconds: 90
   )
   included = bounded.fetch("amendments")
-  assert(included.length < many.length && included.last.include?("amendment-29"),
-         "the newest effective amendments are kept within the Jev input budget")
-  assert(bounded.dig("amendments_omitted", "count") == many.length - included.length &&
-         bounded.dig("amendments_omitted", "included_range").end_with?("30"),
-         "omitted amendment range is explicit instead of silently dropped")
+  assert(included.length == many.length && included.last.include?("amendment-29"),
+         "effective amendments are never silently truncated")
 
-  long_basis = 5.times.map { |index| { "path" => "basis/#{index}-requirement.md",
-                                    "text" => "requirement-#{index}-" + ("b" * 5000) } }
-  bounded_basis = Orbit::JevAdvisor.observation(
-    inputs: { "instruction" => "Implement the attached requirements", "basis" => long_basis, "amendments" => [] },
-    host: { "status" => "active", "observations" => [] },
-    members: [], project_root: root, artifact_digest: "digest", elapsed_seconds: 90
-  )
-  excerpts = bounded_basis.fetch("basis")
-  assert(excerpts.sum { |entry| entry.fetch("text").length } <= Orbit::JevAdvisor::BASIS_BUDGET &&
-         excerpts.first.fetch("text").include?("requirement-0-") &&
-         excerpts.last.fetch("text").include?("requirement-2-"),
-         "specified documents remain identifiable within a bounded Jev request")
-  assert(bounded_basis.dig("basis_omitted", "count") == 2 &&
-         bounded_basis.dig("basis_omitted", "truncated_paths").length == 3,
-         "truncated and omitted task documents are explicit")
 end
 
 server = TCPServer.new("127.0.0.1", 0)
@@ -2943,10 +2938,12 @@ Dir.mktmpdir("orbit-jev-artifact-") do |tmp|
   record.save(state)
   host = RuntimeHost.new(root)
   host.working("editing the linked worktree")
-  advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1, "artifact_ready" => 0.1, "delegatable" => 0.1)
+  advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1, "delegatable" => 0.1)
   runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: RuntimeChecker.new, advisor: advisor)
   runtime.tick(now: Time.now.to_f + 10)
-  changes = advisor.calls.fetch(0).fetch("changes").fetch("status").to_s
+  changes = advisor.calls.fetch(0).dig("changes", "groups").find do |group|
+    group["scope"] == "root_bound_artifact_root" && group["artifact_root"] == File.realpath(other)
+  end.fetch("status").to_s
   assert(changes.include?("only-worktree.txt"), "JEV changes are read from artifact_root")
   assert(!File.exist?(File.join(root, "only-worktree.txt")), "the project root does not contain the artifact file")
 end
@@ -3318,7 +3315,7 @@ end
 fixture(interval: 300) do |root, record, _host, checker, _runtime|
   host = RuntimeTeamHost.new(root)
   host.working("progress")
-  advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1, "artifact_ready" => 0.1, "delegatable" => 0.6)
+  advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1, "delegatable" => 0.6)
   cache = evidence_cache(root)
   # Both route identities must be present: the Root stays route-less (unknown)
   # while the candidate's route is explicit. The legacy comparison.* metric
@@ -4546,6 +4543,123 @@ fixture do |_root, record, host, _checker, _runtime|
   runtime.send(:stop, "cancel")
   assert(File.directory?(File.join(record.path, "checks", "3", "workspace")), "cancel without confirmed exit keeps the workspace")
   assert(%w[paused stop_unconfirmed].include?(record.state["status"]), "cancel still records a stop outcome")
+end
+
+# An unfinished read stays in the independent check flow, including the
+# original manual qualification, without making Root resubmit the deliverable.
+fixture do |_root, record, host, checker, runtime|
+  now = Time.now.to_f
+  record.submit("check")
+  runtime.tick(now: now)
+  unread = answer("continue", delivery_ready: false)
+  unread["coverage"]["items"][0]["gap_kind"] = "not_checked"
+  checker.result = unread
+  runtime.tick(now: now + 1)
+  assert(record.state.dig("review_continuation", "status") == "queued" && host.messages.empty?,
+         "unread material queues review rather than Root correction")
+  runtime.tick(now: now + 62)
+  assert(record.state.dig("review_continuation", "status") == "running" && checker.calls.length == 2,
+         "the queued continuation actually starts")
+  assert(checker.calls.last[:context].dig("review_continuation", "manual") == true,
+         "continuation context preserves the actual manual origin")
+  checker.result = answer("continue")
+  runtime.tick(now: now + 63)
+  assert(record.state.dig("review_continuation", "status") == "finished" &&
+         record.state["finalization_notices"].length == 1 && runtime.completion_gate[1].nil?,
+         "completed independent continuation qualifies without a new Root submission")
+end
+
+# Two unchanged continuations end in one diagnostic, never an infinite bill
+# or an inferred pass. Explicit Root review remains available afterwards.
+fixture do |_root, record, host, checker, runtime|
+  now = Time.now.to_f
+  record.submit("check")
+  runtime.tick(now: now)
+  unread = answer("continue", delivery_ready: false)
+  unread["coverage"]["items"][0]["gap_kind"] = "not_checked"
+  offset = 0
+  3.times do |i|
+    checker.result = unread
+    runtime.tick(now: now + i * 62 + offset + 1)
+    if i == 1
+      runtime.instance_variable_get(:@state)["review"]["blocked"] = { "type" => "unavailable" }
+      runtime.tick(now: now + (i + 1) * 62)
+      assert(checker.calls.length == 2 && record.state["next_check_trigger"] == "coverage_continuation" &&
+             record.state["next_check_manual"] && record.state.dig("review_continuation", "no_progress_count") == 1,
+             "a blocked model preserves the queued manual chain without another model call")
+      runtime.instance_variable_set(:@checker_selector, StubCheckerSelector.new("zhipu/glm-5"))
+      record.submit("review_model", "model" => "zhipu/glm-5")
+      offset = 2
+    end
+    runtime.tick(now: now + (i + 1) * 62 + offset) if i < 2
+  end
+  assert(record.state.dig("review_continuation", "status") == "stalled" && host.messages.length == 1,
+         "two no-progress continuations produce one diagnostic")
+  host.finish("diagnostic seen")
+  runtime.tick(now: now + 400)
+  runtime.tick(now: now + 800)
+  assert(checker.calls.length == 3 && host.messages.length == 1 && runtime.completion_gate[1],
+         "unchanged stalled version cannot auto-restart or complete")
+  record.submit("check")
+  runtime.tick(now: now + 801)
+  checker.result = answer("continue")
+  runtime.tick(now: now + 802)
+  assert(record.state["finalization_notices"].length == 1, "explicit review can resolve the diagnostic")
+end
+
+fixture do |_root, record, host, checker, runtime|
+  now = Time.now.to_f
+  runtime.tick(now: now)
+  unread = answer("continue", delivery_ready: false)
+  unread["coverage"]["items"][0]["gap_kind"] = "not_checked"
+  checker.result = unread
+  runtime.tick(now: now + 1)
+  runtime.instance_variable_set(:@checker_selector, StubCheckerSelector.new("zhipu/glm-5"))
+  record.submit("review_model", "model" => "zhipu/glm-5")
+  runtime.tick(now: now + 62)
+  assert(checker.calls.last[:context].dig("review_continuation", "manual") == false,
+         "automatic continuation cannot acquire manual qualification")
+  checker.result = answer("continue")
+  runtime.tick(now: now + 63)
+  assert(record.state["finalization_notices"].empty?, "automatic coverage never substitutes final review")
+  host.finish("request evidence review")
+  record.submit("check")
+  runtime.tick(now: now + 64)
+  missing = answer("continue", delivery_ready: false)
+  missing["coverage"]["items"][0]["gap_kind"] = "evidence_missing"
+  checker.result = missing
+  host.fail_send_message = "bridge delivery unavailable"
+  sent_before = host.messages.length
+  runtime.tick(now: now + 65)
+  assert(record.state.dig("completion_readiness", "reason").include?("缺少必要证据") &&
+         record.state.dig("completion_readiness", "coverage_notice_delivery") == "unconfirmed" &&
+         record.state.dig("completion_readiness", "coverage_notice_error") == "bridge delivery unavailable" &&
+         record.state["status"] != "failed" && host.messages.length == sent_before && runtime.completion_gate[1],
+         "a missing-evidence notice failure stays unconfirmed, not a task failure or pass")
+  host.fail_send_message = nil
+  record.submit("check")
+  runtime.tick(now: now + 66)
+  checker.result = missing
+  runtime.tick(now: now + 67)
+  assert(host.messages.length == sent_before, "the same gap does not resend an unconfirmed notification indefinitely")
+end
+
+fixture do |root, record, host, checker, runtime|
+  now = Time.now.to_f
+  record.submit("check")
+  runtime.tick(now: now)
+  unread = answer("continue", delivery_ready: false)
+  unread["coverage"]["items"][0]["gap_kind"] = "not_checked"
+  checker.result = unread
+  runtime.tick(now: now + 1)
+  File.write(File.join(root, "artifact.txt"), "changed after review")
+  runtime.tick(now: now + 62)
+  assert(record.state.dig("review_continuation", "status") == "invalidated" &&
+         checker.calls.last[:context]["review_continuation"].nil?,
+         "changed artifact invalidates the continuation binding")
+  checker.result = answer("continue")
+  runtime.tick(now: now + 63)
+  assert(record.state["finalization_notices"].empty?, "changed version cannot inherit manual eligibility")
 end
 
 puts "TASK_RUNTIME_TEST_PASS (deterministic, not real-model acceptance)"

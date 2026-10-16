@@ -66,6 +66,24 @@ test("coverage preserves unverified requirements and requires evidence for verif
 	assert.deepEqual(validateCheckResult(result), [], "unverified is a valid report of missing evidence");
 	(result.coverage as { items: { evidence: string }[] }).items[0].evidence = "";
 	assert.ok(validateCheckResult(result).some(p => p.includes("coverage evidence")), "a verified assertion needs evidence");
+
+	// The gap classification is an enum in the contract and belongs only to an
+	// unverified item; the class is read from the field, never the text.
+	const gapped = baseResult();
+	gapped.coverage = { complete: true, items: [
+		{ requirement: "reject partial output", status: "unverified", evidence: "not re-read this round", gap_kind: "not_checked" },
+	] };
+	assert.deepEqual(validateCheckResult(gapped), [], "a supported gap_kind on an unverified item is accepted");
+	const misclassified = baseResult();
+	misclassified.coverage = { complete: true, items: [
+		{ requirement: "reject partial output", status: "verified", evidence: "read it", gap_kind: "not_checked" },
+	] };
+	assert.ok(validateCheckResult(misclassified).some(p => p.includes("gap_kind")), "gap_kind on a verified item is refused");
+	const unknownKind = baseResult();
+	unknownKind.coverage = { complete: true, items: [
+		{ requirement: "reject partial output", status: "unverified", evidence: "", gap_kind: "unclear" },
+	] };
+	assert.ok(validateCheckResult(unknownKind).some(p => p.includes("gap_kind")), "an unsupported gap_kind is refused");
 });
 
 test("a long requirement is accepted at the representation bound while real refusals stay", () => {

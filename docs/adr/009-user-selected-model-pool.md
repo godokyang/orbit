@@ -1,5 +1,7 @@
 # ADR-009：OMP 会话内的候选模型池与选型
 
+2026-10-16：[ADR-012](012-jev-purpose-specific-input-and-compaction.md) 部分替代本文件中的 JEV 观察去重、检查模型随普通输入重选及通用输入组织安排。压缩模型新增速度优先仅适用于压缩；成员与检查者质量排序原边界保持。实现和新输入校准状态见交接。
+
 - 状态：已采纳，2026-10-16 更新角色候选池与 Root 模型边界。实现与验证范围见[当前交接](../plan/handoff.md)。
 - 范围：单 OMP 宿主内的型号发现、候选池、执行成员建议和独立检查者选择。具体运行行为以[合同](../../contracts/task-runtime.md)为准，宿主与责任边界见 [ADR-008](008-omp-native-collaboration-base.md)。
 

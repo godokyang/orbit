@@ -110,7 +110,7 @@ module CheckerModelSelectorTest
 
     # Mirrors JevAdvisor#assess_checker_quality: the real provider, the real
     # question-set version and the answered status a release must match.
-    def assess_checker_quality(state:, candidates:)
+    def assess_checker_quality(state:, candidates:, compaction: nil)
       @calls += 1
       @state = state
       @candidates = candidates
@@ -398,17 +398,31 @@ module CheckerModelSelectorTest
               "reasoning_note" => "推理变体未核实" }
     model = "kimi-code/k3-256k"
     advisor = FakeAdvisor.new({ model => { "quality" => 0.91 } })
+    catalog_facts = { "id" => "openai/gpt-x", "context_length" => 131_072,
+                      "sources" => prior["sources"], "metrics" => { "coding_index" => 76.2 },
+                      "benchmarks" => { "coding_index" => 76.2 } }
     _, selection = selector(pool: [model], catalog: catalog_for([model]), entries: [entry(model)],
                             advisor: advisor, probe: FakeProbe.new([model]),
-                            overview: FakeOverview.new(model => { "status" => "fresh", "prior" => prior }),
+                            overview: FakeOverview.new(model => { "status" => "fresh", "facts" => catalog_facts,
+                                                                  "prior" => prior }),
                             release: release_for)
-                   .select(explicit: nil, instruction: "Review the change",
+                   .select(explicit: nil, instruction: "the checker selection is verifiable",
                            state: task_state(requirements: { "relevant_indices" => ["coding_index"] }))
     assert(advisor.candidates.first.key?("evidence") &&
            advisor.candidates.first["model_overview_prior"] == prior &&
            selection["quality_basis"] == "exact_model_evidence" &&
            selection["evidence_needed"].empty?,
            "exact route facts and the model-level prior are both presented with their own provenance")
+    capability = advisor.candidates.first.fetch("capability_facts")
+    projected_catalog_facts = capability.dig("catalog", "facts") || {}
+    assert(!capability.dig("catalog").key?("prior") &&
+           !projected_catalog_facts.key?("metrics") && !projected_catalog_facts.key?("benchmarks") &&
+           projected_catalog_facts["context_length"] == catalog_facts["context_length"] &&
+           capability.dig("catalog", "provenance", "verified_by") == "scripted source audit",
+           "checker facts remove duplicate benchmark payload while retaining structural facts and provenance")
+    assert(advisor.state.dig("work_unit", "acceptance") == [] &&
+           advisor.state["instruction"] == "the checker selection is verifiable",
+           "normal checker selection sends identical requirements once while retaining the task instruction")
   end
 
   def checker_rejects_default_reasoning_and_another_billing_route

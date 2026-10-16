@@ -130,6 +130,10 @@ module JudgmentTest
   def check_typesafe_failures_are_unavailable
     cases = {
       "http error" => ["500 Internal Server Error", payload({})],
+      "unrelated HTTP 400" => ["400 Bad Request", JSON.generate("error" => { "code" => "invalid_request" })],
+      "explicit token overflow" => ["400 Bad Request", JSON.generate("detail" => { "error_type" => "max_tokens_exceeded" })],
+      "legacy explicit token overflow code" => ["400 Bad Request", JSON.generate("error" => { "code" => "max_tokens_exceeded" })],
+      "token overflow code on unauthorized response" => ["401 Unauthorized", JSON.generate("detail" => { "error_type" => "max_tokens_exceeded" })],
       "malformed json" => ["200 OK", "{not json"],
       "answers null" => ["200 OK", '{"model":"jev-test","answers":null}'],
       "missing requested answer" => ["200 OK", payload({ "other" => noul(0.9) })],
@@ -145,17 +149,20 @@ module JudgmentTest
                                 ))
         check(result.unavailable? && !result.error.to_s.empty? && result.answers.empty?,
               "a #{label} failure becomes unavailable with a reason and no partial answers (#{result.error})")
+        expected_overflow = ["explicit token overflow", "legacy explicit token overflow code"].include?(label)
+        check(provider.max_tokens_exceeded? == expected_overflow,
+              "only an explicit max_tokens_exceeded code on HTTP 400 enables compaction (#{label})")
       end
     end
   end
 
   def check_jev_advisor_carries_model_metadata
-    answers = { "stuck" => noul(0.1), "off_track" => noul(0.2), "artifact_ready" => noul(0.3) }
+    answers = { "stuck" => noul(0.1), "off_track" => noul(0.2) }
     with_fixture([payload(answers)]) do |endpoint, _requests|
       result = Orbit::JevAdvisor.new(api_key: "test-key", endpoint: endpoint).assess(state: { "instruction" => "x" })
       check(result["provider"] == "typesafe" &&
             result["question_set_version"] == Orbit::ModelQualityPolicy::QUESTION_SET_VERSIONS.fetch("observation") &&
-            result["scores"] == { "stuck" => 0.1, "off_track" => 0.2, "artifact_ready" => 0.3 },
+            result["scores"] == { "stuck" => 0.1, "off_track" => 0.2 },
             "JevAdvisor results expose the unified provider and question set version without changing scores")
     end
   end

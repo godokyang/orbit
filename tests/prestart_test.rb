@@ -75,7 +75,7 @@ module PrestartTest
         { "id" => id, "kind" => kind, "mode" => "model_backed",
           "expected_decision" => kind == "positive" ? "start" : "root_decides",
           "state" => { "input_version" => Orbit::PrestartClassifier::INPUT_VERSION,
-                       "instruction" => instruction, "instruction_truncated" => false, "git" => {} },
+                       "instruction" => instruction },
           "judgment" => judgment.to_h }
       end
     )
@@ -345,6 +345,7 @@ module PrestartTest
                                         "PI_CODING_AGENT_DIR" => File.join(home, "agent"),
                                         "TYPESAFE_API_KEY" => "" },
                                       RbConfig.ruby, "--disable-gems", ENTRY, *args, chdir: cwd)
+    assert(status.success? == success, "entry CLI exit #{status.exitstatus}: #{err}")
     out.strip.empty? ? nil : JSON.parse(out)
   end
 

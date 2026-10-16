@@ -28,7 +28,7 @@ module Orbit
   #   positive order binds release:, state:, judgment: and route_costs:.
   #   Route cost inputs retain the audited fact and usage composition.
   module ModelQualityPolicy
-    INPUT_VERSION = "jev-selection-input-2"
+    INPUT_VERSION = "jev-selection-input-3"
     # orbit-quality-decision-4 records a two-stage responsibility change only.
     # Question text, question-set versions, input version and threshold keys
     # stay as they were under orbit-quality-decision-3. Delegation asks both
@@ -49,13 +49,13 @@ module Orbit
       "candidate_gate" => "candidate_task_fit",
       "combination_proven_by_prior_per_question_releases" => false
     }.freeze
-    OBSERVATION_QUESTION_SET = "jev-observation-2"
-    DELEGATION_QUESTION_SET = "jev-delegation-4"
-    CANDIDATE_QUESTION_SET = "jev-candidates-4"
-    CHECKER_QUESTION_SET = "jev-checker-task-fit-5"
+    OBSERVATION_QUESTION_SET = "jev-observation-4"
+    DELEGATION_QUESTION_SET = "jev-delegation-5"
+    CANDIDATE_QUESTION_SET = "jev-candidates-5"
+    CHECKER_QUESTION_SET = "jev-checker-task-fit-6"
     SCHEMA_VERSION = "orbit-selection-calibration-v2"
     DEFAULT_PATH = File.join(__dir__, "data", "jev-selection-calibration.json")
-    SUPPORTED_PROFILE = "bounded_git_delivery_v1"
+    SUPPORTED_PROFILE = "bounded_git_delivery_v3"
 
     GATING_QUESTIONS = %w[candidate_task_fit checker_task_fit handoff_fit member_task_fit].freeze
     QUESTION_SET_VERSIONS = {
@@ -202,12 +202,16 @@ module Orbit
 
       unit = context["work_unit"]
       acceptance = unit.is_a?(Hash) ? unit["acceptance"] : context["acceptance"]
-      return nil unless bounded_text?(acceptance) ||
-                        (acceptance.is_a?(Array) && !acceptance.empty? && acceptance.all? { |item| bounded_text?(item) })
+      acceptance_present = profile_text?(acceptance) ||
+        (acceptance.is_a?(Array) && !acceptance.empty? && acceptance.all? { |item| profile_text?(item) })
+      # In the current checker-selection shape, instruction already contains
+      # the complete effective requirement and may subsume identical
+      # acceptance text. Keep the source once; profile by that same task fact.
+      return nil unless acceptance_present || profile_text?(context["instruction"])
 
       paths = unit.is_a?(Hash) && unit.dig("scope", "allowed_paths")
-      bounded_unit = unit.is_a?(Hash) && bounded_text?(unit["objective"]) &&
-        paths.is_a?(Array) && !paths.empty? && paths.all? { |item| bounded_text?(item) }
+      bounded_unit = unit.is_a?(Hash) && profile_text?(unit["objective"]) &&
+        paths.is_a?(Array) && !paths.empty? && paths.all? { |item| profile_text?(item) }
       bounded_artifact = %w[reviewer process_reviewer adjudicator].include?(context["review_role"]) &&
         workspace["artifact_root"].is_a?(String) && !workspace["artifact_root"].empty?
       bounded_unit || bounded_artifact ? SUPPORTED_PROFILE : nil
@@ -624,6 +628,13 @@ module Orbit
 
     def bounded_text?(value)
       value.is_a?(String) && !value.strip.empty? && value.length <= MAX_TEXT
+    end
+
+    # Profile identity describes a bounded Git delivery/review workspace, not
+    # the byte length of its effective requirement text. Input capacity and
+    # unavailable behavior are enforced at the judgment boundary.
+    def profile_text?(value)
+      value.is_a?(String) && !value.strip.empty?
     end
 
     def deep_copy(value)

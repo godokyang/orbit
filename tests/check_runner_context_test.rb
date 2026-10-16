@@ -385,6 +385,7 @@ module CheckRunnerContextTest
     check_review_focus_is_bounded_and_traceable
     check_non_hash_context_is_bounded
     check_check_history_stays_bounded_and_traceable
+    check_prior_coverage_and_continuation_survive_compression
     check_takeover_projection_stays_side_by_side
     check_work_unit_declarations_survive_degraded_caps
     check_dropped_declarations_are_explicit
@@ -624,6 +625,14 @@ module CheckRunnerContextTest
     check(prompt.include?("Reuse the existing finding id"), "the reviewer prompt requires reusing the finding id")
     check(prompt.include?("do not re-raise a point"), "the reviewer prompt forbids re-raising settled points")
     check(prompt.include?("new evidence"), "the reviewer prompt requires new evidence for a settled point")
+    check(prompt.include?("every acceptance requirement within the effective delivery scope"),
+          "the coverage note states the acceptance scope before the enumeration duty")
+    check(prompt.include?("a missing required run is evidence_missing and never not_checked"),
+          "a missing required execution is classified as evidence_missing, not not_checked")
+    check(prompt.include?("Set gap_kind only on an unverified item"),
+          "the coverage note restricts gap_kind to unverified items")
+    check(prompt.include?("never write a marker or an abbreviated requirement back into a requirement field"),
+          "a cut requirement must be re-read, never written back as a marker")
 
     appeal = "完整申诉原文。" + ("来源和论据应完整保留。" * 120)
     roots = [{ "path" => "/tmp/task-record", "label" => "this Orbit task record", "version" => "task=t1; check=2" }]
@@ -724,6 +733,25 @@ module CheckRunnerContextTest
                          "items" => 70.times.map { |index| { "requirement" => "r#{index}", "status" => "unverified", "evidence" => "" } } }
     check(runner.send(:result_problems, rules, wide).empty?,
           "a schema with no maxItems imposes no fixed coverage ceiling")
+
+    # The gap classification is an enum in the contract: it is accepted on an
+    # unverified item and refused on a verified one, from the schema rule
+    # rather than a duplicated literal.
+    gapped = Marshal.load(Marshal.dump(paused)).merge("verdict" => "continue")
+    gapped["coverage"] = { "complete" => true, "items" => [
+      { "requirement" => "r", "status" => "unverified", "evidence" => "", "gap_kind" => "not_checked" }
+    ] }
+    check(runner.send(:result_problems, rules, gapped).empty?,
+          "a schema-declared gap classification is accepted on an unverified item")
+    misclassified = Marshal.load(Marshal.dump(gapped))
+    misclassified["coverage"]["items"][0]["status"] = "verified"
+    misclassified["coverage"]["items"][0]["evidence"] = "e"
+    check(runner.send(:result_problems, rules, misclassified).any? { |problem| problem.include?("gap_kind") },
+          "a gap classification on a verified item is refused")
+    unknown_kind = Marshal.load(Marshal.dump(gapped))
+    unknown_kind["coverage"]["items"][0]["gap_kind"] = "unclear"
+    check(runner.send(:result_problems, rules, unknown_kind).any? { |problem| problem.include?("gap_kind") },
+          "a gap classification outside the schema enum is refused")
 
     # maxLength counts Unicode code points and Ruby String#length agrees with
     # it: a 1000-code-point requirement of mostly non-BMP characters (1600
@@ -866,6 +894,84 @@ module CheckRunnerContextTest
           "a huge check history still yields valid JSON inside the cap")
     check(JSON.parse(rendered).dig("check_history", "anchor", "number") == 1,
           "even under pressure the anchor is not dropped before the recent tail")
+  end
+
+  # Coverage-continuation ticket: the checker receives the same-version merged
+  # coverage and the pending/established requirement lists instead of a bare
+  # absence, so earlier valid work is continued rather than revoked by omission.
+  def check_prior_coverage_and_continuation_survive_compression
+    items = [
+      { "requirement" => "aggregate exact cents", "scope" => "delivery", "status" => "verified",
+        "evidence" => "src/cli.js sums integer cents", "verified_by_check" => "7" },
+      { "requirement" => "reject partial output", "scope" => "delivery", "status" => "unverified",
+        "evidence" => "not re-read this round", "gap_kind" => "not_checked" }
+    ]
+    context = base_context.merge(
+      "requirement_coverage" => {
+        "current" => true, "complete" => true, "ready" => false, "gap" => "1 delivery requirement(s) remain unverified",
+        "verified" => 1, "unverified" => 1, "check_id" => "7", "items" => items
+      },
+      "review_continuation" => {
+        "status" => "running", "origin_check" => 2, "previous_check" => 7, "manual" => true,
+        "input_digest" => "sha256:in", "artifact_digest" => "sha256:art", "artifact_root" => "/repo",
+        "pending_requirements" => [{ "requirement" => "reject partial output", "scope" => "delivery" }],
+        "verified_requirements" => [{ "requirement" => "aggregate exact cents", "scope" => "delivery" }],
+        "no_progress_count" => 2
+      }
+    )
+    record = parsed(context)
+    carried = record.fetch("requirement_coverage").fetch("items")
+    check(carried.length == 2 && carried[0]["requirement"] == "aggregate exact cents" &&
+          carried[0]["verified_by_check"] == "7",
+          "a carried verification keeps its requirement text and check provenance")
+    check(carried[1]["gap_kind"] == "not_checked" && record.dig("requirement_coverage", "verified") == 1,
+          "an unverified not_checked item reaches the checker unmodified")
+    continuation = record.fetch("review_continuation")
+    check(continuation["status"] == "running" && continuation["origin_check"] == 2 &&
+          continuation["pending_requirements"].first["requirement"] == "reject partial output" &&
+          continuation["verified_requirements"].first["requirement"] == "aggregate exact cents",
+          "the continuation's pending and established lists stay complete inside the bounds")
+    check(!record.dig("requirement_coverage", "items_omitted"),
+          "no coverage omission facts are invented when nothing was cut")
+    check(!parsed(base_context).key?("requirement_coverage") && !parsed(base_context).key?("review_continuation"),
+          "a context without coverage or continuation does not invent the sections")
+
+    limit = Orbit::CheckRunner::CONTEXT_CAPS[:prior_coverage_item_limit]
+    long_requirement = "要求" * 476
+    check(long_requirement.length == 952, "the pressure fixture uses a legal 952-character requirement")
+    flooded = base_context.merge(
+      "requirement_coverage" => { "complete" => true, "items" => (1..limit).map { |index|
+        { "requirement" => "#{index}-#{long_requirement}", "scope" => "delivery", "status" => "unverified",
+          "evidence" => long_text("e#{index}", 2_000) } } },
+      "review_continuation" => { "status" => "stalled",
+        "pending_requirements" => (1..limit).map { |index| { "requirement" => "#{index}-#{long_requirement}", "scope" => "delivery" } },
+        "verified_requirements" => [{ "requirement" => "9-#{long_requirement}", "scope" => "delivery" }] }
+    )
+    rendered = JSON.generate(compress(flooded))
+    check(rendered.bytesize <= Orbit::CheckRunner::CONTEXT_BYTE_LIMIT, "the coverage continuation stays inside the hard byte cap")
+    check(!JSON.parse(rendered).fetch("context_compression", nil).is_a?(String),
+          "coverage pressure drops entries instead of omitting the whole program context")
+    bounded = JSON.parse(rendered)
+    over = bounded.fetch("requirement_coverage")
+    check(over["items"].length <= limit && !over["items"].empty?,
+          "the delivered coverage stays a usable map under pressure")
+    check(over["items"].all? { |item| item["requirement"].end_with?(long_requirement) },
+          "every delivered requirement keeps its full text instead of a cut marker")
+    check(over["items"].all? { |item| item["evidence"].include?("…[") },
+          "ordinary coverage strings stay bounded pointers with the ordinary marker")
+    omitted = over.fetch("items_omitted")
+    check(omitted["count"] == limit - over["items"].length &&
+          omitted["ids_sha256"] == Digest::SHA256.hexdigest(JSON.generate((1..omitted["count"]).map { |index| "#{index}-#{long_requirement}" })),
+          "an oversized coverage projection counts and hashes what it dropped")
+    check(omitted["ids"].all? { |id| id.length < Orbit::CheckRunner::CONTEXT_COVERAGE_IDENTIFIER_CAP + 96 && !id.include?(long_requirement) },
+          "omission identities stay bounded prefixes instead of the full long requirement")
+    pending = bounded.dig("review_continuation", "pending_requirements")
+    check(pending.any? && pending.all? { |entry| entry["requirement"].end_with?(long_requirement) },
+          "a pending continuation entry keeps its full requirement text")
+    check(bounded.dig("review_continuation", "verified_requirements").first["requirement"] == "9-#{long_requirement}",
+          "an established continuation entry keeps its full requirement text")
+    check(bounded.dig("review_continuation", "pending_requirements_omitted", "count") == limit - pending.length,
+          "an oversized pending list counts what it dropped")
   end
 
   def check_non_hash_context_is_bounded

@@ -1,5 +1,7 @@
 # ADR-008：以原版 OMP 的原生协作为 Orbit 基座
 
+2026-10-16：[ADR-012](012-jev-purpose-specific-input-and-compaction.md) 部分替代本文件中的 JEV 观察去重、检查模型随普通输入重选及通用输入组织安排。压缩模型新增速度优先仅适用于压缩；成员与检查者质量排序原边界保持。实现和新输入校准状态见交接。
+
 - 状态：现行 OMP 单宿主决定；实现与验证边界见[交接](../plan/handoff.md)。
 - 范围：当前 `orbit omp` 入口、原生成员、独立检查及上游策略。具体行为以[任务运行合同](../../contracts/task-runtime.md)和[ADR-009](009-user-selected-model-pool.md)为准。
 

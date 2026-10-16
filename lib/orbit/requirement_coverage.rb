@@ -19,9 +19,9 @@ module Orbit
   # REVIEWER record to enumerate every requirement and verify delivery items;
   # future lifecycle obligations remain recorded and use the runtime's actual
   # final-check/stop gates instead of requiring their outcome before they run.
-  # A newer failing
-  # or partial artifact review of the same version overrides an earlier pass,
-  # and process checks never grant, replace or erase delivery coverage.
+  # An explicitly not_checked item can reuse an earlier verified conclusion
+  # at the exact same binding. New contrary evidence revokes that conclusion;
+  # process checks never grant, replace or erase delivery coverage.
   # Stale records remain as history but never release the current version. The
   # program never fabricates local verification receipts, and a Jev sample is
   # not outcome coverage.
@@ -35,6 +35,7 @@ module Orbit
     KINDS = %w[artifact process].freeze
     ITEM_STATUSES = %w[verified unverified].freeze
     ITEM_SCOPES = %w[delivery lifecycle].freeze
+    GAP_KINDS = %w[not_checked evidence_missing defect].freeze
     MAX_BYTES = 2 * 1024 * 1024
     MAX_RECORDS = 256
     MAX_TEXT = 1000
@@ -64,7 +65,8 @@ module Orbit
     # Append one validated coverage record atomically. Raises Error on invalid
     # content or an unreadable existing file; existing history is never
     # repaired or silently replaced.
-    def record(check_id:, kind:, role:, coverage:, input_digest:, artifact_digest:, artifact_root:, stale: false)
+    def record(check_id:, kind:, role:, coverage:, input_digest:, artifact_digest:, artifact_root:, stale: false,
+               invalidates_prior: false)
       raise Error, "kind must be one of #{KINDS.join(', ')}" unless KINDS.include?(kind)
 
       entry = {
@@ -74,6 +76,7 @@ module Orbit
         "artifact_digest" => label(artifact_digest, "artifact_digest"),
         "artifact_root" => label(artifact_root, "artifact_root", max: MAX_PATH),
         "stale" => stale == true,
+        "invalidates_prior" => invalidates_prior == true,
         "coverage" => validate_coverage(coverage)
       }
       with_lock do
@@ -84,9 +87,8 @@ module Orbit
     end
 
     # Coverage status for one exact binding. Never raises: any gap is data.
-    # Only artifact-scope reviewer records participate; the LATEST one for
-    # this binding decides, so a newer incomplete or unverified review
-    # overrides an earlier pass instead of being skipped.
+    # The latest enumeration controls scope/completeness. Only explicitly
+    # unread items can reuse evidence; an unclassified gap remains conservative.
     def status(input_digest:, artifact_digest:, artifact_root:)
       records =
         begin
@@ -94,14 +96,33 @@ module Orbit
         rescue Error
           return gap("the coverage file is missing or unreadable")
         end
-      current = records.reverse.find do |entry|
+      applicable = records.select do |entry|
         entry["kind"] == ELIGIBLE_KIND && entry["role"] == ELIGIBLE_ROLE &&
           entry["stale"] == false && entry["input_digest"] == input_digest &&
           entry["artifact_digest"] == artifact_digest && entry["artifact_root"] == artifact_root
       end
+      current = applicable.last
       return gap("no artifact-review coverage record for this input, artifact and root version") if current.nil?
 
-      items = current["coverage"]["items"]
+      verified_items = {}
+      items = []
+      applicable.each do |entry|
+        verified_items.clear if entry["invalidates_prior"]
+        items = entry["coverage"]["items"].map do |item|
+          key = [item["requirement"], item.fetch("scope", "delivery")]
+          if item["status"] == "verified"
+            verified_items[key] = item.merge("verified_by_check" => entry["check_id"])
+          elsif item["gap_kind"] == "not_checked" && verified_items[key]
+            # Keep current requirement metadata, but the original evidence and
+            # its check provenance. This is a projection, never a checker reply.
+            item.reject { |name, _| name == "gap_kind" }.merge(
+              verified_items[key].slice("status", "evidence", "verified_by_check"))
+          else
+            verified_items.delete(key)
+            item
+          end
+        end
+      end
       delivery = items.select { |item| item.fetch("scope", "delivery") == "delivery" }
       verified = delivery.count { |item| item["status"] == "verified" }
       base = {
@@ -138,8 +159,8 @@ module Orbit
       seen = {}
       cleaned = items.map do |item|
         raise Error, "each coverage item must be an object" unless item.is_a?(Hash)
-        unless (%w[evidence requirement status] - item.keys).empty? && (item.keys - %w[evidence requirement status ref scope]).empty?
-          raise Error, "each item must contain requirement, status, evidence and optional scope and ref"
+        unless (%w[evidence requirement status] - item.keys).empty? && (item.keys - %w[evidence requirement status ref scope gap_kind]).empty?
+          raise Error, "each item must contain requirement, status, evidence and optional scope, ref and gap_kind"
         end
         scope = item.fetch("scope", "delivery")
         raise Error, "item scope must be delivery or lifecycle" unless ITEM_SCOPES.include?(scope)
@@ -160,6 +181,12 @@ module Orbit
         raise Error, "a verified item needs its evidence" if status == "verified" && evidence.strip.empty?
 
         cleaned_item = { "requirement" => requirement, "scope" => scope, "status" => status, "evidence" => evidence }
+        if item.key?("gap_kind")
+          unless status == "unverified" && GAP_KINDS.include?(item["gap_kind"])
+            raise Error, "gap_kind requires an unverified item and a supported gap classification"
+          end
+          cleaned_item["gap_kind"] = item["gap_kind"]
+        end
         if item.key?("ref")
           ref = item["ref"]
           unless ref.is_a?(String) && ref.length <= MAX_REF && (BLANK_REF.match?(ref) || !ref.match?(/\p{Cc}/))
@@ -194,6 +221,9 @@ module Orbit
       document["records"].each do |entry|
         raise Error, "coverage history contains an invalid record" unless entry.is_a?(Hash) &&
           KINDS.include?(entry["kind"]) && [true, false].include?(entry["stale"])
+        if entry.key?("invalidates_prior") && ![true, false].include?(entry["invalidates_prior"])
+          raise Error, "coverage history has an invalid invalidates_prior"
+        end
         %w[check_id role recorded_at input_digest artifact_digest artifact_root].each do |key|
           raise Error, "coverage history has an invalid #{key}" unless entry[key].is_a?(String)
           label(entry[key], key, max: key == "artifact_root" ? MAX_PATH : MAX_LABEL)

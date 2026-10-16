@@ -90,7 +90,7 @@ module MemberModelSelectorTest
       @states = {}
     end
 
-    def assess_delegation(state:)
+    def assess_delegation(state:, compaction: nil)
       @calls << "delegation"
       @states["delegation"] = state
       fail_judgment("delegation") if @failure == "delegation"
@@ -98,7 +98,7 @@ module MemberModelSelectorTest
       receipt("d1", "delegation", @delegation, 11, state)
     end
 
-    def assess_candidates(state:, candidates:)
+    def assess_candidates(state:, candidates:, compaction: nil)
       @calls << "candidates"
       @states["candidates"] = state
       fail_judgment("candidates") if @failure == "candidates"

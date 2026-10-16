@@ -1281,15 +1281,25 @@ export function installOmpExtension(pi, sdk) {
     const id = session.sessionId;
     guardSession(session, () => taskDirs.get(id), true);
     if (entries.has(id)) return entries.get(id);
-    const entry = { id, session, activeTools: new Set(), pending: 0, interrupted: false };
+    const entry = { id, session, activeTools: new Set(), pending: 0, interrupted: false,
+      toolExecutions: new Map() };
     entry.unsubscribe = session.subscribe(event => {
       if (event.type === 'tool_execution_start') {
         entry.activeTools.add(event.toolCallId);
+        if (event.toolCallId) {
+          entry.toolExecutions.set(event.toolCallId, { started_at: new Date().toISOString(), finished_at: null, status: 'running' });
+          while (entry.toolExecutions.size > 2000) entry.toolExecutions.delete(entry.toolExecutions.keys().next().value);
+        }
         rememberAskArgs(event);
         observeRootVerifyStart(event, session);
       }
       if (event.type === 'tool_execution_end') {
         entry.activeTools.delete(event.toolCallId);
+        const execution = entry.toolExecutions.get(event.toolCallId);
+        if (execution) {
+          execution.finished_at = new Date().toISOString();
+          execution.status = event.isError ? 'failed' : 'completed';
+        }
         observeRootVerifyEnd(event, session);
         // Ask observation only: the registry lookup is deliberately lazy so a
         // normal tool end never pays for it.
@@ -1786,7 +1796,7 @@ export function installOmpExtension(pi, sdk) {
   // verified through the trace's own facts (service-confirmed actual model
   // equals the requested/calibrated one), so no second model list is kept.
   const ENTRY_CURRENT = {
-    rule: 'orbit-entry-rules-3', input: 'orbit-entry-input-2',
+    rule: 'orbit-entry-rules-3', input: 'orbit-entry-input-3',
     decision: 'orbit-entry-decision-2', question_set: 'orbit-entry-3',
     calibration_schema: 'orbit-entry-calibration-v2',
     profile: 'git_untruncated_request_v1',
@@ -2332,10 +2342,15 @@ export function installOmpExtension(pi, sdk) {
     return taskDir ? readReceipts(taskDir) : [];
   }
   // Bounded recent-history window for process observation (stuck/off_track):
-  // the NEWEST N observation EVENTS (assistant/toolResult entries) before the
-  // last assistant, enough to compare a consecutive-failure run; the whole
-  // branch is never copied. Older events get one truthful omission marker.
-  const RECENT_EVENT_WINDOW = 18;
+  // the newest 20 native tool calls before the current assistant. Text-only
+  // assistant messages and tool results do not consume operation slots.
+  const RECENT_OPERATION_WINDOW = 20;
+  const observationText = (value, limit = 2000) => {
+    const text = typeof value === 'string' ? value : String(value ?? '');
+    return text.length > limit
+      ? { text: `${text.slice(0, limit)}…`, truncated: true, original_characters: text.length }
+      : { text, truncated: false, original_characters: text.length };
+  };
   // Native tool-call metadata for assistant observation entries. A
   // toolCall-only assistant message projects EMPTY text (delivery honesty is
   // preserved — never a borrowed earlier answer), which otherwise discards
@@ -2346,46 +2361,44 @@ export function installOmpExtension(pi, sdk) {
   // target for read/write/edit only. Everything else — raw arguments, file
   // bodies, patches, bash commands, eval code — never enters THIS SUMMARY
   // (existing toolResult output projection is unchanged); embedded paths
-  // inside eval/bash are NOT guessed. At most the NEWEST 3 native toolCalls
-  // in native order; more calls yield a real omission count; missing native
-  // values stay 'unknown'; every field is character-bounded with a truthful
-  // truncation marker. An assistant with no toolCalls gets no extra field.
-  const TOOL_CALL_SUMMARY_MAX = 3;
-  const TOOL_CALL_FIELD_LIMITS = { id: 128, name: 64, declared_intent: 400, target: 400 };
+  // inside eval/bash are NOT guessed. Every call in the operation window is
+  // kept in native order. Intent and target are complete metadata strings.
   const TOOL_CALL_TARGET_TOOLS = new Set(['read', 'write', 'edit']);
-  function toolCallSummaries(content) {
+  function toolCallSummaries(content, entry) {
     const calls = Array.isArray(content)
       ? content.filter(part => part && typeof part === 'object' && part.type === 'toolCall') : [];
     if (calls.length === 0) return null;
-    const bounded = (value, limit) => {
-      const text = typeof value === 'string' && value ? value : 'unknown';
-      return text.length > limit ? { value: `${text.slice(0, limit)}…`, truncated: true } : { value: text, truncated: false };
-    };
-    const summaries = calls.slice(-TOOL_CALL_SUMMARY_MAX).map(call => {
+    const summaries = calls.map(call => {
       const args = call.arguments;
       const rawTarget = TOOL_CALL_TARGET_TOOLS.has(call.name) && args && typeof args === 'object'
         && typeof args.path === 'string' && args.path ? args.path : null;
-      const fields = {
-        id: bounded(call.id, TOOL_CALL_FIELD_LIMITS.id),
-        name: bounded(call.name, TOOL_CALL_FIELD_LIMITS.name),
-        declared_intent: bounded(call.intent, TOOL_CALL_FIELD_LIMITS.declared_intent),
-        target: bounded(rawTarget, TOOL_CALL_FIELD_LIMITS.target)
-      };
-      const truncated = Object.keys(fields).filter(key => fields[key].truncated);
-      return { id: fields.id.value, name: fields.name.value,
-        declared_intent: fields.declared_intent.value, target: fields.target.value,
-        ...(truncated.length ? { truncated_fields: truncated } : {}) };
+      const execution = entry?.toolExecutions?.get(call.id) ?? {};
+      const started = execution.started_at ? Date.parse(execution.started_at) : NaN;
+      const finished = execution.finished_at ? Date.parse(execution.finished_at) : NaN;
+      return { id: call.id || 'unknown', name: call.name || 'unknown',
+        declared_intent: call.intent || 'unknown', target: rawTarget || 'unknown',
+        started_at: execution.started_at ?? null, finished_at: execution.finished_at ?? null,
+        duration_ms: Number.isFinite(started) && Number.isFinite(finished) ? Math.max(0, finished - started) : null,
+        status: execution.status ?? 'not_observed' };
     });
-    return calls.length > TOOL_CALL_SUMMARY_MAX
-      ? { tool_calls: summaries, omitted_tool_calls: calls.length - TOOL_CALL_SUMMARY_MAX }
-      : { tool_calls: summaries };
+    return { tool_calls: summaries };
   }
   function state(entry) {
     const session = entry.session;
+    let artifactRoot = null;
+    let boundTaskState = null;
+    try {
+      const taskDir = taskDirs.get(entry.id);
+      if (taskDir) {
+        boundTaskState = JSON.parse(readFileSync(path.join(taskDir, 'state.json'), 'utf8'));
+        artifactRoot = boundTaskState.workspace?.artifact_root ?? null;
+      }
+    } catch { /* unavailable task state remains unknown */ }
     const branch = session.sessionManager.getBranch();
     let lastIndex = -1;
     let lastTurnOrigin = null;
     let lastOriginIndex = -1;
+    let lastOriginItem = null;
     for (let i = branch.length - 1; i >= 0; i--) {
       const item = branch[i];
       if (lastIndex < 0) {
@@ -2393,70 +2406,126 @@ export function installOmpExtension(pi, sdk) {
       } else if (item.type === 'message' && item.message.role === 'user') {
         lastTurnOrigin = item.id;
         lastOriginIndex = i;
+        lastOriginItem = item;
         break;
       } else if (item.type === 'custom_message' && item.customType === 'orbit'
         && typeof item.details?.orbitMessage === 'string' && item.details.orbitMessage.length > 0) {
         lastTurnOrigin = item.details.orbitMessage;
         lastOriginIndex = i;
+        lastOriginItem = item;
         break;
       }
     }
     const last = branch[lastIndex];
     const busy = session.hasAdmittedSubmission === true || session.isStreaming || session.isCompacting || session.isBashRunning || session.isEvalRunning || session.hasPendingAsyncWork() || entry.pending > 0;
     const message = last?.message;
-    const observations = last ? [{ kind: 'agent_message', text: textOf(message.content), ...toolCallSummaries(message.content) }] : [];
+    const observations = last ? [{ kind: 'agent_message', turn_id: last.id,
+      started_at: last.message?.time?.created ?? null, finished_at: last.message?.time?.completed ?? null,
+      text: textOf(message.content), ...toolCallSummaries(message.content, entry) }] : [];
     for (let i = lastIndex + 1; i < branch.length && last; i++) {
       const item = branch[i];
       if (item.type === 'message' && item.message.role === 'toolResult') {
-        observations.push({ kind: 'command', tool: item.message.toolName,
-          status: item.message.isError ? 'failed' : 'completed', aggregated_output: textOf(item.message.content).slice(0, 2000) });
+        const output = observationText(textOf(item.message.content));
+        observations.push({ kind: 'command', message_id: item.id,
+          tool_call_id: item.message.toolCallId ?? item.message.callId ?? null, tool: item.message.toolName,
+          status: item.message.isError ? 'failed' : 'completed', aggregated_output: output.text,
+          output_truncated: output.truncated, output_original_characters: output.original_characters });
       }
     }
     // Bounded RECENT history: process observation (stuck/off_track) must see
-    // consecutive failed turns, not just the last one. We collect events
-    // between the nearest user/Orbit wake boundary and the last assistant
+    // the newest complete operations, not just assistant/toolResult events.
+    // We collect native calls between the nearest user/Orbit wake boundary and the last assistant
     // (the CURRENT turn's real history only — an older task's or unrelated
     // turn's evidence never enters), then keep only the NEWEST N observation
     // events in native order. Older events are summarized by one truthful
     // omission marker with a real count — never silently dropped. Without a
     // trusted boundary we do not guess that older branch content belongs to
     // the current task (empty history, not "everything").
-    // N counts observation EVENTS (assistant/toolResult entries), not whole
-    // rounds; it is large enough to compare a consecutive-failure run and
-    // bounded so the whole branch is never copied into memory.
+    // The window counts individual toolCall ids, including several calls in
+    // one assistant message. Text-only assistant messages do not count.
     if (lastTurnOrigin !== null) {
-      const boundary = lastOriginIndex;
+      let boundary = lastOriginIndex;
+      let taskWakeGap = null;
+      const taskSourceIds = new Set([
+        boundTaskState?.instruction_source?.id,
+        boundTaskState?.continuation?.source?.id,
+        ...(Array.isArray(boundTaskState?.amendments) ? boundTaskState.amendments.map(amendment => amendment?.source?.id) : []),
+      ].filter(id => typeof id === 'string' && id.length > 0));
+      const taskWakeIds = new Set(Array.isArray(boundTaskState?.sent_message_ids)
+        ? boundTaskState.sent_message_ids.filter(id => typeof id === 'string' && id.length > 0) : []);
+      // Internal Orbit delivery can reset the native user boundary. Cross that
+      // wake only when its durable sent id belongs to this task AND the nearest
+      // real user message before it is a source recorded by this task. A newer
+      // unrelated or merely observed user message keeps the conservative wake
+      // boundary. This affects history collection only; delivery attribution
+      // remains lastTurnOrigin below.
+      if (lastOriginItem?.type === 'custom_message' && taskWakeIds.has(lastTurnOrigin)) {
+        let latestUserIndex = -1;
+        for (let i = lastOriginIndex - 1; i >= 0; i--) {
+          const item = branch[i];
+          if (item?.type === 'message' && item.message?.role === 'user' && item.message.attribution !== 'agent') {
+            latestUserIndex = i;
+            break;
+          }
+        }
+        if (latestUserIndex >= 0 && taskSourceIds.has(branch[latestUserIndex].id)) {
+          boundary = latestUserIndex;
+        } else {
+          taskWakeGap = { kind: 'history_gap', reason:
+            'operations before this task wake were excluded because the latest real user message could not be tied to this task' };
+        }
+      }
       if (boundary >= 0) {
         let total = 0;
         for (let i = boundary + 1; i < lastIndex; i++) {
-          const role = branch[i]?.type === 'message' ? branch[i].message?.role : null;
-          if (role === 'assistant' || role === 'toolResult') total++;
+          const item = branch[i];
+          if (item?.type === 'message' && item.message?.role === 'assistant') {
+            total += Array.isArray(item.message.content)
+              ? item.message.content.filter(part => part?.type === 'toolCall').length : 0;
+          }
         }
         let kept = 0;
-        for (let i = lastIndex - 1; i > boundary && kept < RECENT_EVENT_WINDOW; i--) {
+        for (let i = lastIndex - 1; i > boundary && kept < RECENT_OPERATION_WINDOW; i--) {
           const item = branch[i];
           if (item?.type !== 'message') continue;
           const role = item.message?.role;
           if (role === 'assistant') {
-            observations.unshift({ kind: 'prior_agent_message', turn_id: item.id,
-              text: textOf(item.message.content).slice(0, 2000),
-              stop_reason: item.message.stopReason ?? null, ...toolCallSummaries(item.message.content) });
-            kept++;
-          } else if (role === 'toolResult') {
-            observations.unshift({ kind: 'prior_command', message_id: item.id,
-              tool: item.message.toolName,
-              status: item.message.isError ? 'failed' : 'completed',
-              aggregated_output: textOf(item.message.content).slice(0, 2000) });
-            kept++;
+            const calls = toolCallSummaries(item.message.content, entry)?.tool_calls ?? [];
+            const take = Math.min(calls.length, RECENT_OPERATION_WINDOW - kept);
+            if (take > 0) {
+              const selected = calls.slice(-take);
+              observations.unshift({ kind: 'prior_agent_message', turn_id: item.id,
+                started_at: item.message.time?.created ?? null, finished_at: item.message.time?.completed ?? null,
+                stop_reason: item.message.stopReason ?? null, tool_calls: selected });
+              kept += take;
+            }
           }
         }
-        if (total > kept) observations.unshift({ kind: 'omitted_older_history', count: total - kept });
+        const retainedCallIds = new Set(observations.flatMap(observation =>
+          Array.isArray(observation.tool_calls) ? observation.tool_calls.map(call => call.id) : []));
+        // Result state is metadata only and is joined downstream by native id.
+        for (let i = boundary + 1; i < branch.length; i++) {
+          const item = branch[i];
+          if (item?.type !== 'message' || item.message?.role !== 'toolResult') continue;
+          const toolCallId = item.message.toolCallId ?? item.message.callId ?? null;
+          if (!toolCallId || !retainedCallIds.has(toolCallId)) continue;
+          const output = observationText(textOf(item.message.content));
+          observations.push({ kind: 'prior_command', message_id: item.id,
+            tool_call_id: toolCallId,
+            tool: item.message.toolName, status: item.message.isError ? 'failed' : 'completed',
+            aggregated_output: output.text, output_truncated: output.truncated,
+            output_original_characters: output.original_characters });
+        }
+        if (total > kept) observations.unshift({ kind: 'omitted_older_history', count: total - kept,
+          count_basis: 'native tool call ids' });
+        if (taskWakeGap) observations.unshift(taskWakeGap);
       }
     }
     // A wake uses its durable marker, not its native entry id. The runtime
     // checks that marker against this task's sent IDs; foreign wakes cannot
     // attribute a reply to this task and never become user amendments.
-    return { thread_id: entry.id, cwd: session.sessionManager.getCwd(), status: busy ? 'active' : 'idle', interrupted: entry.interrupted,
+    return { thread_id: entry.id, cwd: session.sessionManager.getCwd(), artifact_root: artifactRoot,
+      status: busy ? 'active' : 'idle', interrupted: entry.interrupted,
       turn_id: busy ? last?.id : null, last_turn_id: last?.id || (entry.error ? 'delivery-error' : null),
       last_turn_user_message_id: lastTurnOrigin,
       last_turn_status: entry.interrupted ? 'interrupted' : busy ? 'inProgress' : entry.error || ['error', 'aborted'].includes(message?.stopReason) ? 'failed' : last ? 'completed' : null,

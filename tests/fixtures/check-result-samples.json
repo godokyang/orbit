@@ -409,6 +409,89 @@
           ]
         }
       }
+    },
+    {
+      "name": "unverified item with a supported gap_kind is accepted",
+      "accept": true,
+      "result": {
+        "verdict": "continue",
+        "reason": "one requirement was not re-read this round",
+        "findings": [],
+        "resolved_ids": [],
+        "next_check_seconds": 300,
+        "delivery": {
+          "ready": false,
+          "reason": "final answer not visible in the program record"
+        },
+        "coverage": {
+          "complete": true,
+          "items": [
+            {
+              "requirement": "aggregate exact cents",
+              "status": "verified",
+              "evidence": "src/cli.js sums integer cents"
+            },
+            {
+              "requirement": "reject partial output",
+              "status": "unverified",
+              "evidence": "not re-read in this round",
+              "gap_kind": "not_checked"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "gap_kind on a verified item is refused",
+      "accept": false,
+      "result": {
+        "verdict": "correct",
+        "reason": "delivery verified",
+        "findings": [],
+        "resolved_ids": [],
+        "next_check_seconds": 300,
+        "delivery": {
+          "ready": true,
+          "reason": "answer visible in root observations"
+        },
+        "coverage": {
+          "complete": true,
+          "items": [
+            {
+              "requirement": "aggregate exact cents",
+              "status": "verified",
+              "evidence": "src/cli.js sums integer cents",
+              "gap_kind": "not_checked"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "unsupported gap_kind value is refused",
+      "accept": false,
+      "result": {
+        "verdict": "continue",
+        "reason": "gap classification not understood by the contract",
+        "findings": [],
+        "resolved_ids": [],
+        "next_check_seconds": 300,
+        "delivery": {
+          "ready": false,
+          "reason": "final answer not visible in the program record"
+        },
+        "coverage": {
+          "complete": true,
+          "items": [
+            {
+              "requirement": "reject partial output",
+              "status": "unverified",
+              "evidence": "not inspected",
+              "gap_kind": "unknown"
+            }
+          ]
+        }
+      }
     }
   ]
 }

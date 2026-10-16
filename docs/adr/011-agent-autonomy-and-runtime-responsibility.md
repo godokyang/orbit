@@ -4,6 +4,8 @@
 
 本决定部分替代 [ADR-008](008-omp-native-collaboration-base.md) 的成员文件范围、检查取证和程序处置职责，以及 [ADR-009](009-user-selected-model-pool.md) 的交接范围约束。OMP 单宿主、原生协作、模型授权与真实停止要求保持。外部字段和状态遵守 [ADR-010](010-integration-contract.md)。
 
+终检的默认验收范围、未检查项续查和结论沿用由 [ADR-013](013-final-review-scope-and-continuation.md) 进一步细化；本条其余职责与权限边界保持。
+
 ## 决定
 
 - Root 决定实现、分工、纠偏、争议处理和是否需要用户介入。

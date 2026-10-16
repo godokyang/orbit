@@ -257,9 +257,32 @@ try {
   const withTurn = await request(taskDir, 'state', { session: 'root' });
   assert.equal(withTurn.last_turn_user_message_id, 'original', 'the last assistant turn names the native user message it answers');
 
-  // A task wake after an independent question must restore the task origin.
-  // The durable Orbit marker differs from the native branch entry id.
   const branch = root.sessionManager.getBranch();
+  const boundStatePath = path.join(taskDir, 'state.json');
+  const boundState = JSON.parse(await fs.readFile(boundStatePath, 'utf8'));
+  boundState.sent_message_ids ||= [];
+  boundState.sent_message_ids.push('same-task-wake', 'task-wake-marker');
+  await fs.writeFile(boundStatePath, JSON.stringify(boundState));
+  const historyOperation = (turnId, callId) => [
+    { type: 'message', id: turnId, message: { role: 'assistant', stopReason: 'toolUse', content: [
+      { type: 'toolCall', id: callId, name: 'read', intent: `Inspect ${callId}`, arguments: { path: `${callId}.txt` } }
+    ] } },
+    { type: 'message', id: `${callId}-result`, message: { role: 'toolResult', toolCallId: callId,
+      toolName: 'read', content: [{ type: 'text', text: 'Read completed.' }], isError: false } }
+  ];
+  branch.push(...historyOperation('before-same-task-wake', 'before-wake-call'),
+    { type: 'custom_message', id: 'same-task-native-wake', customType: 'orbit',
+      details: { orbitMessage: 'same-task-wake' }, content: 'Continue this task.' },
+    ...historyOperation('after-same-task-wake', 'after-wake-call'),
+    { type: 'message', id: 'same-task-delivery', message: { role: 'assistant', content: 'Task continues.' } });
+  const sameTaskWake = await request(taskDir, 'state', { session: 'root' });
+  const sameTaskCalls = sameTaskWake.observations.flatMap(item => item.tool_calls || []).map(call => call.id);
+  assert.equal(sameTaskWake.last_turn_user_message_id, 'same-task-wake', 'history widening does not change turn delivery attribution');
+  assert.deepEqual(sameTaskCalls, ['before-wake-call', 'after-wake-call'],
+    'a durable same-task wake keeps operations on both sides of its internal history boundary');
+
+  // A trusted task wake after an unrelated real user question must keep that
+  // question isolated; the durable marker alone does not authorize widening.
   branch.push(
     { type: 'message', id: 'independent-user', message: { role: 'user', content: 'Close the simulator.' } },
     { type: 'message', id: 'independent-answer', message: { role: 'assistant', content: 'Simulator closed.' } }
@@ -268,13 +291,17 @@ try {
   branch.push(
     { type: 'custom_message', id: 'native-wake', customType: 'orbit',
       details: { orbitMessage: 'task-wake-marker' }, content: 'Continue the original task.' },
-    { type: 'message', id: 'resumed-work', message: { role: 'assistant', content: 'Checking the task result.' } },
+    { type: 'message', id: 'resumed-work', message: { role: 'assistant', content: [
+      { type: 'toolCall', id: 'resumed-read', name: 'read', intent: 'Check the task result', arguments: { path: 'result.txt' } }
+    ] } },
     { type: 'message', id: 'resumed-delivery', message: { role: 'assistant', content: 'Task result delivered.' } }
   );
   const resumed = await request(taskDir, 'state', { session: 'root' });
   assert.equal(resumed.last_turn_user_message_id, 'task-wake-marker');
   assert.deepEqual(resumed.observations.filter(o => o.kind === 'prior_agent_message').map(o => o.turn_id), ['resumed-work'],
     'the resumed task history excludes the unrelated question and answer');
+  assert.ok(resumed.observations.some(o => o.kind === 'history_gap' && o.reason.includes('could not be tied to this task')),
+    'the excluded pre-wake history is reported as an attribution gap');
   branch.push(
     { type: 'message', id: 'next-question', message: { role: 'user', content: 'An independent question.' } },
     { type: 'custom_message', id: 'other-extension', customType: 'not-orbit',

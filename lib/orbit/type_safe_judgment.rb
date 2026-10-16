@@ -32,6 +32,36 @@ module Orbit
     attr_reader :model
     attr_reader :last_response
 
+    # Compaction is allowed only when the provider reports the concrete
+    # context overflow code. HTTP status alone is not evidence of overflow.
+    def max_tokens_exceeded?
+      self.class.max_tokens_exceeded?(last_response)
+    end
+
+    def self.max_tokens_exceeded?(response)
+      return false unless response.is_a?(Hash) && response["http_status"] == 400
+
+      body = response["body_base64"].to_s.unpack1("m0")
+      payload = JSON.parse(body)
+      codes = []
+      collect_error_codes(payload, codes)
+      codes.include?("max_tokens_exceeded")
+    rescue JSON::ParserError, ArgumentError
+      false
+    end
+
+    def self.collect_error_codes(value, codes)
+      case value
+      when Hash
+        value.each do |key, child|
+          codes << child if %w[code error_type].include?(key.to_s) && child.is_a?(String)
+          collect_error_codes(child, codes) if child.is_a?(Hash) || child.is_a?(Array)
+        end
+      when Array
+        value.each { |child| collect_error_codes(child, codes) if child.is_a?(Hash) || child.is_a?(Array) }
+      end
+    end
+
     def judge(request)
       @last_response = nil
       # One id per provider invocation, including failures. Retrying the same

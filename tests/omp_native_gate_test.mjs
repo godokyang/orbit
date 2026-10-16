@@ -1488,8 +1488,8 @@ try {
   }
 
   // 11h. Bounded recent-turn observation history: process observation must
-  // see consecutive failed turns within the SAME user turn, never evidence
-  // from before the nearest user message; the window keeps the NEWEST events
+  // see the newest native operations within the SAME user turn, never evidence
+  // from before the nearest user message; the window keeps the NEWEST calls
   // (a long history omits the OLDEST with a real marker), and last-assistant
   // semantics (turn ids, delivery attribution) stay unchanged.
   {
@@ -1497,14 +1497,21 @@ try {
     const mkAssistant = (id, stop) => ({ type: 'message', id,
       message: { role: 'assistant', content: [{ type: 'text', text: `turn ${id}` }], stopReason: stop } });
     const mkTool = (id, tool, isError) => ({ type: 'message', id: `t-${id}`,
-      message: { role: 'toolResult', toolName: tool, isError, content: [{ type: 'text', text: isError ? 'content is required' : 'ok' }] } });
+      message: { role: 'toolResult', toolCallId: id, toolName: tool, isError,
+        content: [{ type: 'text', text: isError ? 'content is required' : 'ok' }] } });
+    const mkOperation = (id, tool, isError) => [
+      { type: 'message', id: `a-${id}`, message: { role: 'assistant', stopReason: 'toolUse',
+        content: [{ type: 'toolCall', name: tool, id, intent: `Perform ${tool} operation ${id}`, arguments: { path: `${id}.txt` } }] } },
+      { type: 'message', id: `t-${id}`, message: { role: 'toolResult', toolCallId: id, toolName: tool,
+        isError, content: [{ type: 'text', text: isError ? 'content is required' : 'ok' }] } },
+    ];
     const mkUser = id => ({ type: 'message', id, message: { role: 'user', content: `${id} text` } });
     // Short case: 4 consecutive failed writes in the current turn.
     const shortHistory = [
-      mkUser('old-user'), mkAssistant('a-old', 'toolUse'), mkTool('r0', 'write', true),
+      mkUser('old-user'), ...mkOperation('old', 'write', true),
       mkUser('cur-user'),
-      mkAssistant('a1', 'toolUse'), mkTool('r2', 'write', true), mkTool('r3', 'write', true),
-      mkAssistant('a2', 'toolUse'), mkTool('r4', 'write', true), mkTool('r5', 'write', true),
+      ...mkOperation('c1', 'write', true), ...mkOperation('c2', 'write', true),
+      ...mkOperation('c3', 'write', true), ...mkOperation('c4', 'write', true),
       mkAssistant('a3', 'endTurn'),
     ];
     root.sessionManager.getBranch = () => shortHistory;
@@ -1514,14 +1521,14 @@ try {
       assert.equal(priorCommands.length, 4, `expected 4 prior failed writes in-window, got ${priorCommands.length}`);
       assert.ok(!JSON.stringify(observed.observations).includes('old-user text'),
         'pre-boundary user evidence must not enter the current task history');
-      assert.ok(!observed.observations.some(o => o.kind === 'prior_command' && o.message_id === 't-r0'),
+      assert.ok(!observed.observations.some(o => o.kind === 'prior_command' && o.message_id === 't-old'),
         'no pre-boundary tool results');
       assert.equal(observed.last_turn_id, 'a3');
       assert.equal(observed.last_turn_user_message_id, 'cur-user');
-      const priorMsgs = observed.observations.filter(o => o.kind === 'prior_agent_message');
-      assert.deepEqual(priorMsgs.map(m => m.turn_id), ['a1', 'a2']);
+      const priorCalls = observed.observations.flatMap(o => o.tool_calls || []);
+      assert.deepEqual(priorCalls.map(c => c.id), ['c1', 'c2', 'c3', 'c4']);
       // prior_command entries carry their native message ids for traceability.
-      assert.ok(priorCommands.every(m => typeof m.message_id === 'string' && m.message_id.startsWith('t-r')),
+      assert.ok(priorCommands.every(m => typeof m.message_id === 'string' && m.message_id.startsWith('t-c')),
         'prior commands carry native message ids');
     } finally {
       root.sessionManager.getBranch = () => savedBranch;
@@ -1531,8 +1538,7 @@ try {
     // material never enters, and the marker is actually reachable.
     const longHistory = [mkUser('long-user')];
     for (let n = 0; n < 30; n++) {
-      longHistory.push(mkAssistant(`la${n}`, 'toolUse'));
-      longHistory.push(mkTool(`lr${n}`, 'write', n >= 25)); // last 5 fail
+      longHistory.push(...mkOperation(`lr${n}`, 'write', n >= 25)); // last 5 fail
     }
     longHistory.push(mkAssistant('la-final', 'endTurn'));
     root.sessionManager.getBranch = () => longHistory;
@@ -1542,7 +1548,7 @@ try {
       assert.equal(failed.length, 5, `the 5 NEWEST consecutive failures must all be visible, got ${failed.length}`);
       const marker = observed.observations.find(o => o.kind === 'omitted_older_history');
       assert.ok(marker && marker.count > 0, 'a real omission marker with a positive count must exist');
-      assert.ok(marker.count >= 40, `the marker must reflect many omitted older events, got ${marker.count}`);
+      assert.equal(marker.count, 10, `the marker counts omitted tool calls, got ${marker.count}`);
       assert.ok(!observed.observations.some(o => o.kind === 'prior_command' && o.message_id === 't-lr0'),
         'the oldest tool results are actually omitted');
       assert.equal(observed.last_turn_id, 'la-final');
@@ -1556,9 +1562,8 @@ try {
     // failures survive and the omission count stays truthful.
     const noisyHistory = [mkUser('noisy-user')];
     for (let n = 0; n < 30; n++) {
-      noisyHistory.push(mkAssistant(`na${n}`, 'toolUse'));
+      noisyHistory.push(...mkOperation(`nr${n}`, 'write', n >= 25)); // last 5 fail
       for (let k = 0; k < 3; k++) noisyHistory.push({ type: 'custom_message', id: `nc${n}-${k}`, message: { role: 'custom' } });
-      noisyHistory.push(mkTool(`nr${n}`, 'write', n >= 25)); // last 5 fail
       noisyHistory.push({ type: 'model_change', id: `nm${n}` });
     }
     noisyHistory.push({ type: 'custom_message', id: 'nc-final', message: { role: 'custom' } });
@@ -1568,12 +1573,10 @@ try {
       const observed = await request('state');
       const failed = observed.observations.filter(o => o.kind === 'prior_command' && o.status === 'failed');
       assert.equal(failed.length, 5, `noisy case: the 5 newest failures must survive dense custom entries, got ${failed.length}`);
-      const priorCommands = observed.observations.filter(o => o.kind === 'prior_command');
-      const priorMsgs = observed.observations.filter(o => o.kind === 'prior_agent_message');
-      assert.equal(priorCommands.length + priorMsgs.length, 18,
-        `the window keeps exactly RECENT_EVENT_WINDOW observations, got ${priorCommands.length + priorMsgs.length}`);
+      const operationCount = observed.observations.reduce((sum, o) => sum + (o.tool_calls?.length || 0), 0);
+      assert.equal(operationCount, 20, `the window keeps exactly 20 native tool calls, got ${operationCount}`);
       const marker = observed.observations.find(o => o.kind === 'omitted_older_history');
-      assert.ok(marker && marker.count === 60 - 18, `truthful omission count 42 expected, got ${marker && marker.count}`);
+      assert.ok(marker && marker.count === 10, `truthful omitted-call count 10 expected, got ${marker && marker.count}`);
       assert.ok(!observed.observations.some(o => o.kind === 'prior_command' && o.message_id === 't-nr0'),
         'oldest noisy-case results are omitted');
     } finally {
@@ -1596,8 +1599,7 @@ try {
       assert.ok(current, 'current agent_message exists');
       assert.equal(current.text, '', 'a toolCall-only last assistant yields empty text, not a borrowed earlier answer');
       const priorMsgs2 = observed.observations.filter(o => o.kind === 'prior_agent_message');
-      assert.deepEqual(priorMsgs2.map(m => m.turn_id), ['toolless'],
-        'the earlier answer stays in prior history, not as the delivery');
+      assert.deepEqual(priorMsgs2, [], 'text-only assistant messages do not occupy the operation window');
     } finally {
       root.sessionManager.getBranch = () => savedBranch;
     }
@@ -1666,9 +1668,8 @@ try {
     } finally {
       root.sessionManager.getBranch = () => savedBranch;
     }
-    // Missing native values stay 'unknown'; more than 3 native calls keep the
-    // NEWEST 3 in native order with a truthful omission count; over-long
-    // fields are truncated and flagged.
+    // Missing native values stay 'unknown'; every call is retained in native
+    // order and intent/target remain complete.
     root.sessionManager.getBranch = () => [
       mkUser('cur-user'),
       { type: 'message', id: 'a-many-tools',
@@ -1683,14 +1684,13 @@ try {
     try {
       const observed = await request('state');
       const current = observed.observations.find(o => o.kind === 'agent_message');
-      assert.deepEqual(current.tool_calls.map(c => c.id), ['tc-b2', 'tc-w3', 'tc-r4'],
-        'only the NEWEST 3 native calls are kept, in native order');
-      assert.equal(current.omitted_tool_calls, 1, 'the older call is truthfully counted, not silently dropped');
-      assert.equal(current.tool_calls[0].declared_intent, 'unknown', 'a missing native intent stays unknown');
+      assert.deepEqual(current.tool_calls.map(c => c.id), ['tc-b1', 'tc-b2', 'tc-w3', 'tc-r4'],
+        'all native calls are kept in native order');
+      assert.equal(current.tool_calls[0].declared_intent, 'First older call');
       assert.equal(current.tool_calls[0].target, 'unknown', 'bash never gets a guessed target');
-      assert.equal(current.tool_calls[1].declared_intent.length, 401, 'over-long intent is bounded');
-      assert.deepEqual(current.tool_calls[1].truncated_fields, ['declared_intent'], 'truncation is flagged truthfully');
-      assert.equal(current.tool_calls[2].target, 'README.md');
+      assert.equal(current.tool_calls[1].declared_intent, 'unknown', 'a missing native intent stays unknown');
+      assert.equal(current.tool_calls[2].declared_intent.length, 500, 'long intent remains complete');
+      assert.equal(current.tool_calls[3].target, 'README.md');
       const serialized = JSON.stringify(observed.observations);
       assert.ok(!serialized.includes('echo one') && !serialized.includes('echo two'),
         'bash command arguments never leak');
@@ -1963,7 +1963,7 @@ try {
       reason: 'fixture release', scope: 'fixture scope', profile: 'git_untruncated_request_v1',
       reviewed_by: 'fixture', reviewed_at: '2026-09-29T14:33:28Z',
       schema_version: 'orbit-entry-calibration-v2', rule_version: 'orbit-entry-rules-3',
-      question_set_version: 'orbit-entry-3', input_version: 'orbit-entry-input-2',
+      question_set_version: 'orbit-entry-3', input_version: 'orbit-entry-input-3',
       decision_version: 'orbit-entry-decision-2', question_digest: 'dg-current',
       model: 'jev-1.13.0',
       thresholds: { execution_authorized: 0.85, delegation_value: 0.65, supervision_value: 0.65 },
@@ -1972,7 +1972,7 @@ try {
     const entryDocument = (overrides = {}) => ({
       decision: 'start', message_id: 'm1',
       trace: {
-        rule_version: 'orbit-entry-rules-3', input_version: 'orbit-entry-input-2',
+        rule_version: 'orbit-entry-rules-3', input_version: 'orbit-entry-input-3',
         decision_version: 'orbit-entry-decision-2', question_set_version: 'orbit-entry-3',
         judgment_status: 'answered', provider: 'typesafe',
         actual_model: 'jev-1.13.0', requested_model: 'jev-1.13.0', question_digest: 'dg-current',
@@ -1988,17 +1988,14 @@ try {
     await advisoryState({ entry: entryDocument({ trace: { thresholds: { execution_authorized: 0.85, delegation_value: 0.9, supervision_value: 0.65 } } }) });
     assert.ok(!(await advisoryTurn()).includes('[orbit-entry-advisory]'),
       'a below-threshold entry value never advises');
-    // (b) COMPLETE but older ruleset (every field populated, self-consistent,
-    //     not the current pinned versions): rejected on the version pin.
+    // (b) Complete but prior input version (all fields populated and
+    //     self-consistent): rejected on the current input-version pin.
     await advisoryState({ entry: entryDocument({ trace: {
-      rule_version: 'orbit-entry-rules-2', input_version: 'orbit-entry-input-1',
-      decision_version: 'orbit-entry-decision-1', question_set_version: 'orbit-entry-2',
-      question_digest: 'dg-old',
-      calibration: calibrationOf({ rule_version: 'orbit-entry-rules-2', input_version: 'orbit-entry-input-1',
-        decision_version: 'orbit-entry-decision-1', question_set_version: 'orbit-entry-2', question_digest: 'dg-old' }),
+      input_version: 'orbit-entry-input-2',
+      calibration: calibrationOf({ input_version: 'orbit-entry-input-2' }),
     } }) });
     assert.ok(!(await advisoryTurn()).includes('[orbit-entry-advisory]'),
-      'a complete older-ruleset trace is rejected by the current-version pin');
+      'a complete prior-input trace is rejected by the current-version pin');
     // (c) unknown calibration schema (current versions, stale release schema).
     await advisoryState({ entry: entryDocument({ trace: { calibration: calibrationOf({ schema_version: 'orbit-entry-calibration-v1' }) } }) });
     assert.ok(!(await advisoryTurn()).includes('[orbit-entry-advisory]'),
@@ -2165,7 +2162,7 @@ process.stdout.write(JSON.stringify({ task_directory: dir, status: 'starting' })
     const realRuby = process.env.ORBIT_RUBY || 'ruby';
     const advDir = await fs.mkdtemp(path.join(os.tmpdir(), 'orbit-adv-'));
     const traceShape = {
-      rule_version: 'orbit-entry-rules-3', input_version: 'orbit-entry-input-2',
+      rule_version: 'orbit-entry-rules-3', input_version: 'orbit-entry-input-3',
       decision_version: 'orbit-entry-decision-2', question_set_version: 'orbit-entry-3',
       provider: 'typesafe', actual_model: 'jev-1.13.0', call_id: 'call-fixture',
       judgment_status: 'answered', requested_model: 'jev-1.13.0',
@@ -2174,7 +2171,7 @@ process.stdout.write(JSON.stringify({ task_directory: dir, status: 'starting' })
       calibration: { reason: 'fixture', scope: 'fixture', profile: 'git_untruncated_request_v1',
         reviewed_by: 'fixture', reviewed_at: '2026-09-29T14:33:28Z',
         schema_version: 'orbit-entry-calibration-v2', rule_version: 'orbit-entry-rules-3',
-        question_set_version: 'orbit-entry-3', input_version: 'orbit-entry-input-2',
+        question_set_version: 'orbit-entry-3', input_version: 'orbit-entry-input-3',
         decision_version: 'orbit-entry-decision-2', question_digest: 'dg-current',
         model: 'jev-1.13.0',
         thresholds: { execution_authorized: 0.85, delegation_value: 0.65, supervision_value: 0.65 },

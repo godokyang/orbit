@@ -97,6 +97,7 @@ export const toolArgs = z => ({
         basis: z.array(z.string()).optional(), message_id: z.string().optional().describe('start: native user message id selecting the original instruction; amend: the exact native user correction id, required explicitly. A progress question is a continuation source, never an amendment.'),
         allowed_models: z.array(z.string()).min(1).max(64).optional().describe("Optional exact task model authorization; cannot exceed the session authorization."),
         review_model: z.string().optional().describe('Optional Root-selected provider/id from the current OMP model catalog.'),
+        task_overview: z.string().optional().describe('Optional task selection context already known to Root; do not investigate solely to fill this field.'),
         recovery_evidence: z.string().optional().describe('review-model only: for a model with a recorded account/quota refusal, cite an actual account recovery or successful same-route call before retry. A new artifact or model name alone is not recovery.'),
         resume_from: z.string().optional().describe('start only: exact confirmed-stopped task_directory for continuing the SAME delivery from paused or legacy needs_user. Requires a real native user message in the same Root session. Uses the preserved original instruction and amendments, creates a new supervised boundary, and never revives stopped members. Explicit pause/discussion/cancel wins; unrelated questions never resume.'),
         external_refs: z.array(z.string()).optional().describe('start only: opaque references the caller attaches to this task (for example an external tracker id); at most 16, each non-blank, at most 256 characters, distinct. Stored verbatim and returned by status/export; never interpreted. A continuation does not inherit them.'),
@@ -262,6 +263,7 @@ export function createOrbitHost({ provider, project, dispatch, bind, reset, auth
           }
           for (const model of a.allowed_models || []) args.push("--allowed-model", model);
           if (chosen) args.push('--review-model', chosen);
+          if (a.task_overview !== undefined) args.push('--task-overview', a.task_overview);
           for (const ref of a.external_refs || []) args.push('--external-ref', ref);
           if (a.entry_file) args.push('--entry-file', a.entry_file);
           if (a.check_in) args.push('--check-in', String(a.check_in));
