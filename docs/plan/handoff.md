@@ -6,7 +6,7 @@
 
 - 自主职责调整阶段一已完成，具体规则见[任务运行合同](../../contracts/task-runtime.md)与 [ADR-011](../adr/011-agent-autonomy-and-runtime-responsibility.md)。实施状态和验收记录见[唯一总待办](agent-autonomy-implementation.md)。
 - 本次全量 `npm test` 通过，退出码为 0。测试环境使用本地 Ruby base64 路径，并在测试期间临时接用根目录 Zod 4；测试后已恢复原环境。
-- 本次未安装、未运行真实模型验收，也未核实源码与已安装版本一致。
+- 已安装并核实 Orbit 0.8.11 与当前源码一致，也完成真实模型负例运行；正例获得 task-fit hint 并派发原生成员，但成员受工作单元命令范围阻塞后被中断，完整真实验收仍未通过。证据与剩余路径见[未完成事项](debt-ledger.md)。
 - Loom 未修改。阶段二事项仅列在总待办中，等待用户另行通知。
 
 ## 当前未完成事项
