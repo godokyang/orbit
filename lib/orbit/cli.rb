@@ -17,6 +17,7 @@ require_relative "omp_entry"
 require_relative "prestart"
 require_relative "task_view"
 require_relative "session_summary"
+require_relative "conversation"
 require_relative "workspace_binding"
 require_relative "workspace_snapshot"
 require_relative "check_snapshot_archive"
@@ -50,6 +51,7 @@ module Orbit
         orbit omp [原生参数]       启动原版 OMP 并加载 Orbit 扩展；普通 omp 不接入
         orbit status [TASK]       查看当前项目任务，TASK 可用 ID 前缀或目录
         orbit session-summary --thread ID [--project DIR]  本地只读汇总同一原生 OMP 会话的任务事实
+        orbit conversation TASK --after OFFSET  只读增量读取宿主报告的可见助手消息
         orbit stop [TASK]         停止当前项目任务；多任务须指定 TASK
         orbit export TASK --output FILE  打包任务证据为本地自足归档（不上传）
         orbit restore-check TASK CHECK --output DIR  把检查历史恢复到新的独立目录
@@ -70,6 +72,7 @@ module Orbit
       "omp" => "orbit omp [OMP 原生参数]\n启动原版 OMP 并用 -e 显式加载 Orbit 扩展；模型、profile、工具、权限、恢复与消息参数原样交给 OMP，其他扩展照常加载，退出码照常返回。普通 omp 不加载 Orbit。",
       "status" => "orbit status [TASK] [--json|--details]\n默认简述结果和下一步；--details 显示诊断。省略 TASK 时查当前项目；多任务列出 ID。没有待处理任务时显示最近结束记录。\norbit status --external-ref REF [--project DIR] [--json]\n按外部引用精确查找任务（含已结束，新到旧，一个引用可命中多个任务），恒返回 {\"tasks\":[...]}；无匹配退出 0 返回空数组；与位置参数 TASK 互斥。",
       "session-summary" => "orbit session-summary --thread ID [--project DIR]\n只读汇总该项目同一原生 OMP 会话下的任务与检查/纠偏/Jev 次数；JSON 输出。缺失事件日志或用量保持 unknown/null，不读或导出原生会话正文，不调用模型、不修改任务。",
+      "conversation" => "orbit conversation TASK --after OFFSET\n只读读取宿主报告的会话文件在 OFFSET 之后的可见助手消息；返回 next_offset 供下次续读。不写任务、不调用模型、不重放对话；缺少会话文件或偏移越界时失败，不合成消息。",
       "stop" => "orbit stop [TASK] [--reason TEXT] [--json]\n只定位唯一待处理任务；多任务先用 orbit status 查看，再传 ID。请求入队不代表停止已确认。",
       "doctor" => "orbit doctor [TASK] [--json]\n只读检查环境、安装和已有任务记录；通过所选已有任务或当前会话验证连接，不调用模型，不验证登录或额度。",
       "jev" => "orbit jev setup\n交互输入 TypeSafe key，配置 zsh／bash 新终端的 TYPESAFE_API_KEY；不写入 Orbit 配置。",
@@ -228,6 +231,8 @@ module Orbit
         takeover_scope(argv)
       when "session-summary"
         session_summary(argv)
+      when "conversation"
+        conversation(argv)
       when "model-evidence"
         model_evidence(argv)
       when "model-candidates"
@@ -253,7 +258,7 @@ module Orbit
            WorkspaceBinding::Error, ModelEvidenceCache::Error, ModelCandidatePool::Error, JSON::ParserError,
            PrestartClassifier::Error, PrestartLedger::Error, JevAdvisor::Error, TaskEvidence::Error, WorkUnitStore::Error,
            RouteResourceStore::Error, RouteResourceFacts::Error, ResourceCallLedger::Error, RouteCostInputs::Error,
-           CheckSnapshotArchive::Error, IntegrationContract::Error => error
+           CheckSnapshotArchive::Error, IntegrationContract::Error, Conversation::Error => error
       warn "orbit: #{error.message}"
       1
     end
@@ -315,6 +320,19 @@ module Orbit
         raise ArgumentError, "usage: orbit session-summary --thread ID [--project DIR]"
       end
       puts JSON.pretty_generate(SessionSummary.report(project: options[:project], thread: options[:thread]))
+      0
+    end
+
+    def conversation(argv)
+      options = { after: 0 }
+      OptionParser.new do |parser|
+        parser.on("--after OFFSET") { |value| options[:after] = value }
+      end.parse!(argv)
+      if argv.length != 1
+        raise ArgumentError, "usage: orbit conversation TASK --after OFFSET [--json]"
+      end
+      record = TaskView.single!(argv.first)
+      puts JSON.pretty_generate(Conversation.read(record, after: options[:after]))
       0
     end
 

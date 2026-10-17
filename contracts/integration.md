@@ -1,6 +1,6 @@
 # Orbit 集成合同
 
-合同版本：1.6
+合同版本：1.7
 
 面向把 Orbit 当作外部执行与检查服务的集成方（例如 Loom）。本合同只冻结下面列出的命令、返回字段与结果 schema；这些之外的一切（包括 `status --json` 里的其他字段）都是 Orbit 内部实现，随时可变。产品语义以 [任务运行合同](task-runtime.md) 和 [检查结果 schema](check-result.schema.json) 为准，本文件与它们冲突时以它们为准并修正本文件。机器可读形式见 [integration.json](integration.json)，`orbit capabilities --json` 与契约测试都读取它，决定理由见 [ADR-010](../docs/adr/010-integration-contract.md)。
 
@@ -43,6 +43,7 @@
 | `status_latest_check` | 1.3 起：最后完成检查，含失败/陈旧；白名单字段、模型回执去重数组与输入一致性 |
 | `session_binding` | 1.5 起：status 只读投影 `session_binding`——provider 会话身份、宿主报告的会话文件路径与稳定启动消息边界；未知为 null，不猜路径、不臆造旧记录启动边界（见 §4） |
 | `resume_wake` | 1.5 起：可选 `start --resume-wake`，须与 `--resume-from` 同用；绑定后投递程序来源的原生续接消息，回执见 §4 |
+| `conversation_read` | 1.7 起：`orbit conversation TASK --after OFFSET --json` 只读增量投影宿主报告的会话文件中的可见助手消息；返回 `next_offset`，不写任务、不调用模型、不重放对话 |
 
 ## 3. 命令与返回
 
@@ -51,6 +52,7 @@
 - `orbit start ...`：返回 `task_directory`、`status`。`status=starting` 只表示任务记录已建立；调用方需要真实宿主会话（`--thread`、`--socket`），Orbit 不创建 Root 会话。 运行时完成宿主归属校验与任务绑定后才进入 `running`；调用方应回读状态确认，绑定拒绝沿既有 `failed` 错误路径记录，不把启动返回当作已经执行。
 - `orbit check TASK_DIRECTORY`、`orbit stop TASK --json`：返回 `task_directory`、`command_id`、`status`。`queued` 只是请求入队，不是检查结果，也不是已停止。`check` 也可返回 `rejected` 及原因。
 - `orbit status TASK --json`、`orbit export TASK --output FILE`、`orbit doctor --json`、`orbit version --json`、`orbit capabilities --json`：见 integration.json。
+- `orbit conversation TASK --after OFFSET --json`：见 §4.1。
 
 ### 按外部引用查询（1.2）
 
@@ -133,6 +135,14 @@ models 从该检查 usage.calls 的 model（缺时仅用该回执 requested_mode
 运行时完成精确宿主绑定后，经既有 send_message 通道投递一次明确程序来源的续接消息，不冒充用户、不新增范围或型号授权。尝试先于发送持久化；状态离开 `requested` 后不自动重发。`sent` 不证明执行、采用或完成；失败不改变既有停止门。启动边界仍是 `session_binding` 中的真实原生接续用户消息，不是唤醒消息。
 
 
+### 4.1 可见助手消息（1.7）
+
+`orbit conversation TASK --after OFFSET --json` 是只读增量投影，供集成方显示助手的可见回复，不是新的 AI 运行时或对话记忆。它只读取任务 `session_binding.session_file` 中**宿主报告**的会话文件；不定位、不猜测其它路径，不写任务状态，不启动会话，不调用模型。
+
+返回字段固定为：`session_file`（真实路径）、`offset`（本次起点）、`next_offset`（下次起点，字节偏移）、`messages`（最多 100 条，每条 `id`/`role`/`text`/`created_at`，只含可见 assistant 文本）、`truncated`（本次读取触及 1 MB 上限）、`dropped`（超过 100 条未返回的条数）、`read_at`。`--after` 缺省为 0，必须是非负整数。只解析完整的 JSONL 行；半行留待下次。偏移越界、文件缺失、符号链接或不可读一律失败，不合成空消息；`messages` 为空表示这段没有新的可见助手文本，不代表任务完成或没有回复。
+
+该命令不改变既有 `status`/`stop`/`resume` 语义，也不提供流式推送；集成方按自己的间隔轮询，并保存 `next_offset`。
+
 ## 5. 引用字段（不透明，通用）
 
 **检查项引用 `ref`**：检查结果 schema 的每个覆盖项可带可选 `ref`（最多 200 字符，不含控制字符；空串或纯空白按未提供处理，不保存，`status` 中该项没有 `ref`）。检查者只在原要求、修订或依据本来就给该要求标了编号时逐字抄录，不得自编、规范化或推断；没有就省略。Orbit 原样保存并在 `requirement_coverage.items[].ref` 返回，不解释、不要求唯一、不要求与任何东西匹配（同一编号可对应多个覆盖项，也可没有）。其余不合规（超长、含控制字符、非字符串）与其他字段一样属于结果契约违规，检查结果被拒绝并走既有的检查失败路径；因此检查者不确定时应省略而不是猜写。
@@ -193,3 +203,5 @@ Root 原生调用、原生成员派发/实际请求、检查者/复核者在调�
 - 1.5（追加）：可选 `resume_wake` 与 `continuation.wake` 回执，绑定后投递一次程序来源续接消息；默认行为、启动边界及既有状态取值不变。
 
 - 1.6：新增检查覆盖缺口分类与来源检查号；未检查项由检查流程续查，保留当前版本独立终检及实际停止门。
+
+- 1.7：新增只读 `conversation_read`：按字节偏移读取宿主报告的会话文件中可见的助手消息，返回 `next_offset`。不写任务、不调用模型、不重放对话；缺失/越界失败而不是合成消息。
