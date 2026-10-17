@@ -427,9 +427,8 @@ async function closeCollabWriters() {
 // caller already named it) before showing that role's multi-select rows. The
 // session catalog is the addable source for BOTH roles; each role keeps its own
 // checkbox state, opening snapshot and net delta, and the snapshot of the edited
-// role is exactly what its commit is compared against. Presentation follows
-// OMP's own model picker (title, search line, `>` cursor, footer hints); the
-// persisted multi-select semantics stay Orbit's: Space toggles, Esc writes
+// role is exactly what its commit is compared against. Character-grid panes
+// distinguish keyboard focus from checked membership; Space toggles, Esc writes
 // nothing, a refused commit keeps the selection on screen with the reason, and
 // ONE Enter commits exactly ONE net delta for the selected role — there is no
 // cross-role transaction, so the other pool is a separate command run. Space on
@@ -445,7 +444,7 @@ function pickerRow(entry) {
   };
 }
 
-export function createModelPicker({ roles, role = null, commit, done, listRows = PICKER_LIST_ROWS, theme = null }) {
+export function createModelPicker({ roles, role = null, commit, done, listRows = PICKER_LIST_ROWS, theme = null, requestRender = () => {} }) {
   const views = new Map();
   // One independent view per role. `configured=false` is "never configured": the
   // rows come from the inherited legacy candidates and the role keeps its
@@ -510,161 +509,173 @@ export function createModelPicker({ roles, role = null, commit, done, listRows =
     if (state.cursor < state.scroll) state.scroll = state.cursor;
     if (state.cursor >= state.scroll + listRows) state.scroll = state.cursor - listRows + 1;
   };
-  const statusLines = () => [
-    error ? `保存失败：${error}` : null,
-    notice ? `提示：${notice}` : null,
-  ].filter(Boolean);
-  // Every role is shown, but only the edited one is writable: the others stay
-  // read-only so a save can never be mistaken for a cross-pool edit.
-  const roleTabs = () => [...views.values()].map(state =>
-    `${state.role === active ? '>' : ' '} [${state.label}${state.configured ? ` 已配置 ${state.base.size}` : ' 未配置'}]`).join('  ');
-  const roleStateLine = state => {
-    if (!state.roleScoped) return `角色池接口不可用：Orbit CLI 未支持 model-candidates --role，当前显示旧共享列表，保存会被拒绝（请升级 Orbit）。`;
-    if (!state.configured) {
-      // An unconfigured role is NOT an empty pool: until it is edited it keeps
-      // using the inherited legacy shared candidates when there are any, and
-      // only falls back to the ordinary OMP behaviour when there are none.
-      return state.base.size > 0
-        ? `${state.label}池未单独配置：当前继承旧共享候选 ${state.base.size} 个；另一未配置角色也继承旧列表。`
-        : `${state.label}池未配置且无继承候选：沿用 OMP 空池行为。`;
-    }
-    if (state.base.size === 0) return `${state.label}池已配置为空：不借用另一角色候选，也不回退 OMP 默认。`;
-    return `${state.label}池已配置：${state.base.size} 个候选，与另一角色独立。`;
+  const poolStatus = state => {
+    if (!state.roleScoped) return '角色池接口不可用，请升级 Orbit 后保存';
+    if (!state.configured) return state.base.size
+      ? `未单独配置 · 继承 ${state.base.size} 个共享候选`
+      : '未配置 · 沿用 OMP 默认行为';
+    return state.base.size ? `已配置 ${state.base.size} 个候选` : '已配置为空 · 不回退其他候选';
   };
-  const untouchedLine = () => {
-    const others = [...views.values()].filter(state => state.role !== active);
-    if (!others.length) return null;
-    return `本次只保存 ${current().label}池；` +
-      others.map(state => `${state.label}池${state.configured ? '保持已配置（不改动）' : '维持未配置回退（不改动）'}`).join('、') + '。';
-  };
+  const diagnosticLabel = value => ({
+    fresh: '有效', absent: '缺失', stale: '已过期', unavailable: '不可用',
+    invalid: '无效', disabled: '已禁用', not_configured: '未配置',
+    unmapped: '未映射', no_benchmark: '无基准', measurement_unknown: '测量信息未知',
+  })[value] || value;
 
   function render(width) {
-    // Like OMP's HubFrame: measure terminal cells, not JS string length.
+    // Layout plain terminal cells first; apply ANSI only to completed segments.
+    // This also keeps focus coloring inside its own pane.
     const cells = text => typeof Bun !== 'undefined' ? Bun.stringWidth(text) : [...text].reduce((n, ch) =>
       n + (/\p{Mark}/u.test(ch) ? 0 : /[\u1100-\u115f\u2329-\u232a\u2e80-\ua4cf\uac00-\ud7a3\uf900-\ufaff\ufe10-\ufe6f\uff01-\uff60\uffe0-\uffe6]|\p{Extended_Pictographic}/u.test(ch) ? 2 : 1), 0);
     const fit = (text, limit) => {
+      if (limit <= 0) return '';
       if (cells(text) <= limit) return text;
-      let out = '';
-      for (const ch of text) { if (cells(out + ch) > limit - 1) break; out += ch; }
+      let out = '', used = 0;
+      for (const ch of text) {
+        const size = cells(ch);
+        if (used + size > limit - 1) break;
+        out += ch; used += size;
+      }
       return out + '…';
     };
+    const pad = (text, limit) => { const value = fit(text, limit); return value + ' '.repeat(Math.max(0, limit - cells(value))); };
     const paint = (color, text) => typeof theme?.fg === 'function' ? theme.fg(color, text) : text;
-    const clip = lines => lines.map(line => fit(line, width));
-    const state = current();
-    // Step 1: pick the role that this invocation edits (skipped when --role
-    // already named it). Each row carries its own pool state so an unconfigured
-    // role is never presented as an empty configured one.
-    if (choosing || !state) {
-      const rows = order.map((id, index) => {
-        const view = views.get(id);
-        const pool = view.configured
-          ? `已配置 ${view.base.size} 个候选${view.base.size ? '' : '（显式空池：不借用另一角色，也不回退 OMP 默认）'}`
-          : (view.base.size > 0
-            ? `未单独配置 · 继承旧共享候选 ${view.base.size} 个`
-            : '未配置且无继承候选 · 沿用 OMP 空池行为');
-        return `${index === roleCursor ? '>' : ' '} ${view.label}（${view.role}）· ${view.scope} · ${pool}`;
-      });
-      return clip([
-        'Orbit 候选模型池（ADR-009）· 选择本次要编辑的角色',
-        ...rows,
-        '↑/↓ 移动 · Enter 进入该角色的多选编辑 · Esc 取消',
-        '执行者池与检查者池独立保存：一次 Enter 只提交当前角色的净增删；另一池重开命令编辑。',
-        'Root 模型由 OMP 原生 --model 选择；本候选池不切换当前 Root。',
-        ...statusLines(),
-      ]);
-    }
-    const rows = filtered();
-    const availableCount = state.current.filter(entry => entry.available).length;
-    const delta = deltaOf(state);
-    const head = [
-      `Orbit 候选模型池 · 编辑角色 ${state.label}（${state.role}）· ${state.scope}`,
-      roleTabs(),
-      roleStateLine(state),
-      ...(untouchedLine() ? [untouchedLine()] : []),
-      `已选 ${state.selected.size} / 当前可选 ${availableCount}` +
-        (delta.add.length || delta.remove.length
-          ? ` · 本次待新增 ${delta.add.length} 待移出 ${delta.remove.length}` : ''),
-      `搜索: ${state.query || '（输入即过滤 provider/id）'}`,
-    ];
-    const body = [];
-    if (rows.length) {
-      const start = Math.max(0, state.scroll);
-      const stop = Math.min(rows.length, start + listRows);
-      for (let index = start; index < stop; index++) {
-        const entry = rows[index];
-        const mark = state.selected.has(entry.id) ? '[x]' : '[ ]';
-        const pointer = index === state.cursor ? (state.focus === 'models' ? '>' : '•') : ' ';
-        const tag = entry.available ? '' : '  · 当前不可选，仅可移出';
-        const evidence = entry.evidenceStatus ? `  · 证据 ${entry.evidenceStatus}` : '';
-        const overview = entry.overviewStatus ? `  · 概述 ${entry.overviewStatus}` : '';
-        body.push(`${pointer} ${mark} ${entry.id}${tag}${evidence}${overview}`);
-      }
-      if (rows.length > stop) body.push(`  … 还有 ${rows.length - stop} 项（继续 ↓）`);
-      if (start > 0) body.unshift(`  … 以上还有 ${start} 项（继续 ↑）`);
-    } else {
-      body.push(state.query ? '（无匹配模型；Backspace 删词后重试）' : '（当前会话没有可选模型）');
-    }
-    const footer = [
-      ...(state.focus === 'models' ? ['Space 勾选/取消 · Enter 保存本角色 · Esc 取消'] : []),
-      '输入即搜索 · Backspace 删搜索 · Tab 换角色（先保存）',
-      'Root 模型由 OMP 原生 --model 选择；本候选池不切换当前 Root。',
-      '缺证据：orbit model-evidence --file FILE|-；质量与隔离环境尚未探测。',
-      ...(state.statusNote ? [`本角色诊断：${state.statusNote}`] : []),
-      ...statusLines(),
-    ];
-    const scopes = categories(state);
-    const scopeIndex = Math.max(0, scopes.findIndex(item => item.id === state.category));
-    const scope = scopes[scopeIndex];
-    const selected = [...state.selected];
-    const selectionRows = [
-      `已选清单 · ${state.label} · ${selected.length}`,
-      ...(selected.length ? selected.slice(0, listRows).map(id =>
-        `[x] ${id}${state.rowFor.get(id)?.available ? '' : ' · 当前不可选'}`) : ['（尚未选择模型）']),
-      ...(selected.length > listRows ? [`还有 ${selected.length - listRows} 项，切到“已选模型”查看`] : []),
-    ];
-    const scopeStart = Math.max(0, Math.min(scopeIndex - listRows + 1, scopes.length - listRows));
-    const sidebar = [state.focus === 'categories' ? '分类 · ↑/↓ 选择' : '分类 · ← 进入', ...scopes.slice(scopeStart, scopeStart + listRows).map(item =>
-      `${item.id === state.category ? (state.focus === 'categories' ? '>' : '•') : ' '} ${item.label}  ${item.count}`),
-      ...(scopeStart ? ['↑ 上方还有分类'] : []),
-      ...(scopeStart + listRows < scopes.length ? ['↓ 下方还有分类'] : [])];
-    const columns = (left, right, leftWidth, totalWidth) => Array.from({ length: Math.max(left.length, right.length) }, (_, i) => {
-      const label = fit(left[i] || '', leftWidth);
-      return label + ' '.repeat(Math.max(0, leftWidth - cells(label))) + ' │ ' + fit(right[i] || '', totalWidth - leftWidth - 3);
-    });
-    const browser = [`${scope.label} · ${rows.length} 项`, head.at(-1), '', ...body];
-    let panels;
-    if (width >= 150) {
-      const summaryWidth = Math.min(48, Math.floor(width * 0.3));
-      const browserWidth = width - summaryWidth - 3;
-      panels = columns(columns(sidebar, browser, 27, browserWidth), selectionRows, browserWidth, width);
-    } else if (width >= 80) {
-      panels = [...columns(sidebar, browser, 25, width), '', ...selectionRows];
-    } else {
-      panels = [`分类：${scope.label} · ← 分类 / → 模型`, ...browser, '', ...selectionRows];
-    }
-    // Long identity: the focused model is also shown separately, without
-    // sharing a column with badges; selected identities wrap below on narrow screens.
-    const detail = rows[state.cursor];
-    const wrap = text => {
-      const lines = []; let line = '';
+    // Invert the theme's readable accent against the terminal background.
+    // selectedBg may itself equal accent, making accent-on-selectedBg invisible.
+    const shade = text => typeof theme?.fg === 'function' ? `\x1b[7m${text}\x1b[27m` : text;
+    const w = Math.max(1, Math.min(width, choosing ? 88 : 180));
+    if (w < 8) return [fit('Orbit', w)];
+    const inner = w - 4;
+    const rule = (label = '', left = '├', right = '┤') => {
+      const title = label ? ` ${fit(label, inner - 2)} ` : '';
+      return paint('borderMuted', left) + paint('accent', title) + paint('borderMuted', '─'.repeat(w - 2 - cells(title)) + right);
+    };
+    const row = (text = '', color = 'text', focused = false) => {
+      const content = paint(color, pad(text, inner));
+      return paint('borderMuted', '│ ') + (focused ? shade(content) : content) + paint('borderMuted', ' │');
+    };
+    const wrap = (text, limit = inner) => {
+      const lines = []; let line = '', used = 0;
       for (const ch of text) {
-        if (cells(line + ch) > width) { lines.push(line); line = ''; }
-        line += ch;
+        const size = cells(ch);
+        if (used + size > limit && line) { lines.push(line); line = ''; used = 0; }
+        line += ch; used += size;
       }
       if (line) lines.push(line);
       return lines;
     };
-    const details = detail ? wrap(`当前：${detail.id}` +
-      (detail.available ? '' : ' · 当前不可选，仅可移出') +
-      (detail.evidenceStatus ? ` · 证据 ${detail.evidenceStatus}` : '') +
-      (detail.overviewStatus ? ` · 概述 ${detail.overviewStatus}` : '')) : [];
-    if (width < 150) {
-      const start = panels.length - selectionRows.length;
-      panels.splice(start, selectionRows.length, ...selectionRows.flatMap(wrap));
+    const prose = (text, color = 'muted') => wrap(text).map(line => row(line, color));
+    const feedback = () => [
+      ...(error ? prose(`保存失败：${error}；选择已保留，Enter 重试`, 'error') : []),
+      ...(notice ? prose(notice, 'warning') : []),
+    ];
+    const state = current();
+    if (choosing || !state) {
+      const lines = [rule('Orbit / 模型池', '╭', '╮'), row('选择要配置的角色', 'accent'), row()];
+      for (const [index, id] of order.entries()) {
+        const view = views.get(id), focused = index === roleCursor;
+        lines.push(row(`${focused ? '>' : ' '} ${view.label} (${view.role})`, focused ? 'accent' : 'text', focused));
+        lines.push(...prose(`  ${view.scope}`), ...prose(`  ${poolStatus(view)}`, view.configured && !view.base.size ? 'warning' : 'muted'), row());
+      }
+      lines.push(rule(), ...prose('两池独立保存；不切换当前 Root 模型。'), ...feedback(),
+        ...prose('↑↓ 选择   Enter 编辑   Esc 取消', 'accent'), rule('', '╰', '╯'));
+      return lines;
     }
-    return [...clip(head.slice(0, -1)).map((line, i) => i === 0 ? paint('accent', line) : line),
-      ...clip(panels).map(line => line.startsWith('>') || line.includes('│ >') ? paint('accent', line) : line), ...details,
-      ...clip([state.focus === 'categories' ? '↑/↓ 分类 · → / Enter 进入模型 · Esc 取消' : '↑/↓ 模型 · ← 分类 · Ctrl+↑/↓ 快速切分类', ...footer])];
+    const rows = filtered();
+    const delta = deltaOf(state);
+    const changed = delta.add.length || delta.remove.length;
+    const scopes = categories(state);
+    const scopeIndex = Math.max(0, scopes.findIndex(item => item.id === state.category));
+    const scope = scopes[scopeIndex];
+    const start = Math.max(0, state.scroll), stop = Math.min(rows.length, start + listRows);
+    const selected = [...state.selected];
+    // Show changes before unchanged members, so a removed model stays reviewable.
+    const review = [
+      ...delta.add.map(id => ({ text: `[+] ${id}`, color: 'success' })),
+      ...delta.remove.map(id => ({ text: `[-] ${id}`, color: 'warning' })),
+      ...selected.filter(id => !delta.add.includes(id)).map(id => ({
+        text: `[x] ${id}${state.rowFor.get(id)?.available ? '' : ' (不可选)'}`, color: 'muted',
+      })),
+    ];
+    const scopeStart = Math.max(0, Math.min(scopeIndex - listRows + 1, scopes.length - listRows));
+    const categoryRows = scopes.slice(scopeStart, scopeStart + listRows).map(item => ({
+      text: `${item.id === state.category ? (state.focus === 'categories' ? '>' : '·') : ' '} ${item.label}  ${item.count}`,
+      color: item.id === state.category ? 'accent' : 'muted',
+      focused: item.id === state.category && state.focus === 'categories',
+    }));
+    const modelRows = rows.slice(start, stop).map((entry, index) => ({
+      text: `${start + index === state.cursor ? (state.focus === 'models' ? '>' : '·') : ' '} ${state.selected.has(entry.id) ? '[x]' : '[ ]'} ${entry.id}${entry.available ? '' : ' (不可选)'}`,
+      color: start + index === state.cursor && state.focus === 'models' ? 'accent' : entry.available ? 'text' : 'warning',
+      focused: start + index === state.cursor && state.focus === 'models',
+    }));
+    if (!rows.length) modelRows.push({ text: state.query ? '无匹配模型；Backspace 修改搜索' : '此分类暂无模型；← 切换分类', color: 'muted' });
+    const lines = [
+      rule(`Orbit / 模型池 / ${state.label}`, '╭', '╮'),
+      ...prose(`${poolStatus(state)} · 本次只保存${state.label}池`, 'muted'),
+      row(`已选 ${selected.length}  ·  目录可选 ${state.current.filter(entry => entry.available).length}` +
+        (changed ? `  ·  待保存 +${delta.add.length} / -${delta.remove.length}` : '  ·  无改动'), changed ? 'warning' : 'text'),
+      row(`搜索 / ${state.query || '输入模型或供应商名称'}`, 'accent'),
+    ];
+    // Pane widths include padding but not separators; every segment is styled
+    // independently, after clipping. Narrow terminals stack a short review.
+    const threeColumns = w >= 132;
+    const categoryWidth = w >= 80 ? 24 : 0;
+    const reviewWidth = threeColumns ? Math.min(48, Math.floor(inner * 0.3)) : 0;
+    const modelWidth = inner - (categoryWidth ? categoryWidth + 3 : 0) - (reviewWidth ? reviewWidth + 3 : 0);
+    const paneCell = (entry, size) => {
+      const content = paint(entry?.color || 'muted', pad(entry?.text || '', size));
+      return entry?.focused ? shade(content) : content;
+    };
+    const paneRow = entries => paint('borderMuted', '│ ') +
+      entries.map(([entry, size]) => paneCell(entry, size)).join(paint('borderMuted', ' │ ')) + paint('borderMuted', ' │');
+    lines.push(rule());
+    if (!categoryWidth) lines.push(row(`分类：${scope.label} · ← 分类 / → 模型`, state.focus === 'categories' ? 'accent' : 'muted'));
+    lines.push(paneRow([
+      ...(categoryWidth ? [[{ text: state.focus === 'categories' ? '分类 [焦点]' : '分类', color: 'accent' }, categoryWidth]] : []),
+      [{ text: `${scope.label} · ${rows.length} 项${state.focus === 'models' ? ' [焦点]' : ''}`, color: 'accent' }, modelWidth],
+      ...(reviewWidth ? [[{ text: `已选清单 ${selected.length} · +新增 / -移出`, color: 'text' }, reviewWidth]] : []),
+    ]));
+    const visibleRows = !categoryWidth && state.focus === 'categories' ? categoryRows : modelRows;
+    const height = Math.max(visibleRows.length, categoryWidth ? categoryRows.length : 0, reviewWidth ? Math.min(review.length, listRows) : 0, 3);
+    for (let index = 0; index < height; index++) {
+      lines.push(paneRow([
+        ...(categoryWidth ? [[categoryRows[index], categoryWidth]] : []),
+        [visibleRows[index], modelWidth],
+        ...(reviewWidth ? [[review[index], reviewWidth]] : []),
+      ]));
+    }
+    lines.push(row(rows.length ? `模型 ${start + 1}–${stop} / ${rows.length} · ↑↓ 浏览` : '输入文字重新搜索', 'muted'));
+    if (scopeStart || scopeStart + listRows < scopes.length) lines.push(row('分类还有更多 · ← 后用 ↑↓ 浏览', 'muted'));
+    if (!threeColumns) {
+      lines.push(rule(`已选 ${selected.length} · +新增 / -移出`));
+      const previewCount = Math.min(review.length, w < 80 ? 2 : 3);
+      for (const item of review.slice(0, previewCount)) lines.push(...prose(item.text, item.color));
+      if (!review.length) lines.push(row('尚未选择模型', 'muted'));
+      if (review.length > previewCount) lines.push(row(`另有 ${review.length - previewCount} 项 · 在分类中查看已选或对应供应商`, 'muted'));
+    } else if (review.length > listRows) {
+      lines.push(row(`清单另有 ${review.length - listRows} 项 · 在分类中查看已选或对应供应商`, 'muted'));
+    }
+    lines.push(rule());
+    const detail = rows[state.cursor];
+    if (detail) {
+      lines.push(...prose(`当前：${detail.id}`, 'text'));
+      const diagnostics = [
+        detail.available ? null : '当前不可选，仅可移出',
+        detail.evidenceStatus ? `证据：${diagnosticLabel(detail.evidenceStatus)}` : null,
+        detail.overviewStatus ? `概述：${diagnosticLabel(detail.overviewStatus)}` : null,
+      ].filter(Boolean);
+      if (diagnostics.length) lines.push(...prose(diagnostics.join(' · '), detail.available ? 'muted' : 'warning'));
+    }
+    if (state.statusNote) lines.push(...prose(`诊断：${state.statusNote}`, 'warning'));
+    lines.push(...feedback(), rule(),
+      ...prose(committing ? '正在保存，请稍候…' : state.focus === 'models'
+        ? `Space 勾选/取消   Enter ${changed ? '保存更改' : '关闭'}   Esc 取消`
+        : '↑↓ 选择分类   → / Enter 进入模型   Esc 取消', 'accent'),
+      ...prose('←→ 分类/模型 · Ctrl+↑↓ 快速切分类 · Tab 换角色'),
+      ...prose('输入即搜索 · Backspace 删除'),
+      ...prose('目录可选 ≠ 额度或调用成功；不影响另一角色池与 Root。', 'dim'),
+      rule('', '╰', '╯'));
+    return lines;
   }
 
   // A refused commit keeps the user's selection and replaces the snapshot the
@@ -688,6 +699,7 @@ export function createModelPicker({ roles, role = null, commit, done, listRows =
     committing = true;
     error = null;
     notice = `正在保存 ${state.label}池……`;
+    requestRender();
     try {
       // The snapshot this delta was computed against travels WITH the commit:
       // after a failure-refresh the picker's base may differ from the pool
@@ -707,6 +719,7 @@ export function createModelPicker({ roles, role = null, commit, done, listRows =
       committing = false;
       notice = null;
       clampCursor();
+      if (!closed) requestRender();
     }
   }
 
@@ -4131,7 +4144,7 @@ export function installOmpExtension(pi, sdk) {
     }
   });
   pi.registerCommand('orbit-models', {
-    description: 'Edit one ADR-009 model pool at a time (executor or checker): choose a role with ↑/↓ and Enter, type to search, Space toggles models; Enter saves the current role as one net delta. Tab (or ←/→) opens role selection only after current edits are saved or cancelled; Esc cancels current edits. Headless/script use: add/remove [--role executor|checker].',
+    description: 'Edit one model pool at a time (executor or checker): ↑/↓ and Enter choose a role; type to search, ←/→ focus categories/models, Space toggles models, Enter saves the current role delta (or closes without changes). Tab returns to role selection only without pending edits; Esc cancels. Headless/script use: add/remove [--role executor|checker].',
     handler: async (args, ctx) => {
       const notify = (text, level = 'info') => { try { ctx.ui.notify(text, level); } catch { process.stderr.write(`${text}\n`); } };
       const tokens = (args || '').trim().split(/\s+/).filter(Boolean);
@@ -4300,7 +4313,8 @@ export function installOmpExtension(pi, sdk) {
           // `roleArg` skips the chooser; otherwise the role is chosen inside the
           // same overlay (one role per invocation = one atomic delta).
           outcome = await ctx.ui.custom((_tui, _theme, _keybindings, done) =>
-            createModelPicker({ roles: views.filter(view => view.ok), role: roleArg, done, commit: commitRoleDelta, theme: _theme }));
+            createModelPicker({ roles: views.filter(view => view.ok), role: roleArg, done, commit: commitRoleDelta, theme: _theme,
+              requestRender: () => _tui.requestRender() }));
         } catch (error) {
           notify(`picker unavailable (${error?.message || error}); falling back to the text list`, 'warning');
         }
