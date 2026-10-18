@@ -3171,6 +3171,12 @@ export function installOmpExtension(pi, sdk) {
         return result;
       }
       case 'session_state': return state(entry);
+      case 'session_abort': {
+        const session = entry.session;
+        if (!session || typeof session.abort !== 'function') throw new Error('session abort is unavailable');
+        await session.abort({ goalReason: 'integration' });
+        return { confirmed: true, scope: 'session', at: new Date().toISOString() };
+      }
       case 'messages': return messages(entry);
       case 'current_model': return `${entry.session.model.provider}/${entry.session.model.id}`;
       case 'default_member_route': return memberModel();

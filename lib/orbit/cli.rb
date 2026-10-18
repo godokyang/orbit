@@ -239,6 +239,8 @@ module Orbit
         events(argv)
       when "messages"
         messages(argv)
+      when "abort"
+        abort_session(argv)
       when "model-evidence"
         model_evidence(argv)
       when "model-candidates"
@@ -339,6 +341,19 @@ module Orbit
       end
       record = TaskView.single!(argv.first)
       puts JSON.pretty_generate(Conversation.read(record, after: options[:after]))
+      0
+    end
+
+    def abort_session(argv)
+      OptionParser.new do |parser|
+        parser.on("--json") { }
+      end.parse!(argv)
+      if argv.length != 1
+        raise ArgumentError, "usage: orbit abort TASK [--json]"
+      end
+      record = TaskView.single!(argv.first)
+      connection = Connection.open(record.state.fetch("connection"))
+      puts JSON.generate(connection.session_abort)
       0
     end
 

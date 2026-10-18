@@ -10,7 +10,7 @@ module HostConformanceTest
   CONTRACT = File.join(ROOT, "contracts", "host-port.json")
   RUBY = File.join(ROOT, "lib", "orbit", "hosts", "omp", "plugin_connection.rb")
   JS = File.join(ROOT, "plugins", "omp-host.mjs")
-  REQUIRED = %w[host_port session_state current_model model_catalog default_member_route
+  REQUIRED = %w[host_port session_state session_abort current_model model_catalog default_member_route
                 messages send_message stop_root member_roster member_state member_result
                 send_member stop_member collaboration_events bind_task].freeze
 

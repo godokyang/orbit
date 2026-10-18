@@ -36,6 +36,7 @@ module Orbit
     def host_port = request("host_port")
 
     def state = request("session_state")
+    def session_abort = request("session_abort")
     def configured_model = request("current_model")
 
     # ADR-009 session catalog: the models OMP considers selectable in this

@@ -44,6 +44,7 @@
 | `session_binding` | 1.5 起：status 只读投影 `session_binding`——provider 会话身份、宿主报告的会话文件路径与稳定启动消息边界；未知为 null，不猜路径、不臆造旧记录启动边界（见 §4） |
 | `resume_wake` | 1.5 起：可选 `start --resume-wake`，须与 `--resume-from` 同用；绑定后投递程序来源的原生续接消息，回执见 §4 |
 | `conversation_read` | 1.7 起：`orbit conversation TASK --after OFFSET --json` 只读增量投影宿主报告的会话文件中的可见助手消息；返回 `next_offset`，不写任务、不调用模型、不重放对话 |
+| `session_abort` | 1.8 起：`orbit abort TASK --json` 中止绑定会话；`scope=session` 只表示会话已中止，不等于任务停止或业务完成 |
 | `native_user_messages` | 1.8 起：`orbit messages TASK --json` 只读投影宿主会话文件中的原生用户消息；稳定 id、文本、时间；校验会话身份与工作区，缺失或不符失败 |
 | `events_read` | 1.8 起：`orbit events TASK --after CURSOR --json` 只读增量投影任务事件；游标不透明，白名单类型与字段裁剪，缺失日志返回空列表并原样返回游标 |
 

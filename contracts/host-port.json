@@ -215,6 +215,15 @@
           "version"
         ]
       }
+    },
+    "session_abort": {
+      "request": [],
+      "result": {
+        "required": [
+          "confirmed",
+          "scope"
+        ]
+      }
     }
   },
   "obligations": {

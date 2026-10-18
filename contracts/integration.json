@@ -129,6 +129,15 @@
         "read_at"
       ],
       "note": "Read-only projection of the native user messages recorded by the host. The task must carry a host-reported session file and identity; the first non-title header line must name that session and a workspace this task owns. Each message carries a stable native id, text and created_at; internal, agent-attributed and non-user entries are never returned. The command never writes a task, starts a session, calls a model or invents an id."
+    },
+    "session_abort": {
+      "invocation": "orbit abort TASK --json",
+      "stdout_fields": [
+        "confirmed",
+        "scope",
+        "at"
+      ],
+      "note": "Abort the bound native session. scope=session means the session was aborted; it is not a task stop and never a business completion. A missing or foreign task fails."
     }
   },
   "status_fields": [
@@ -559,6 +568,13 @@
       "max_messages": 200,
       "header_validation": "session_id_and_workspace",
       "missing_or_mismatch": "error",
+      "writes_task": false,
+      "calls_model": false
+    },
+    "session_abort": {
+      "since": "1.8",
+      "command": "abort",
+      "scope": "session",
       "writes_task": false,
       "calls_model": false
     }
