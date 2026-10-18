@@ -87,6 +87,25 @@ Loom 节点不再直接说 OMP：RPC 帧类型、会话文件格式、`orbit omp
 - **要求**：启动语义归 Orbit；进程归属须先决定（见 4.1）。
 - **验收**：节点不再拼 OMP 命令；重启节点后能按记录的身份接回。
 
+### 3.6 执行 run 问答切换（未实施）
+
+discovery 的问答已经走 `question_relay`；执行 run 的 `_live_question_step` 仍走原生 ask。切换不是替换一个调用点，原因如下：
+
+- run question 的 `run_question` payload 绑定 `native_question_id`、`tool_call_id` 与 `ui_request_id`；
+- 答复递送用 `delivered_dialog` 从原生会话文件确认“同一 toolCall 的结果”，再写 `question_delivery`；
+- 采纳用 `read_answer_adoption`，要求投递 entry 之后、下一次 ask 之前的 assistant 声明块。
+
+切换需要一条并行路径：
+
+1. relay ask 的 `id`、`tool_call_id`、逐题 `question.id` 作为稳定身份；
+2. `run_question` 的 `context` 增加 `ask_request_id`，`native_question_id` 取 relay 问题 id；
+3. 答复仍用 `dialog_answers` 组装，递送改为 `orbit answer`；投递证据用同一 `tool_call_id` 的会话文件 toolResult entry；
+4. 采纳声明格式不变，仍只认后续 assistant 的 `loom-answer-adoption` 块；
+5. 仅在 `question_relay` 能力存在且 relay 模式启用时走新路径，缺失回退原生；执行 run 的进程需要像 discovery 一样设置 `ORBIT_QUESTION_RELAY=1`。
+
+风险：toolResult entry 的识别、单题/多题结果形状、超时/取消语义必须与原生一致；在真实 Loom 整链验证前不应默认启用。
+
+
 ## 4. 决定与未决
 
 ### 4.1 进程归属
