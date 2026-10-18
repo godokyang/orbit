@@ -4,8 +4,8 @@ require "json"
 require "tmpdir"
 require "open3"
 require "pathname"
-require_relative "check_runner"
-require_relative "model_authorization"
+require_relative "../../check_runner"
+require_relative "../../model_authorization"
 
 module Orbit
   # Drop-in check process for an independent OMP reviewer/adjudicator session.
@@ -14,7 +14,7 @@ module Orbit
   # validation stay in CheckRunner. This class never builds a `codex exec`
   # command; it loads the trusted reviewer factory in local OMP in its own process group.
   class OmpCheckRunner < CheckRunner
-    REVIEWER = File.expand_path("../../runners/omp-reviewer/reviewer.ts", __dir__)
+    REVIEWER = File.expand_path("../../../../runners/omp-reviewer/reviewer.ts", __dir__)
 
     def self.default_command
       ["omp", "--mode", "rpc", "--no-ui", "--no-session", "--no-tools", "--no-pty",

@@ -4,8 +4,8 @@ require "fileutils"
 require "open3"
 require "tmpdir"
 require "json"
-require_relative "model_authorization"
-require_relative "release_lease"
+require_relative "../../model_authorization"
+require_relative "../../release_lease"
 
 module Orbit
   # Explicit OMP entry. It starts the original omp binary and appends this
@@ -27,7 +27,7 @@ module Orbit
   module OmpEntry
     module_function
 
-    EXTENSION = File.expand_path("../../plugins/omp.mjs", __dir__)
+    EXTENSION = File.expand_path("../../../../plugins/omp.mjs", __dir__)
     # Per-process extension root that carries the session's dynamic member
     # agent definitions (ADR-009). OMP only discovers `<ext-root>/agents/*.md`
     # for extension roots that resolve to a DIRECTORY; the Orbit extension
@@ -45,8 +45,8 @@ module Orbit
     # observing an already-parked session. PI_CONFIG_FILES is additive and
     # process-scoped; OMP appends every explicit user --config after
     # environment overlays, so a user config file keeps precedence.
-    IDLE_PARKING_OVERLAY = File.expand_path("../../plugins/omp-idle-parking.yml", __dir__)
-    MODEL_AUTHORIZATION_OVERLAY = File.expand_path("../../plugins/omp-model-authorization.yml", __dir__)
+    IDLE_PARKING_OVERLAY = File.expand_path("../../../../plugins/omp-idle-parking.yml", __dir__)
+    MODEL_AUTHORIZATION_OVERLAY = File.expand_path("../../../../plugins/omp-model-authorization.yml", __dir__)
 
     MINIMUM_OMP_VERSION = "18.2.8"
     # Keep the old constant for callers that already read the version floor.

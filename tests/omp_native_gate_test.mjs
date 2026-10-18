@@ -630,8 +630,8 @@ try {
   ctx.models.resolve = spec => spec === '@task'
     ? { provider: 'zhipu-coding-plan', id: 'glm-5.2', thinking: 'max', baseUrl: 'https://open.bigmodel.cn/api/coding/paas/v4' }
     : undefined;
-  assert.equal(await request('model'), 'glm/x', 'Root model RPC stays the live session model');
-  const memberModel = await request('member_model');
+  assert.equal(await request('current_model'), 'glm/x', 'Root model RPC stays the live session model');
+  const memberModel = await request('default_member_route');
   assert.deepEqual(memberModel, { provider: 'zhipu-coding-plan', id: 'glm-5.2', billing_route: 'subscription_quota' },
     'the verified zhipu coding-plan endpoint is subscription_quota');
   assert.equal((await request('model_catalog')).routes['glm/x'], 'unknown',
@@ -655,67 +655,67 @@ try {
   ctx.models.resolve = spec => spec === '@task'
     ? { provider: 'zhipu-coding-plan', id: 'glm-5.2', baseUrl: 'https://open.bigmodel.cn/api/paas/v4' }
     : undefined;
-  assert.deepEqual(await request('member_model'),
+  assert.deepEqual(await request('default_member_route'),
     { provider: 'zhipu-coding-plan', id: 'glm-5.2', billing_route: 'unknown' },
     'the standard Zhipu API path is not the coding-plan endpoint');
   ctx.models.resolve = spec => spec === '@task'
     ? { provider: 'zhipu-coding-plan', id: 'glm-5.2', baseUrl: 'https://open.bigmodel.cn/api/coding/paas/v4', transport: 'pi-native' }
     : undefined;
-  assert.deepEqual(await request('member_model'),
+  assert.deepEqual(await request('default_member_route'),
     { provider: 'zhipu-coding-plan', id: 'glm-5.2', billing_route: 'unknown' },
     'a pi-native transport never proves a first-party route');
   ctx.models.resolve = spec => spec === '@task'
     ? { provider: 'zhipu-coding-plan', id: 'glm-5.2', baseUrl: 'https://plan.example.com/api/coding/paas/v4' }
     : undefined;
-  assert.deepEqual(await request('member_model'),
+  assert.deepEqual(await request('default_member_route'),
     { provider: 'zhipu-coding-plan', id: 'glm-5.2', billing_route: 'unknown' },
     'a same-named custom provider on another host stays unknown');
   ctx.models.resolve = spec => spec === '@task'
     ? { provider: 'zhipu-coding-plan', id: 'glm-5.2', baseUrl: 'http://open.bigmodel.cn/api/coding/paas/v4' }
     : undefined;
-  assert.deepEqual(await request('member_model'),
+  assert.deepEqual(await request('default_member_route'),
     { provider: 'zhipu-coding-plan', id: 'glm-5.2', billing_route: 'unknown' },
     'a plain-http plan endpoint is not first-party proof');
   ctx.models.resolve = spec => spec === '@task'
     ? { provider: 'kimi-code', id: 'kimi-for-coding', baseUrl: 'https://api.kimi.com/coding/v1' }
     : undefined;
-  assert.deepEqual(await request('member_model'),
+  assert.deepEqual(await request('default_member_route'),
     { provider: 'kimi-code', id: 'kimi-for-coding', billing_route: 'subscription_quota' },
     'the verified Kimi Code endpoint is subscription_quota');
   ctx.models.resolve = spec => spec === '@task'
     ? { provider: 'kimi-code', id: 'kimi-for-coding', baseUrl: 'https://api.moonshot.ai/v1' }
     : undefined;
-  assert.deepEqual(await request('member_model'),
+  assert.deepEqual(await request('default_member_route'),
     { provider: 'kimi-code', id: 'kimi-for-coding', billing_route: 'unknown' },
     'the Moonshot direct API host is not the Kimi Code plan endpoint');
   ctx.models.resolve = spec => spec === '@task'
     ? { provider: 'github-copilot', id: 'gpt-5.4', baseUrl: 'https://api.githubcopilot.com' }
     : undefined;
-  assert.deepEqual(await request('member_model'),
+  assert.deepEqual(await request('default_member_route'),
     { provider: 'github-copilot', id: 'gpt-5.4', billing_route: 'unknown' },
     'a plan service without a verified first-party endpoint stays unknown');
   ctx.models.resolve = spec => spec === '@task'
     ? { provider: 'deepseek', id: 'deepseek-flash', api: 'openai-completions', baseUrl: 'https://api.deepseek.com/v1' }
     : undefined;
-  assert.deepEqual(await request('member_model'),
+  assert.deepEqual(await request('default_member_route'),
     { provider: 'deepseek', id: 'deepseek-flash', billing_route: 'direct_api' },
     'the verified first-party DeepSeek endpoint is direct_api');
   ctx.models.resolve = spec => spec === '@task'
     ? { provider: 'deepseek', id: 'deepseek-flash', baseUrl: 'https://api.deepseek.com/v1', transport: 'pi-native' }
     : undefined;
-  assert.deepEqual(await request('member_model'),
+  assert.deepEqual(await request('default_member_route'),
     { provider: 'deepseek', id: 'deepseek-flash', billing_route: 'unknown' },
     'a gateway-forwarded DeepSeek endpoint is not direct_api');
   ctx.models.resolve = spec => spec === '@task'
     ? { provider: 'deepseek', id: 'deepseek-flash', baseUrl: 'http://api.deepseek.com/v1' }
     : undefined;
-  assert.deepEqual(await request('member_model'),
+  assert.deepEqual(await request('default_member_route'),
     { provider: 'deepseek', id: 'deepseek-flash', billing_route: 'unknown' },
     'a plain-http DeepSeek endpoint is not direct_api');
   ctx.models.resolve = spec => spec === '@task'
     ? { provider: 'deepseek', id: 'deepseek-flash', baseUrl: 'https://proxy.example.com/v1' }
     : undefined;
-  assert.deepEqual(await request('member_model'),
+  assert.deepEqual(await request('default_member_route'),
     { provider: 'deepseek', id: 'deepseek-flash', billing_route: 'unknown' },
     'a custom DeepSeek endpoint stays unknown');
   // OpenCode Go: the verified first-party Go endpoint is a subscription plan;
@@ -724,7 +724,7 @@ try {
   ctx.models.resolve = spec => spec === '@task'
     ? { provider: 'opencode-go', id: 'deepseek-v4.1-flash', baseUrl: 'https://opencode.ai/zen/go/v1' }
     : undefined;
-  assert.deepEqual(await request('member_model'),
+  assert.deepEqual(await request('default_member_route'),
     { provider: 'opencode-go', id: 'deepseek-v4.1-flash', billing_route: 'subscription_quota' },
     'the verified OpenCode Go endpoint is subscription_quota');
   ctx.models.list = () => [{ provider: 'opencode-go', id: 'deepseek-v4.1-flash' }];
@@ -738,14 +738,14 @@ try {
       baseUrl: 'https://opencode.ai/zen/go/v1', transport: 'pi-native' }]
   ]) {
     ctx.models.resolve = candidate => (candidate === '@task' ? refused : undefined);
-    assert.deepEqual(await request('member_model'),
+    assert.deepEqual(await request('default_member_route'),
       { provider: 'opencode-go', id: 'deepseek-v4.1-flash', billing_route: 'unknown' },
       `${label} stays unknown`);
   }
   ctx.models.list = () => [model];
   ctx.models.resolve = () => undefined;
-  await assert.rejects(() => request('member_model'), /unresolved/);
-  assert.equal(await request('model'), 'glm/x', 'a failed task-role lookup does not replace the Root model');
+  await assert.rejects(() => request('default_member_route'), /unresolved/);
+  assert.equal(await request('current_model'), 'glm/x', 'a failed task-role lookup does not replace the Root model');
   delete ctx.models.resolve;
   // Missing quality facts do not make a pool member unusable. Root can
   // explicitly choose it without pretending Jev recommended it.
@@ -865,7 +865,7 @@ try {
       on(name, handler) { (memberHooks[name] ||= []).push(handler); } }, sdk);
     for (const handler of memberHooks.tool_call || [])
       await handler({ toolName: 'read', toolCallId: 'child-scope-block', input: { path: '.orbit/private' } }, actualMemberCtx);
-    const blockedFact = (await request('hub_events')).events.find(event => event.tool_call_id === 'child-scope-block');
+    const blockedFact = (await request('collaboration_events')).events.find(event => event.tool_call_id === 'child-scope-block');
     assert.equal(blockedFact?.kind, 'work_unit_tool_blocked', 'Root sees scope blocks from a distinct member extension factory');
     assert.equal(blockedFact.agent_id, liveRef.id);
     assert.equal(blockedFact.work_unit_id, unit.id);
@@ -1099,7 +1099,7 @@ try {
   }
 
   // Bridge: query by ACTUAL agent id.
-  const roster = await request('members');
+  const roster = await request('member_roster');
   assert.ok(roster.some(m => m.id === revised.input.name && m.registered === true));
   const mstate = await request('member_state', { id: revised.input.name });
   assert.equal(mstate.model, 'glm/x');
@@ -1242,7 +1242,7 @@ try {
   //    member is refused once its task is not active or it was confirmed stopped.
   {
     await emit('tool_call', { toolName: 'hub', toolCallId: 'hub-1', input: { op: 'send', to: 'orbit-native-1', message: 'ping-from-root' } }, ctx);
-    const before = (await request('hub_events')).events.filter(e => e.kind === 'hub_call');
+    const before = (await request('collaboration_events')).events.filter(e => e.kind === 'hub_call');
     assert.equal(before.at(-1).message, 'ping-from-root', 'hub message content must be observed');
     assert.equal(before.at(-1).to, 'orbit-native-1');
     // Task not active -> wake refused (task is 'running' here, so flip first).
@@ -1275,7 +1275,7 @@ try {
       await listener({ type: 'tool_execution_end', toolCallId: 'member-hub-1', toolName: 'hub',
         result: { content: [{ type: 'text', text: 'member reply text' }] }, isError: false });
     }
-    const all = (await request('hub_events')).events;
+    const all = (await request('collaboration_events')).events;
     const memberCall = all.find(e => e.kind === 'hub_call' && e.tool_call_id === 'member-hub-1');
     assert.ok(memberCall, 'member hub call must be observed');
     assert.equal(memberCall.agent_id, revised.input.name, 'member hub call carries the member agent id');
@@ -1437,7 +1437,7 @@ try {
         return false;
       };
       const t0 = Date.now();
-      const queued = await request('send', { text: '终检提醒：请先按原始要求核对交付，再请求独立终检。' });
+      const queued = await request('send_message', { text: '终检提醒：请先按原始要求核对交付，再请求独立终检。' });
       assert.equal(queued.delivery, 'accepted');
       assert.equal(queued.via, 'steer-queue');
       assert.ok(Date.now() - t0 < 1500, 'streaming ACK must not wait for branch consumption');
@@ -1452,27 +1452,27 @@ try {
         timers.push(setTimeout(() => { root.sessionManager.getBranch().push({ type: 'custom_message', id: `idle-${Date.now()}`, ...message }); }, 250));
         timers.push(setTimeout(() => resolve(true), 60000)); // the whole prompt far outlives the RPC
       });
-      const idleAck = await request('send', { text: 'correction to idle root' });
+      const idleAck = await request('send_message', { text: 'correction to idle root' });
       assert.equal(idleAck.via, 'branch');
 
       // (c) Idle preflight discard (resolves false without accepting) -> fail closed.
       root.sendCustomMessage = async () => false;
-      await assert.rejects(() => request('send', { text: 'discarded correction' }), /discarded by the session/);
+      await assert.rejects(() => request('send_message', { text: 'discarded correction' }), /discarded by the session/);
 
       // (d) No acceptance signal at all -> fail closed, never a false report.
       root.sendCustomMessage = () => new Promise(() => {});
-      await assert.rejects(() => request('send', { text: 'lost correction' }), /not accepted within/);
+      await assert.rejects(() => request('send_message', { text: 'lost correction' }), /not accepted within/);
 
       // (e) Marker accepted, transport rejects later -> ACK stands, error surfaced.
       root.sendCustomMessage = async (message, options) => {
         root.sessionManager.getBranch().push({ type: 'custom_message', id: `late-${Date.now()}`, ...message });
         return Promise.reject(new Error('transport died after accept'));
       };
-      const late = await request('send', { text: 'late rejection case' });
+      const late = await request('send_message', { text: 'late rejection case' });
       assert.equal(late.delivery, 'accepted');
       let observed = false;
       for (let n = 0; n < 30; n++) {
-        const state = await request('state');
+        const state = await request('session_state');
         if (JSON.stringify(state.observations).includes('transport died after accept')) { observed = true; break; }
         await new Promise(resolve => setTimeout(resolve, 100));
       }
@@ -1516,7 +1516,7 @@ try {
     ];
     root.sessionManager.getBranch = () => shortHistory;
     try {
-      const observed = await request('state');
+      const observed = await request('session_state');
       const priorCommands = observed.observations.filter(o => o.kind === 'prior_command' && o.status === 'failed');
       assert.equal(priorCommands.length, 4, `expected 4 prior failed writes in-window, got ${priorCommands.length}`);
       assert.ok(!JSON.stringify(observed.observations).includes('old-user text'),
@@ -1543,7 +1543,7 @@ try {
     longHistory.push(mkAssistant('la-final', 'endTurn'));
     root.sessionManager.getBranch = () => longHistory;
     try {
-      const observed = await request('state');
+      const observed = await request('session_state');
       const failed = observed.observations.filter(o => o.kind === 'prior_command' && o.status === 'failed');
       assert.equal(failed.length, 5, `the 5 NEWEST consecutive failures must all be visible, got ${failed.length}`);
       const marker = observed.observations.find(o => o.kind === 'omitted_older_history');
@@ -1570,7 +1570,7 @@ try {
     noisyHistory.push(mkAssistant('na-final', 'endTurn'));
     root.sessionManager.getBranch = () => noisyHistory;
     try {
-      const observed = await request('state');
+      const observed = await request('session_state');
       const failed = observed.observations.filter(o => o.kind === 'prior_command' && o.status === 'failed');
       assert.equal(failed.length, 5, `noisy case: the 5 newest failures must survive dense custom entries, got ${failed.length}`);
       const operationCount = observed.observations.reduce((sum, o) => sum + (o.tool_calls?.length || 0), 0);
@@ -1594,7 +1594,7 @@ try {
       mkTool('tr2', 'write', true),
     ];
     try {
-      const observed = await request('state');
+      const observed = await request('session_state');
       const current = observed.observations.find(o => o.kind === 'agent_message');
       assert.ok(current, 'current agent_message exists');
       assert.equal(current.text, '', 'a toolCall-only last assistant yields empty text, not a borrowed earlier answer');
@@ -1621,7 +1621,7 @@ try {
       mkTool('tr3', 'write', true),
     ];
     try {
-      const observed = await request('state');
+      const observed = await request('session_state');
       const current = observed.observations.find(o => o.kind === 'agent_message');
       assert.ok(current.tool_calls, 'the toolCall-only current message carries tool_calls metadata');
       assert.equal(current.text, '', 'text stays empty — metadata never becomes a delivery answer');
@@ -1655,7 +1655,7 @@ try {
       mkAssistant('a-final-plain', 'endTurn'),
     ];
     try {
-      const observed = await request('state');
+      const observed = await request('session_state');
       const priorWithTools = observed.observations.find(o => o.kind === 'prior_agent_message' && o.turn_id === 'a-prior-tools');
       assert.ok(priorWithTools?.tool_calls, 'prior toolCall-only entries carry metadata');
       assert.equal(priorWithTools.tool_calls[0].target, 'src/one.js');
@@ -1682,7 +1682,7 @@ try {
       mkTool('tr5', 'bash', false),
     ];
     try {
-      const observed = await request('state');
+      const observed = await request('session_state');
       const current = observed.observations.find(o => o.kind === 'agent_message');
       assert.deepEqual(current.tool_calls.map(c => c.id), ['tc-b1', 'tc-b2', 'tc-w3', 'tc-r4'],
         'all native calls are kept in native order');
@@ -1735,7 +1735,7 @@ try {
       // A stranded Orbit hint (queued steer) from an earlier accepted send,
       // plus a user message, a foreign custom message, and ANOTHER task's
       // Orbit marker (a different durable sent set) ahead of it.
-      const sent = await request('send', { text: 'orbit hint that strands' });
+      const sent = await request('send_message', { text: 'orbit hint that strands' });
       taskStatePath = path.join(started.task_directory, 'state.json');
       savedTaskState = await fs.readFile(taskStatePath, 'utf8');
       const taskState = JSON.parse(savedTaskState);
@@ -1747,7 +1747,7 @@ try {
         { role: 'custom', customType: 'orbit', details: { orbitMessage: sent.id }, content: 'orbit hint' },
         { role: 'custom', customType: 'other-extension', details: {}, content: 'foreign aside' });
       followUpQueue.push({ role: 'user', content: 'typed follow-up' });
-      const result = await request('stop');
+      const result = await request('stop_root');
       assert.equal(result.confirmed, true, 'stop confirms despite the pending owned hint and bg result');
       assert.deepEqual(calls.acknowledge, [['job-1', 'job-2']],
         'owner job deliveries are suppressed from the source, exactly once with the snapshot ids');
@@ -1764,7 +1764,7 @@ try {
       root.asyncJobManager.cancelAndReapOwnerJobs = async () => ({ settled: false });
       root.isStreaming = true;
       steeringQueue.push({ role: 'custom', customType: 'orbit', details: { orbitMessage: sent.id }, content: 'requeued by abort' });
-      await assert.rejects(() => request('stop'), /did not settle/,
+      await assert.rejects(() => request('stop_root'), /did not settle/,
         'an unsettled reap fails the stop instead of reporting success');
     } finally {
       await fs.writeFile(taskStatePath, savedTaskState);
@@ -1782,7 +1782,7 @@ try {
       root.isStreaming = false;
       root.abort = async () => { aborted = true; root.hasAdmittedSubmission = false; };
       try {
-        assert.equal((await request('stop')).confirmed, true);
+        assert.equal((await request('stop_root')).confirmed, true);
         assert.equal(aborted, true, 'admitted setup is cancelled before confirming stop');
       } finally {
         root.abort = savedAbort;
@@ -1799,7 +1799,7 @@ try {
       root.abort = async () => { calls.aborts++; root.isStreaming = false; };
       root.isStreaming = true;
       try {
-        const legacy = await request('stop');
+        const legacy = await request('stop_root');
         assert.equal(legacy.confirmed, true, 'a legacy session without the guard still stops');
       } finally { root.abort = savedAbort; root.isStreaming = false; }
     }

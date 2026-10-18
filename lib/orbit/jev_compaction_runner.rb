@@ -5,7 +5,7 @@ require "json"
 require "pathname"
 require "tmpdir"
 
-require_relative "omp_check_runner"
+require_relative "hosts/omp/omp_check_runner"
 
 module Orbit
   # Supervises exactly one JEV compaction model call in its own local OMP

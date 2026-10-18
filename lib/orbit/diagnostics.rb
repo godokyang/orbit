@@ -2,9 +2,9 @@
 
 require "open3"
 require_relative "version"
-require_relative "plugin_connection"
+require_relative "hosts/omp/plugin_connection"
 require_relative "check_runner"
-require_relative "omp_entry"
+require_relative "hosts/omp/omp_entry"
 require_relative "../../scripts/manage-install"
 
 module Orbit

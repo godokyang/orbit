@@ -3169,10 +3169,10 @@ export function installOmpExtension(pi, sdk) {
           sessionId: entry.id, model: `${entry.session.model.provider}/${entry.session.model.id}` });
         return result;
       }
-      case 'state': return state(entry);
+      case 'session_state': return state(entry);
       case 'messages': return messages(entry);
-      case 'model': return `${entry.session.model.provider}/${entry.session.model.id}`;
-      case 'member_model': return memberModel();
+      case 'current_model': return `${entry.session.model.provider}/${entry.session.model.id}`;
+      case 'default_member_route': return memberModel();
       // ADR-009 bridge for the Ruby runtime side: the live model catalog plus
       // the dispatchable agent mapping. `agents` maps `provider/id` -> the
       // generated session agent name for candidates that are BOTH in the pool
@@ -3227,12 +3227,12 @@ export function installOmpExtension(pi, sdk) {
                  allowed_models: taskAllowedModels(taskDirs.get(entry.id)), authorization_guard: authorizationGuards.has(entry.id),
                  agent_dir: typeof sdk.getAgentDir === 'function' ? sdk.getAgentDir() : null };
       }
-      case 'send': return send(entry, request.text);
-      case 'stop': return stop(entry);
+      case 'send_message': return send(entry, request.text);
+      case 'stop_root': return stop(entry);
       // Simple readable interface for TaskRuntime wiring (M1.x): the native
       // member roster and recent native hub traffic.
-      case 'members': return memberRoster();
-      case 'hub_events': {
+      case 'member_roster': return memberRoster();
+      case 'collaboration_events': {
         // Task-scoped read: only events bound to the requester's task. An
         // event observed before any binding (or from an unbound session) is
         // never attributed to a task from this buffer.
@@ -3242,7 +3242,7 @@ export function installOmpExtension(pi, sdk) {
         // task. The buffer is in-process and bounded; consumers must poll
         // promptly, and events are NOT durable across an OMP exit.
         const taskDir = taskDirs.get(request.session);
-        if (!taskDir) throw new Error('hub_events requires a bound task session');
+        if (!taskDir) throw new Error('collaboration_events requires a bound task session');
         return { events: collabEvents.filter(entry => entry.task_dir === taskDir),
                  dropped_oldest: collabDroppedByTask.get(taskDir) ?? 0,
                  next_seq: (collabSeqByTask.get(taskDir) ?? 0) + 1, buffer_cap: COLLAB_CAP };

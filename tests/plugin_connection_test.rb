@@ -3,7 +3,7 @@
 require "json"
 require "socket"
 require "tmpdir"
-require_relative "../lib/orbit/plugin_connection"
+require_relative "../lib/orbit/hosts/omp/plugin_connection"
 
 # Deterministic socket fixture for PluginConnection#model_catalog: the host
 # reply is untrusted, so malformed ids, empty families and empty agent names are

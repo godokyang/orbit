@@ -111,7 +111,7 @@ module InstallTest
         FileUtils.mkdir_p(File.dirname(dest))
         FileUtils.cp(File.join(ROOT, file.fetch("path")), dest, preserve: true)
       end
-      File.open(File.join(@source, "lib/orbit/omp_check_runner.rb"), "a") do |file|
+      File.open(File.join(@source, "lib/orbit/hosts/omp/omp_check_runner.rb"), "a") do |file|
         file.write(<<~RUBY)
           require "open3"
           module Orbit

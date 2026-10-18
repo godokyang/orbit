@@ -13,7 +13,7 @@ require_relative "model_evidence_cache"
 require_relative "model_quality_policy"
 require_relative "route_cost_inputs"
 require_relative "observation_key"
-require_relative "omp_check_runner"
+require_relative "hosts/omp/omp_check_runner"
 require_relative "openrouter_model_overview"
 
 module Orbit

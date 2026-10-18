@@ -11,7 +11,7 @@ require "rbconfig"
 require "shellwords"
 require "time"
 require_relative "../lib/orbit/release_lease"
-require_relative "../lib/orbit/omp_entry"
+require_relative "../lib/orbit/hosts/omp/omp_entry"
 
 module OrbitInstall
   # Format 4 is the single-host layout: the CLI wrapper is the only installed
@@ -351,7 +351,7 @@ module OrbitInstall
   # No SDK packages are downloaded, installed, patched or used as fallback.
   def verify_reviewer_host!(stage)
     omp, version = local_omp!
-    entry = File.join(stage, "lib/orbit/omp_check_runner.rb")
+    entry = File.join(stage, "lib/orbit/hosts/omp/omp_check_runner.rb")
     raise "检查器入口缺失；旧安装保持不变" unless File.file?(entry)
     script = 'require "json"; puts JSON.generate(Orbit::OmpCheckRunner.probe_host(omp: ARGV.fetch(0)))'
     begin

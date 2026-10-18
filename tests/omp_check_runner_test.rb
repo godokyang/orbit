@@ -4,7 +4,7 @@ require "json"
 require "tmpdir"
 require "fileutils"
 require "rbconfig"
-require_relative "../lib/orbit/omp_check_runner"
+require_relative "../lib/orbit/hosts/omp/omp_check_runner"
 
 # No-model stand-in for reviewer.ts. Proves the Ruby adapter reuses CheckRunner's
 # prompt and schema gate, records evidence, and stops the process group. It does

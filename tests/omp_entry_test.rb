@@ -5,7 +5,7 @@ require "fileutils"
 require "open3"
 require "rbconfig"
 require "yaml"
-require_relative "../lib/orbit/omp_entry"
+require_relative "../lib/orbit/hosts/omp/omp_entry"
 
 # `orbit omp` is a transparent launcher: it must keep every native OMP argument
 # and the native exit code, and add exactly one explicit `-e` for this
@@ -164,7 +164,7 @@ module OmpEntryTest
   def detected_version_parses_the_omp_cli_output
     with_stub_omp(0) do |env, _out|
       stdout, _stderr, status = Open3.capture3(env, RbConfig.ruby, "--disable-gems",
-                                               "-r", File.expand_path("../lib/orbit/omp_entry.rb", __dir__),
+                                               "-r", File.expand_path("../lib/orbit/hosts/omp/omp_entry.rb", __dir__),
                                                "-e", "puts Orbit::OmpEntry.detected_version")
       assert(status.success? && stdout.strip == Orbit::OmpEntry::PINNED_OMP_VERSION,
              "omp/18.2.8 is parsed to the minimum version")

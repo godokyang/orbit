@@ -229,13 +229,13 @@ try {
 
   // The bounded bridge keeps its historical shape: capped copy of the same
   // observation, full evidence still only in the file.
-  const early = await request(taskDir, 'hub_events', { session: 'root' });
+  const early = await request(taskDir, 'collaboration_events', { session: 'root' });
   const earlyCall = early.events.find(e => e.kind === 'hub_call' && e.tool_call_id === 'member-hub-1');
   assert.equal(earlyCall.message.length, 2000, 'buffer copy keeps the 2000-char cap');
   assert.ok(early.events.some(e => e.kind === 'task_dispatch'), 'buffer still carries recent evidence for the runtime');
 
   // Root session file reference: path only, straight from the registry ref.
-  const rootState = await request(taskDir, 'state', { session: 'root' });
+  const rootState = await request(taskDir, 'session_state', { session: 'root' });
   assert.equal(rootState.session_file, rootRef.sessionFile, 'state exposes the main ref session file path');
   // The registry ref's sessionFile is stamped at registration/attach and OMP
   // 18.9.0 does not refresh it when the SAME session creates or switches its
@@ -243,7 +243,7 @@ try {
   // chat's file. The state RPC must report the ACTIVE session's own path.
   root.sessionFile = '/tmp/switched-chat.jsonl';
   try {
-    const switched = await request(taskDir, 'state', { session: 'root' });
+    const switched = await request(taskDir, 'session_state', { session: 'root' });
     assert.equal(switched.session_file, '/tmp/switched-chat.jsonl',
       'state reports the active session file, not the stale registry copy');
   } finally {
@@ -254,7 +254,7 @@ try {
   // turn exists, then the user message that turn answers.
   assert.equal(rootState.last_turn_user_message_id, null, 'no assistant turn yet: origin stays null');
   root.sessionManager.getBranch().push({ type: 'message', id: 'reply-1', message: { role: 'assistant', content: 'working' } });
-  const withTurn = await request(taskDir, 'state', { session: 'root' });
+  const withTurn = await request(taskDir, 'session_state', { session: 'root' });
   assert.equal(withTurn.last_turn_user_message_id, 'original', 'the last assistant turn names the native user message it answers');
 
   const branch = root.sessionManager.getBranch();
@@ -275,7 +275,7 @@ try {
       details: { orbitMessage: 'same-task-wake' }, content: 'Continue this task.' },
     ...historyOperation('after-same-task-wake', 'after-wake-call'),
     { type: 'message', id: 'same-task-delivery', message: { role: 'assistant', content: 'Task continues.' } });
-  const sameTaskWake = await request(taskDir, 'state', { session: 'root' });
+  const sameTaskWake = await request(taskDir, 'session_state', { session: 'root' });
   const sameTaskCalls = sameTaskWake.observations.flatMap(item => item.tool_calls || []).map(call => call.id);
   assert.equal(sameTaskWake.last_turn_user_message_id, 'same-task-wake', 'history widening does not change turn delivery attribution');
   assert.deepEqual(sameTaskCalls, ['before-wake-call', 'after-wake-call'],
@@ -287,7 +287,7 @@ try {
     { type: 'message', id: 'independent-user', message: { role: 'user', content: 'Close the simulator.' } },
     { type: 'message', id: 'independent-answer', message: { role: 'assistant', content: 'Simulator closed.' } }
   );
-  assert.equal((await request(taskDir, 'state', { session: 'root' })).last_turn_user_message_id, 'independent-user');
+  assert.equal((await request(taskDir, 'session_state', { session: 'root' })).last_turn_user_message_id, 'independent-user');
   branch.push(
     { type: 'custom_message', id: 'native-wake', customType: 'orbit',
       details: { orbitMessage: 'task-wake-marker' }, content: 'Continue the original task.' },
@@ -296,7 +296,7 @@ try {
     ] } },
     { type: 'message', id: 'resumed-delivery', message: { role: 'assistant', content: 'Task result delivered.' } }
   );
-  const resumed = await request(taskDir, 'state', { session: 'root' });
+  const resumed = await request(taskDir, 'session_state', { session: 'root' });
   assert.equal(resumed.last_turn_user_message_id, 'task-wake-marker');
   assert.deepEqual(resumed.observations.filter(o => o.kind === 'prior_agent_message').map(o => o.turn_id), ['resumed-work'],
     'the resumed task history excludes the unrelated question and answer');
@@ -308,7 +308,7 @@ try {
       details: { orbitMessage: 'task-wake-marker' }, content: 'Not an Orbit wake.' },
     { type: 'message', id: 'next-answer', message: { role: 'assistant', content: 'Independent answer.' } }
   );
-  assert.equal((await request(taskDir, 'state', { session: 'root' })).last_turn_user_message_id, 'next-question',
+  assert.equal((await request(taskDir, 'session_state', { session: 'root' })).last_turn_user_message_id, 'next-question',
     'a later user question supersedes the wake; another extension cannot supply its marker');
 
   // Rollover: more attributed observations than the 500-entry buffer cap.
@@ -320,7 +320,7 @@ try {
     const all = await collabLines(taskDir);
     return all.some(l => l.kind === 'hub_result' && l.text === 'rollover 519') ? all : null;
   }, 'all rollover lines durable');
-  const bridge = await request(taskDir, 'hub_events', { session: 'root' });
+  const bridge = await request(taskDir, 'collaboration_events', { session: 'root' });
   assert.equal(bridge.events.length, 500, 'buffer stays at its cap');
   assert.ok(bridge.dropped_oldest > 0, 'buffer rollover is visible to the runtime');
   assert.ok(!bridge.events.some(e => e.kind === 'task_dispatch'), 'rolled-out events are gone from the buffer');

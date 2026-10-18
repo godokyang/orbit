@@ -3,8 +3,8 @@
 require "json"
 require "socket"
 require "timeout"
-require_relative "connection"
-require_relative "model_authorization"
+require_relative "../../connection"
+require_relative "../../model_authorization"
 
 module Orbit
   # The official Native plugin supplies the native client and owns this
@@ -33,8 +33,8 @@ module Orbit
 
     def close; end
 
-    def state = request("state")
-    def configured_model = request("model")
+    def state = request("session_state")
+    def configured_model = request("current_model")
 
     # ADR-009 session catalog: the models OMP considers selectable in this
     # session (`ctx.models.list()`), the current writing model, the ephemeral
@@ -108,7 +108,7 @@ module Orbit
     # No memoization: the delegation decision and its signature must reflect
     # the current @task role/model/route resolution at each assessment.
     def member_model_resolution
-      request("member_model")
+      request("default_member_route")
     end
     def default_member_model
       resolved = member_model_resolution
@@ -130,19 +130,19 @@ module Orbit
     def events = []
     def send_message(text)
       payload = { "text" => text }
-      result = request("send", payload)
+      result = request("send_message", payload)
       @sent_ids << result.fetch("id")
       result
     end
-    def stop! = request("stop")
+    def stop! = request("stop_root")
     # Native task members are addressed by durable agent id. session stays the
     # Root thread id so the plugin can check task ownership.
     def member_state(id) = request("member_state", "id" => id)
     def member_result(id) = request("member_result", "id" => id)
     def send_member(id, text) = request("send_member", "id" => id, "text" => text)
     def stop_member(id) = request("stop_member", "id" => id)
-    def native_member_roster = request("members")
-    def hub_events = request("hub_events")
+    def native_member_roster = request("member_roster")
+    def hub_events = request("collaboration_events")
     def bind_task(task_directory) = request("bind_task", "task_directory" => task_directory)
 
     def user_message(id: nil)
