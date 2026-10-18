@@ -3160,6 +3160,7 @@ export function installOmpExtension(pi, sdk) {
     if (typeof request.method === 'string' && MEMBER_METHODS.has(request.method)) return memberDispatch(request);
     const entry = owned(request.session);
     switch (request.method) {
+      case 'host_port': return { version: '1.0' };
       case 'bind_task': {
         const result = await host.bindTask(request.task_directory, entry.id);
         taskDirs.set(entry.id, result.task_directory);

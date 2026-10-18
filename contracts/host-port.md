@@ -24,6 +24,7 @@
 
 | 方法 | 请求 | 返回 | 必填字段 | 说明 |
 | --- | --- | --- | --- | --- |
+| `host_port` | `{}` | 对象 | `version` | 适配层声明实现的合同版本 |
 | `session_state` | `{}` | 对象 | `cwd` | 会话身份与状态。`cwd` 必须是绝对路径。其余字段适配层私有 |
 | `current_model` | `{}` | 字符串 | — | 当前写模型，`provider/id` |
 | `model_catalog` | `{}` | 对象 | `current`、`available` | 见 §3.1 |

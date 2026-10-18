@@ -33,6 +33,8 @@ module Orbit
 
     def close; end
 
+    def host_port = request("host_port")
+
     def state = request("session_state")
     def configured_model = request("current_model")
 
