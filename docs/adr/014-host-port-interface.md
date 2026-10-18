@@ -2,7 +2,7 @@
 
 状态：提议，2026-10-19。**未采纳**；采纳前现行规则仍以 [ADR-008](008-omp-native-collaboration-base.md)、[任务运行合同](../../contracts/task-runtime.md)与[集成合同](../../contracts/integration.md)为准。
 
-关联：[ADR-010](010-integration-contract.md)（集成合同）、[ADR-011](011-agent-autonomy-and-runtime-responsibility.md)（Agent 判断与程序职责）、[宿主接口与事件通路实施方案](https://github.com/zeen-chat/orbit/blob/main/docs/plan/host-port-and-events.md)（跨仓方案，不在本仓）。
+关联：[ADR-010](010-integration-contract.md)（集成合同）、[ADR-011](011-agent-autonomy-and-runtime-responsibility.md)（Agent 判断与程序职责）、[宿主接口与事件通路实施方案](../plan/host-port-and-events.md)（本仓 docs/plan）。
 
 ## 背景
 
