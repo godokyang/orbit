@@ -117,6 +117,18 @@
         "read_at"
       ],
       "note": "Read-only incremental projection of the task's own events.jsonl. CURSOR is opaque; v1 encodes a byte offset and the caller stores and returns it verbatim. Only complete lines are parsed; events outside the public whitelist are counted in skipped, non-JSON lines in unreadable, and neither is guessed. A single read is capped at 1 MB or 200 events; overflow sets truncated and counts the excess public events in dropped. A task that exists before its log is written returns an empty list with the cursor unchanged. An invalid or out-of-range cursor, or a missing task, fails. The command never writes a task, starts a session, calls a model or synthesizes an event."
+    },
+    "native_user_messages": {
+      "invocation": "orbit messages TASK --json",
+      "stdout_fields": [
+        "session_id",
+        "session_file",
+        "messages",
+        "truncated",
+        "dropped",
+        "read_at"
+      ],
+      "note": "Read-only projection of the native user messages recorded by the host. The task must carry a host-reported session file and identity; the first non-title header line must name that session and a workspace this task owns. Each message carries a stable native id, text and created_at; internal, agent-attributed and non-user entries are never returned. The command never writes a task, starts a session, calls a model or invents an id."
     }
   },
   "status_fields": [
@@ -537,6 +549,16 @@
       "missing_log": "empty_list_same_cursor",
       "out_of_range": "error",
       "revision_included": false,
+      "writes_task": false,
+      "calls_model": false
+    },
+    "native_user_messages": {
+      "since": "1.8",
+      "command": "messages",
+      "source": "host_reported_session_file_only",
+      "max_messages": 200,
+      "header_validation": "session_id_and_workspace",
+      "missing_or_mismatch": "error",
       "writes_task": false,
       "calls_model": false
     }

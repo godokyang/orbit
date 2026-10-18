@@ -44,6 +44,7 @@
 | `session_binding` | 1.5 起：status 只读投影 `session_binding`——provider 会话身份、宿主报告的会话文件路径与稳定启动消息边界；未知为 null，不猜路径、不臆造旧记录启动边界（见 §4） |
 | `resume_wake` | 1.5 起：可选 `start --resume-wake`，须与 `--resume-from` 同用；绑定后投递程序来源的原生续接消息，回执见 §4 |
 | `conversation_read` | 1.7 起：`orbit conversation TASK --after OFFSET --json` 只读增量投影宿主报告的会话文件中的可见助手消息；返回 `next_offset`，不写任务、不调用模型、不重放对话 |
+| `native_user_messages` | 1.8 起：`orbit messages TASK --json` 只读投影宿主会话文件中的原生用户消息；稳定 id、文本、时间；校验会话身份与工作区，缺失或不符失败 |
 | `events_read` | 1.8 起：`orbit events TASK --after CURSOR --json` 只读增量投影任务事件；游标不透明，白名单类型与字段裁剪，缺失日志返回空列表并原样返回游标 |
 
 ## 3. 命令与返回
@@ -177,6 +178,15 @@ models 从该检查 usage.calls 的 model（缺时仅用该回执 requested_mode
 
 事件类型放在 `kind`；`check_started` 自己的检查类型放在 `check_kind`，避免与信封字段冲突。未知 `kind` 由调用方忽略；新类型只在次版本增加。
 
+### 4.3 原生用户消息（1.8）
+
+`orbit messages TASK --json` 只读投影任务 `session_binding.session_file` 中宿主记录的原生用户消息，供集成方替换自己的会话文件解析。不写任务、不启动会话、不调用模型、不发明 id。
+
+- 首条非 `title` 行必须是 `session`，其 `id` 等于任务记录的 `session_id`，`cwd` 属于该任务的 `project_root` 或 `artifact_root`；不符即失败。
+- 只返回 `type=message`、`role=user`、非 `internal`、非 `agent` 归属的条目；`id` 取原生消息 id，缺失时取 `item_id`。
+- 最多 200 条；超出置 `truncated=true` 并计入 `dropped`。
+- 返回 `session_id`、`session_file`、`messages`（`id`/`text`/`created_at`）、`truncated`、`dropped`、`read_at`。
+
 ## 5. 引用字段（不透明，通用）
 
 **检查项引用 `ref`**：检查结果 schema 的每个覆盖项可带可选 `ref`（最多 200 字符，不含控制字符；空串或纯空白按未提供处理，不保存，`status` 中该项没有 `ref`）。检查者只在原要求、修订或依据本来就给该要求标了编号时逐字抄录，不得自编、规范化或推断；没有就省略。Orbit 原样保存并在 `requirement_coverage.items[].ref` 返回，不解释、不要求唯一、不要求与任何东西匹配（同一编号可对应多个覆盖项，也可没有）。其余不合规（超长、含控制字符、非字符串）与其他字段一样属于结果契约违规，检查结果被拒绝并走既有的检查失败路径；因此检查者不确定时应省略而不是猜写。
@@ -239,4 +249,5 @@ Root 原生调用、原生成员派发/实际请求、检查者/复核者在调�
 - 1.6：新增检查覆盖缺口分类与来源检查号；未检查项由检查流程续查，保留当前版本独立终检及实际停止门。
 
 - 1.7：新增只读 `conversation_read`：按字节偏移读取宿主报告的会话文件中可见的助手消息，返回 `next_offset`。不写任务、不调用模型、不重放对话；缺失/越界失败而不是合成消息。
+- 1.8：新增只读 `native_user_messages`：按任务记录的会话身份与工作区校验后，返回原生用户消息；不写任务、不调用模型。
 - 1.8：新增只读 `events_read`：按不透明游标读取任务事件，固定白名单与字段裁剪；单次 1 MB 或 200 条上限，缺失日志返回空列表并原样返回游标。不写任务、不调用模型、不合成事件；v1 不带 revision。
