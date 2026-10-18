@@ -87,9 +87,9 @@ Loom 节点不再直接说 OMP：RPC 帧类型、会话文件格式、`orbit omp
 - **要求**：启动语义归 Orbit；进程归属须先决定（见 4.1）。
 - **验收**：节点不再拼 OMP 命令；重启节点后能按记录的身份接回。
 
-### 3.6 执行 run 问答切换（未实施）
+### 3.6 执行 run 问答切换（已实现，待整链验证）
 
-discovery 的问答已经走 `question_relay`；执行 run 的 `_live_question_step` 仍走原生 ask。切换不是替换一个调用点，原因如下：
+discovery 与执行 run 的问答均已走 `question_relay`（能力存在时）。切换不是替换一个调用点，涉及：
 
 - run question 的 `run_question` payload 绑定 `native_question_id`、`tool_call_id` 与 `ui_request_id`；
 - 答复递送用 `delivered_dialog` 从原生会话文件确认“同一 toolCall 的结果”，再写 `question_delivery`；
