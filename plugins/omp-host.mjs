@@ -4206,7 +4206,7 @@ export function installOmpExtension(pi, sdk) {
     }
   });
 
-  if (process.env.ORBIT_EXTERNAL_INTEGRATION === '1' && typeof pi.registerTool === 'function') {
+  if (process.env.ORBIT_QUESTION_RELAY === '1' && typeof pi.registerTool === 'function') {
     pi.registerTool({
       name: 'ask',
       label: 'Ask',
