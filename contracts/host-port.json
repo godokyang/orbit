@@ -1,0 +1,130 @@
+{
+  "contract": "orbit-host-port",
+  "version": "1.0",
+  "status": "draft",
+  "description": "Machine-readable form of contracts/host-port.md. Internal contract between the Orbit core and a host adapter. Not a Loom dependency; Loom depends on contracts/integration.md only. Within one major version methods and optional fields are only added, never changed or removed.",
+  "transport": {
+    "kind": "unix-domain-socket",
+    "framing": "newline-delimited-json",
+    "request": {
+      "type": "object",
+      "required": ["method", "session"],
+      "properties": {
+        "method": { "type": "string" },
+        "session": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "response": {
+      "oneOf": [
+        { "type": "object", "required": ["result"] },
+        { "type": "object", "required": ["error"] }
+      ]
+    },
+    "timeout_seconds": 15,
+    "retry": "caller-decided",
+    "push": false
+  },
+  "methods": {
+    "session_state": {
+      "request": [],
+      "result": { "required": ["cwd"], "note": "cwd is absolute; other fields are adapter-private" }
+    },
+    "current_model": {
+      "request": [],
+      "result": { "type": "string", "pattern": "^[^\\s/]+/[^\\s]+$" }
+    },
+    "model_catalog": {
+      "request": [],
+      "result": {
+        "required": ["current", "available"],
+        "optional": ["allowed_models", "authorization_guard", "families", "routes", "limits"],
+        "adapter_private": ["agents", "agent_dir"]
+      }
+    },
+    "default_member_route": {
+      "request": [],
+      "result": {
+        "required": ["provider", "id"],
+        "optional": ["billing_route"],
+        "billing_route_values": ["direct_api", "subscription_quota", "unknown"]
+      }
+    },
+    "messages": {
+      "request": [],
+      "result": {
+        "type": "array",
+        "items": {
+          "required": ["id"],
+          "optional": ["item_id", "internal"],
+          "note": "id is stable; other fields are adapter-private"
+        }
+      }
+    },
+    "send_message": {
+      "request": ["text"],
+      "result": { "required": ["id"] }
+    },
+    "stop_root": {
+      "request": [],
+      "result": { "required": ["confirmed"] }
+    },
+    "member_roster": {
+      "request": [],
+      "result": {
+        "type": "array",
+        "items": { "required": ["thread_id"], "note": "other fields are adapter-private" }
+      }
+    },
+    "member_state": {
+      "request": ["id"],
+      "result": { "optional": ["model", "registry_status"] }
+    },
+    "member_result": {
+      "request": ["id"],
+      "result": { "type": ["object", "null"] }
+    },
+    "send_member": {
+      "request": ["id", "text"],
+      "result": { "note": "receipt fields are adapter-private" }
+    },
+    "stop_member": {
+      "request": ["id"],
+      "result": { "note": "receipt fields are adapter-private" }
+    },
+    "collaboration_events": {
+      "request": [],
+      "result": {
+        "required": ["events"],
+        "items": { "required": ["id", "kind"], "optional": ["seq"] }
+      }
+    },
+    "bind_task": {
+      "request": ["task_directory"],
+      "result": { "required": ["task_directory"] }
+    }
+  },
+  "obligations": {
+    "required": ["H2", "H3", "H4", "H5", "H6", "H7"],
+    "optional": ["H1", "O1", "O2", "O3", "O4"],
+    "definitions": {
+      "H1": "See user message and stable id before the first model request; may attach guidance or abort. Missing: disable automatic entry, keep explicit start only.",
+      "H2": "Project effective requirements on every request and inject a state summary per turn. Missing: cannot host a controlled task.",
+      "H3": "Intercept before tool calls: members cannot delegate, path and command scope, model authorization. Missing: cannot host a controlled task.",
+      "H4": "Register a member before its first model call; abort on failure. Missing: cannot host a controlled task.",
+      "H5": "Stop and confirm: idle, no in-flight tool, owned background work finished, task messages cleared from the queue. Missing: cannot host a controlled task.",
+      "H6": "Receipts for every model and tool call: actual model, usage, time. Missing: strict model authorization and ledger are invalid.",
+      "H7": "Isolated read-only checker session: separate process, read-only tools, fixed snapshot. Missing: cannot host a controlled task.",
+      "O1": "Members exchange messages. Missing: disable that collaboration, Root only.",
+      "O2": "Forward user amendments to active members. Missing: send to Root only, record as undelivered.",
+      "O3": "Skipped native question tracking and follow-up reminders. Missing: no follow-up reminder.",
+      "O4": "Inject cooperation policy at the same layer as system instructions. Missing: carry it through H2 projection."
+    }
+  },
+  "conformance": {
+    "directory": "tests/host_conformance/",
+    "groups": ["zero-model", "real-model"],
+    "gate": "A host must pass conformance before it can host a controlled task.",
+    "upgrade": "Re-run on every host version bump instead of per-version manual review."
+  }
+}
