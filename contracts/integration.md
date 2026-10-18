@@ -1,6 +1,6 @@
 # Orbit 集成合同
 
-合同版本：1.7
+合同版本：1.8
 
 面向把 Orbit 当作外部执行与检查服务的集成方（例如 Loom）。本合同只冻结下面列出的命令、返回字段与结果 schema；这些之外的一切（包括 `status --json` 里的其他字段）都是 Orbit 内部实现，随时可变。产品语义以 [任务运行合同](task-runtime.md) 和 [检查结果 schema](check-result.schema.json) 为准，本文件与它们冲突时以它们为准并修正本文件。机器可读形式见 [integration.json](integration.json)，`orbit capabilities --json` 与契约测试都读取它，决定理由见 [ADR-010](../docs/adr/010-integration-contract.md)。
 
@@ -44,6 +44,7 @@
 | `session_binding` | 1.5 起：status 只读投影 `session_binding`——provider 会话身份、宿主报告的会话文件路径与稳定启动消息边界；未知为 null，不猜路径、不臆造旧记录启动边界（见 §4） |
 | `resume_wake` | 1.5 起：可选 `start --resume-wake`，须与 `--resume-from` 同用；绑定后投递程序来源的原生续接消息，回执见 §4 |
 | `conversation_read` | 1.7 起：`orbit conversation TASK --after OFFSET --json` 只读增量投影宿主报告的会话文件中的可见助手消息；返回 `next_offset`，不写任务、不调用模型、不重放对话 |
+| `events_read` | 1.8 起：`orbit events TASK --after CURSOR --json` 只读增量投影任务事件；游标不透明，白名单类型与字段裁剪，缺失日志返回空列表并原样返回游标 |
 
 ## 3. 命令与返回
 
@@ -143,6 +144,39 @@ models 从该检查 usage.calls 的 model（缺时仅用该回执 requested_mode
 
 该命令不改变既有 `status`/`stop`/`resume` 语义，也不提供流式推送；集成方按自己的间隔轮询，并保存 `next_offset`。
 
+### 4.2 任务事件游标（1.8）
+
+`orbit events TASK --after CURSOR --json` 只读增量投影任务自己的 `events.jsonl`，供集成方跟随检查、发现、纠正与停止事实，不需要轮询 `status` 差分。不写任务、不启动会话、不调用模型、不合成事件。
+
+返回字段固定为：`cursor`（本次起点）、`next_cursor`（下次起点）、`events`、`truncated`、`skipped`、`unreadable`、`dropped`、`read_at`。
+
+- `CURSOR` 对调用方不透明；v1 编码字节位置，调用方原样保存与回传，不解析。
+- 只解析完整行；半行留待下次。
+- 白名单外的事件计入 `skipped`，非 JSON 行计入 `unreadable`，都不猜。
+- 单次上限 1 MB 或 200 条；超出时 `truncated=true`，多出的白名单事件计入 `dropped`。
+- 任务存在但日志尚未创建时返回空列表并原样返回游标；游标非法或越界、任务不存在时失败。
+- v1 不带 `revision`：追加事件与状态 revision 不是同一次原子写入。
+- 事件是追加顺序的观察；`at` 精度到秒，可能相同。当前状态仍以 `status` 为准，停止只看 `stop_confirmation.confirmed`。
+
+公开类型与保留字段（其余字段一律丢弃，包括工作区路径、自由文本原因、错误文本与问题正文）：
+
+| kind | 保留字段 |
+| --- | --- |
+| `check_started` | `number`、`role`、`check_kind`、`trigger`、`manual`、`model`、`input_digest`、`artifact_digest` |
+| `check_finished` | `number`、`stale`、`stale_reasons`、`verdict`、`finding_ids`、`resolved_ids`、`artifact_digest` |
+| `check_failed` | `number`、`failure_kind` |
+| `finding_recorded` | `check`、`finding_id` |
+| `finding_resolved` | `id`、`check` |
+| `instruction_amended` | `source`（仅 `kind` 与 `id`） |
+| `correction_sent` | `id`、`artifact_digest`、`input_digest` |
+| `finalization_notice` | `check`、`version` |
+| `completion_stop_queued` | 仅 `kind` 与 `at` |
+| `stopped` | `confirmed` |
+| `stop_unconfirmed` | 仅 `kind` 与 `at` |
+| `member_settled` | `thread_id`、`status` |
+
+事件类型放在 `kind`；`check_started` 自己的检查类型放在 `check_kind`，避免与信封字段冲突。未知 `kind` 由调用方忽略；新类型只在次版本增加。
+
 ## 5. 引用字段（不透明，通用）
 
 **检查项引用 `ref`**：检查结果 schema 的每个覆盖项可带可选 `ref`（最多 200 字符，不含控制字符；空串或纯空白按未提供处理，不保存，`status` 中该项没有 `ref`）。检查者只在原要求、修订或依据本来就给该要求标了编号时逐字抄录，不得自编、规范化或推断；没有就省略。Orbit 原样保存并在 `requirement_coverage.items[].ref` 返回，不解释、不要求唯一、不要求与任何东西匹配（同一编号可对应多个覆盖项，也可没有）。其余不合规（超长、含控制字符、非字符串）与其他字段一样属于结果契约违规，检查结果被拒绝并走既有的检查失败路径；因此检查者不确定时应省略而不是猜写。
@@ -205,3 +239,4 @@ Root 原生调用、原生成员派发/实际请求、检查者/复核者在调�
 - 1.6：新增检查覆盖缺口分类与来源检查号；未检查项由检查流程续查，保留当前版本独立终检及实际停止门。
 
 - 1.7：新增只读 `conversation_read`：按字节偏移读取宿主报告的会话文件中可见的助手消息，返回 `next_offset`。不写任务、不调用模型、不重放对话；缺失/越界失败而不是合成消息。
+- 1.8：新增只读 `events_read`：按不透明游标读取任务事件，固定白名单与字段裁剪；单次 1 MB 或 200 条上限，缺失日志返回空列表并原样返回游标。不写任务、不调用模型、不合成事件；v1 不带 revision。

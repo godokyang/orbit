@@ -1,6 +1,6 @@
 {
   "contract": "orbit-integration",
-  "version": "1.7",
+  "version": "1.8",
   "major": 1,
   "description": "Machine-readable form of contracts/integration.md. Versioned independently of the software version. Within one major version entries are only added, never changed or removed; a breaking change raises the major version and is named in the release notes. `orbit capabilities --json` serves `capabilities` from this file and the contract test reads `commands` and `status_fields` from it.",
   "status_values": [
@@ -103,6 +103,20 @@
         "read_at"
       ],
       "note": "Read-only incremental projection of the host-reported session file. OFFSET is a byte offset returned as next_offset by the previous call; --after defaults to 0. Only complete JSONL lines are parsed and only visible assistant text is returned. A missing/invalid session file or an offset beyond the file fails; the command never synthesizes messages, writes a task, starts a session, calls a model or replays the conversation."
+    },
+    "events_read": {
+      "invocation": "orbit events TASK --after CURSOR --json",
+      "stdout_fields": [
+        "cursor",
+        "next_cursor",
+        "events",
+        "truncated",
+        "skipped",
+        "unreadable",
+        "dropped",
+        "read_at"
+      ],
+      "note": "Read-only incremental projection of the task's own events.jsonl. CURSOR is opaque; v1 encodes a byte offset and the caller stores and returns it verbatim. Only complete lines are parsed; events outside the public whitelist are counted in skipped, non-JSON lines in unreadable, and neither is guessed. A single read is capped at 1 MB or 200 events; overflow sets truncated and counts the excess public events in dropped. A task that exists before its log is written returns an empty list with the cursor unchanged. An invalid or out-of-range cursor, or a missing task, fails. The command never writes a task, starts a session, calls a model or synthesizes an event."
     }
   },
   "status_fields": [
@@ -498,6 +512,33 @@
       "writes_task": false,
       "calls_model": false,
       "replays_conversation": false
+    },
+    "events_read": {
+      "since": "1.8",
+      "command": "events",
+      "cursor_unit": "byte",
+      "default_cursor": 0,
+      "max_bytes": 1000000,
+      "max_events": 200,
+      "kinds": [
+        "check_started",
+        "check_finished",
+        "check_failed",
+        "finding_recorded",
+        "finding_resolved",
+        "instruction_amended",
+        "correction_sent",
+        "finalization_notice",
+        "completion_stop_queued",
+        "stopped",
+        "stop_unconfirmed",
+        "member_settled"
+      ],
+      "missing_log": "empty_list_same_cursor",
+      "out_of_range": "error",
+      "revision_included": false,
+      "writes_task": false,
+      "calls_model": false
     }
   }
 }

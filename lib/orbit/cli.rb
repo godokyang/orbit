@@ -18,6 +18,7 @@ require_relative "prestart"
 require_relative "task_view"
 require_relative "session_summary"
 require_relative "conversation"
+require_relative "task_events"
 require_relative "workspace_binding"
 require_relative "workspace_snapshot"
 require_relative "check_snapshot_archive"
@@ -233,6 +234,8 @@ module Orbit
         session_summary(argv)
       when "conversation"
         conversation(argv)
+      when "events"
+        events(argv)
       when "model-evidence"
         model_evidence(argv)
       when "model-candidates"
@@ -333,6 +336,20 @@ module Orbit
       end
       record = TaskView.single!(argv.first)
       puts JSON.pretty_generate(Conversation.read(record, after: options[:after]))
+      0
+    end
+
+    def events(argv)
+      options = { after: 0 }
+      OptionParser.new do |parser|
+        parser.on("--after CURSOR") { |value| options[:after] = value }
+        parser.on("--json") { }
+      end.parse!(argv)
+      if argv.length != 1
+        raise ArgumentError, "usage: orbit events TASK --after CURSOR [--json]"
+      end
+      record = TaskView.single!(argv.first)
+      puts JSON.pretty_generate(TaskEvents.read(record, after: options[:after]))
       0
     end
 
