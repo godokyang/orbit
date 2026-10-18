@@ -25,6 +25,26 @@ Loom 节点不再直接说 OMP：RPC 帧类型、会话文件格式、`orbit omp
 | 能力 | 状态 | 依据 |
 | --- | --- | --- |
 | `native_user_messages` | 已实现（合同 1.8） | `orbit messages`；节点续接优先使用 |
+| `session_state` / `session_abort` | 已实现（合同 1.8） | 扩展 `session.abort`；`scope=session` 不等于任务停止 |
+| `session_launch` | 已实现（合同 1.8） | `orbit launch` 返回中性 argv；节点在能力存在时使用，进程仍由节点拉起 |
+| `session_prompt` | 已实现（合同 1.8） | 扩展 `pi.sendUserMessage`（`attribution=user`）；`orbit prompt` 实测返回原生 message_id |
+| `question_relay` | 已实现（合同 1.8） | 扩展在外部模式 shadow `ask` 工具，经 socket 转发；`orbit questions` / `orbit answer` 实测问答闭环 |
+
+实测（2026-10-19，源 CLI）：
+
+- `orbit prompt` 返回 `{"accepted":true,"message_id":"4804d6d2"}`，任务继续执行。
+- shadow `ask` 捕获问题 `choice`/A/B；`orbit questions` 列出；`orbit answer` 递送 A；`tool_execution_end` 的原生结果 `content=[{"text":"A"}]`、`selectedOptions=["A"]`，任务继续。
+- shadow 只在 `ORBIT_EXTERNAL_INTEGRATION=1` 时注册，独立使用 OMP 时保留原生 ask。
+
+剩余：Loom 节点尚未切换到 `question_relay` / `session_prompt` 合同（仍保留直连路径）；完整 Loom 整链未跑。
+
+## 3. Orbit 侧能力（按代价从低到高）
+
+2026-10-19 实施状态：
+
+| 能力 | 状态 | 依据 |
+| --- | --- | --- |
+| `native_user_messages` | 已实现（合同 1.8） | `orbit messages`；节点续接优先使用 |
 | `session_state` / `session_abort` | `session_abort` 已实现（合同 1.8） | 扩展 `session.abort`；`scope=session` 不等于任务停止 |
 | `session_launch` | 已实现（合同 1.8） | `orbit launch` 返回中性 argv；节点在能力存在时使用，进程仍由节点拉起 |
 | `session_prompt` | **受阻** | OMP 扩展的 `session`/`sessionManager` 没有 prompt/send；只有 abort、state、model、branch |

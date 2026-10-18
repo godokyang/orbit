@@ -114,7 +114,7 @@ export const toolArgs = z => ({
 
 // Shared transport and task operations for native plugin hosts. Each adapter
 // supplies only its real session operations and native invocation identity.
-export function createOrbitHost({ provider, project, dispatch, bind, reset, authorizeTask }) {
+export function createOrbitHost({ provider, project, dispatch, bind, reset, authorizeTask, promptUser }) {
   const tasks = new Map();
   let host, socket, setup, ownFolder = null, socketIdentity = null, closing = false;
   async function listen() {

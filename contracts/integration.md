@@ -45,6 +45,8 @@
 | `resume_wake` | 1.5 起：可选 `start --resume-wake`，须与 `--resume-from` 同用；绑定后投递程序来源的原生续接消息，回执见 §4 |
 | `conversation_read` | 1.7 起：`orbit conversation TASK --after OFFSET --json` 只读增量投影宿主报告的会话文件中的可见助手消息；返回 `next_offset`，不写任务、不调用模型、不重放对话 |
 | `session_launch` | 1.8 起：`orbit launch --socket PATH (--model M \| --resume ID) --json` 返回宿主中性的启动参数（`argv` 不含 Orbit 可执行文件与 `socket`）；不启动进程 |
+| `question_relay` | 1.8 起：`orbit questions TASK --json` 列出待答问题；`orbit answer TASK --question ID --answers JSON --json` 递送答复。问题 id 稳定，答复格式与原生 ask 一致；`accepted` 不表示模型已采用 |
+| `session_prompt` | 1.8 起：`orbit prompt TASK --message TEXT --json` 向绑定会话注入真实用户消息（`attribution=user`），返回 `accepted` 与可得 `message_id`；不写任务、不直接调用模型 |
 | `session_abort` | 1.8 起：`orbit abort TASK --json` 中止绑定会话；`scope=session` 只表示会话已中止，不等于任务停止或业务完成 |
 | `native_user_messages` | 1.8 起：`orbit messages TASK --json` 只读投影宿主会话文件中的原生用户消息；稳定 id、文本、时间；校验会话身份与工作区，缺失或不符失败 |
 | `events_read` | 1.8 起：`orbit events TASK --after CURSOR --json` 只读增量投影任务事件；游标不透明，白名单类型与字段裁剪，缺失日志返回空列表并原样返回游标 |

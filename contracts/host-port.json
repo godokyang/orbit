@@ -224,6 +224,35 @@
           "scope"
         ]
       }
+    },
+    "session_prompt": {
+      "request": [
+        "text"
+      ],
+      "result": {
+        "required": [
+          "accepted"
+        ]
+      }
+    },
+    "ask_requests": {
+      "request": [],
+      "result": {
+        "required": [
+          "asks"
+        ]
+      }
+    },
+    "answer_ask": {
+      "request": [
+        "id",
+        "answers"
+      ],
+      "result": {
+        "required": [
+          "accepted"
+        ]
+      }
     }
   },
   "obligations": {

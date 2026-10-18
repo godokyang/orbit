@@ -243,6 +243,12 @@ module Orbit
         abort_session(argv)
       when "launch"
         launch_spec(argv)
+      when "prompt"
+        prompt_session(argv)
+      when "questions"
+        questions(argv)
+      when "answer"
+        answer_question(argv)
       when "model-evidence"
         model_evidence(argv)
       when "model-candidates"
@@ -343,6 +349,51 @@ module Orbit
       end
       record = TaskView.single!(argv.first)
       puts JSON.pretty_generate(Conversation.read(record, after: options[:after]))
+      0
+    end
+
+    def questions(argv)
+      OptionParser.new { |parser| parser.on("--json") { } }.parse!(argv)
+      raise ArgumentError, "usage: orbit questions TASK --json" if argv.length != 1
+      record = TaskView.single!(argv.first)
+      connection = Connection.open(record.state.fetch("connection"))
+      puts JSON.generate(connection.ask_requests)
+      0
+    end
+
+    def answer_question(argv)
+      options = {}
+      OptionParser.new do |parser|
+        parser.on("--question ID") { |value| options[:question] = value }
+        parser.on("--answers JSON") { |value| options[:answers] = value }
+        parser.on("--json") { }
+      end.parse!(argv)
+      raise ArgumentError, "usage: orbit answer TASK --question ID --answers JSON [--json]" if argv.length != 1
+      raise ArgumentError, "--question is required" unless options[:question].is_a?(String) && !options[:question].empty?
+      answers = begin
+        JSON.parse(options[:answers].to_s)
+      rescue JSON::ParserError
+        raise ArgumentError, "--answers must be a JSON array"
+      end
+      raise ArgumentError, "--answers must be a JSON array" unless answers.is_a?(Array)
+      record = TaskView.single!(argv.first)
+      connection = Connection.open(record.state.fetch("connection"))
+      puts JSON.generate(connection.answer_ask(options[:question], answers))
+      0
+    end
+
+    def prompt_session(argv)
+      options = {}
+      OptionParser.new do |parser|
+        parser.on("--message TEXT") { |value| options[:message] = value }
+        parser.on("--json") { }
+      end.parse!(argv)
+      raise ArgumentError, "usage: orbit prompt TASK --message TEXT [--json]" if argv.length != 1
+      text = options[:message]
+      raise ArgumentError, "--message is required" unless text.is_a?(String) && !text.strip.empty?
+      record = TaskView.single!(argv.first)
+      connection = Connection.open(record.state.fetch("connection"))
+      puts JSON.generate(connection.session_prompt(text))
       0
     end
 

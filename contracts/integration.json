@@ -146,6 +146,30 @@
         "socket"
       ],
       "note": "Host-neutral launch spec for a controlled session. argv excludes the Orbit binary: the caller prepends its configured orbit path. The caller still owns the process (spawn and reap); this command does not start anything."
+    },
+    "session_prompt": {
+      "invocation": "orbit prompt TASK --message TEXT --json",
+      "stdout_fields": [
+        "accepted",
+        "message_id",
+        "at"
+      ],
+      "note": "Inject a real user message into the bound session. The host records attribution=user (not agent). message_id is the native id when the host reports it within the read window, otherwise null; accepted does not mean the model answered. The command never writes task state or calls the model directly."
+    },
+    "question_requests": {
+      "invocation": "orbit questions TASK --json",
+      "stdout_fields": [
+        "asks"
+      ],
+      "note": "List native questions the controlled session is waiting on. Each ask carries a stable id, normalized questions and the time it was raised. Empty means no question is pending; it does not mean the task is complete."
+    },
+    "question_answer": {
+      "invocation": "orbit answer TASK --question ID --answers JSON --json",
+      "stdout_fields": [
+        "accepted",
+        "id"
+      ],
+      "note": "Deliver one answer array for a pending ask (one item per question, selectedOptions from that question's labels, optional customInput). Unknown ids, unknown labels, duplicate labels and single-select multi-answers fail. accepted means the host accepted the answer array, not that the model adopted it."
     }
   },
   "status_fields": [
@@ -591,6 +615,23 @@
       "command": "launch",
       "argv_excludes_binary": true,
       "spawns": false,
+      "writes_task": false,
+      "calls_model": false
+    },
+    "session_prompt": {
+      "since": "1.8",
+      "command": "prompt",
+      "attribution": "user",
+      "message_id_may_be_null": true,
+      "writes_task": false
+    },
+    "question_relay": {
+      "since": "1.8",
+      "commands": [
+        "questions",
+        "answer"
+      ],
+      "ask_id": "stable",
       "writes_task": false,
       "calls_model": false
     }

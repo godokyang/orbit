@@ -3156,6 +3156,78 @@ export function installOmpExtension(pi, sdk) {
     if (!provider || !id) throw new Error('native task model is unresolved: @task did not resolve to a provider/id');
     return { provider, id, billing_route: billingRoute(resolved) };
   }
+  const pendingAsks = new Map();
+  function normalizeAskQuestions(raw) {
+    if (!Array.isArray(raw) || raw.length === 0) throw new Error('ask requires at least one question');
+    const seen = new Set();
+    return raw.map(question => {
+      if (!question || typeof question !== 'object' || typeof question.id !== 'string' || !question.id ||
+          typeof question.question !== 'string' || !question.question)
+        throw new Error('ask question shape is invalid');
+      if (seen.has(question.id)) throw new Error(`duplicate ask question id: ${question.id}`);
+      seen.add(question.id);
+      if (!Array.isArray(question.options) || question.options.length === 0)
+        throw new Error('ask question requires options');
+      const options = question.options.map(option => {
+        if (!option || typeof option.label !== 'string' || !option.label)
+          throw new Error('ask option label is invalid');
+        return { label: option.label, ...(typeof option.description === 'string' ? { description: option.description } : {}) };
+      });
+      if (new Set(options.map(option => option.label)).size !== options.length)
+        throw new Error('ask option labels must be unique within a question');
+      return { id: question.id, question: question.question, options, multi: question.multi === true };
+    });
+  }
+  function parseRelayAnswers(questions, raw) {
+    if (!Array.isArray(raw)) throw new Error('ask answers must be an array');
+    return questions.map(question => {
+      const answer = raw.find(item => item && item.id === question.id);
+      if (!answer) throw new Error(`ask answer is missing for ${question.id}`);
+      const labels = question.options.map(option => option.label);
+      const selected = Array.isArray(answer.selectedOptions) ? answer.selectedOptions : [];
+      if (selected.some(label => !labels.includes(label))) throw new Error(`ask answer selects an unknown option for ${question.id}`);
+      if (!question.multi && selected.length > 1) throw new Error(`ask answer is single-select for ${question.id}`);
+      const parsed = { id: question.id, selectedOptions: selected };
+      if (typeof answer.customInput === 'string' && answer.customInput) parsed.customInput = answer.customInput;
+      return parsed;
+    });
+  }
+  function relayAsk(raw, signal) {
+    const questions = normalizeAskQuestions(raw);
+    const id = randomUUID();
+    return new Promise((resolve, reject) => {
+      pendingAsks.set(id, { id, questions, at: new Date().toISOString(), resolve, reject });
+      if (signal) {
+        if (signal.aborted) {
+          pendingAsks.delete(id);
+          reject(new Error('Ask tool was cancelled by the user'));
+          return;
+        }
+        signal.addEventListener('abort', () => {
+          if (pendingAsks.delete(id)) reject(new Error('Ask tool was cancelled by the user'));
+        }, { once: true });
+      }
+    });
+  }
+  function askToolResult(questions, answers) {
+    const results = questions.map(question => {
+      const answer = answers.find(item => item.id === question.id) || { id: question.id, selectedOptions: [] };
+      const entry = { id: question.id, question: question.question, options: question.options,
+        multi: question.multi === true, selectedOptions: answer.selectedOptions };
+      if (answer.customInput) entry.customInput = answer.customInput;
+      return entry;
+    });
+    if (results.length === 1) {
+      const single = results[0];
+      const details = { question: single.question, options: single.options, multi: single.multi,
+        selectedOptions: single.selectedOptions };
+      if (single.customInput) details.customInput = single.customInput;
+      return { content: [{ type: 'text', text: single.customInput || single.selectedOptions.join(', ') || 'User did not select any options' }],
+        details };
+    }
+    const lines = results.map(result => `${result.id}: ${result.customInput || result.selectedOptions.join(', ') || 'User did not select any options'}`);
+    return { content: [{ type: 'text', text: 'User answers:\n' + lines.join('\n') }], details: { results } };
+  }
   async function dispatch(request) {
     if (typeof request.method === 'string' && MEMBER_METHODS.has(request.method)) return memberDispatch(request);
     const entry = owned(request.session);
@@ -3171,6 +3243,16 @@ export function installOmpExtension(pi, sdk) {
         return result;
       }
       case 'session_state': return state(entry);
+      case 'session_prompt': return promptUser(request.text);
+      case 'ask_requests': return { asks: [...pendingAsks.values()].map(pending => ({ id: pending.id, questions: pending.questions, at: pending.at })) };
+      case 'answer_ask': {
+        const pending = pendingAsks.get(request.id);
+        if (!pending) throw new Error('ask request is not pending');
+        const answers = parseRelayAnswers(pending.questions, request.answers);
+        pendingAsks.delete(request.id);
+        pending.resolve(answers);
+        return { accepted: true, id: request.id };
+      }
       case 'session_abort': {
         const session = entry.session;
         if (!session || typeof session.abort !== 'function') throw new Error('session abort is unavailable');
@@ -3257,9 +3339,25 @@ export function installOmpExtension(pi, sdk) {
       default: throw new Error('Unknown Orbit connection operation');
     }
   }
+  async function promptUser(text) {
+    if (typeof pi.sendUserMessage !== 'function') throw new Error('session prompt is unavailable');
+    if (typeof text !== 'string' || !text.trim()) throw new Error('session prompt requires non-empty text');
+    const before = (currentContext?.sessionManager?.getBranch?.() ?? []).length;
+    await pi.sendUserMessage(text);
+    // sendUserMessage may resolve before the entry is visible; poll briefly for
+    // the native user message that carries the stable id.
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const branch = currentContext?.sessionManager?.getBranch?.() ?? [];
+      const fresh = branch.slice(before).filter(item => item?.type === 'message' &&
+        item?.message?.role === 'user' && item?.message?.attribution !== 'agent');
+      if (fresh.length) return { accepted: true, message_id: fresh.at(-1)?.id ?? null, at: new Date().toISOString() };
+      await pause(50);
+    }
+    return { accepted: true, message_id: null, at: new Date().toISOString() };
+  }
   async function connect(ctx) {
     const entry = rootFor(ctx);
-    if (!host) host = createOrbitHost({ provider: 'omp', project: await fs.realpath(ctx.cwd), dispatch,
+    if (!host) host = createOrbitHost({ provider: 'omp', project: await fs.realpath(ctx.cwd), dispatch, promptUser,
       bind: context => rootFor(context).id,
       authorizeTask: (value, id) => {
         const allowed = parseAllowedModels(value.model_authorization?.allowed_models);
@@ -4108,6 +4206,31 @@ export function installOmpExtension(pi, sdk) {
     }
   });
 
+  if (process.env.ORBIT_EXTERNAL_INTEGRATION === '1' && typeof pi.registerTool === 'function') {
+    pi.registerTool({
+      name: 'ask',
+      label: 'Ask',
+      description: 'Ask the user one or more questions with option choices. In a controlled Loom session the question is relayed through Orbit.',
+      parameters: pi.zod.object({
+        questions: pi.zod.array(pi.zod.object({
+          id: pi.zod.string(),
+          question: pi.zod.string(),
+          options: pi.zod.array(pi.zod.object({
+            label: pi.zod.string(),
+            description: pi.zod.string().optional(),
+          })),
+          header: pi.zod.string().optional(),
+          multi: pi.zod.boolean().optional(),
+          recommended: pi.zod.number().optional(),
+        })),
+      }),
+      async execute(_toolCallId, args, signal) {
+        const questions = normalizeAskQuestions(args?.questions);
+        const answers = await relayAsk(questions, signal);
+        return askToolResult(questions, answers);
+      },
+    });
+  }
   pi.registerTool({ name: 'orbit', label: 'Orbit', description: toolDescription, parameters: pi.zod.object(toolArgs(pi.zod)),
     async execute(_id, args, _signal, _update, ctx) {
       const entry = await connect(ctx);

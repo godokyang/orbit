@@ -37,6 +37,9 @@ module Orbit
 
     def state = request("session_state")
     def session_abort = request("session_abort")
+    def session_prompt(text) = request("session_prompt", "text" => text)
+    def ask_requests = request("ask_requests")
+    def answer_ask(id, answers) = request("answer_ask", "id" => id, "answers" => answers)
     def configured_model = request("current_model")
 
     # ADR-009 session catalog: the models OMP considers selectable in this

@@ -31,6 +31,9 @@
 | `default_member_route` | `{}` | 对象 | `provider`、`id` | 默认成员路由；可选 `billing_route`（`direct_api` / `subscription_quota` / `unknown`） |
 | `messages` | `{}` | 数组 | 每项 `id` | 原生消息。`id` 稳定；可选 `item_id`、`internal`。其余字段适配层私有 |
 | `send_message` | `{text}` | 对象 | `id` | 以程序来源送一条消息，不冒充用户；返回原生消息 id |
+| `ask_requests` | `{}` | 对象 | `asks` 数组 | 待答问题：`id`、`questions`、`at` |
+| `answer_ask` | `{id, answers}` | 对象 | `accepted` | 递送答复；未知 id 或非法答案失败 |
+| `session_prompt` | `{text}` | 对象 | `accepted` | 注入真实用户消息（`attribution=user`）；`message_id` 可得时为原生 id，否则 null |
 | `session_abort` | `{}` | 对象 | `confirmed`、`scope` | 中止会话；`scope=session` 只表示会话已中止，不等于任务停止 |
 | `stop_root` | `{}` | 对象 | `confirmed` | 停止 Root 并确认。`confirmed` 只在真实停止后为 `true` |
 | `member_roster` | `{}` | 数组 | 每项 `thread_id` | 当前成员。其余字段适配层私有 |
