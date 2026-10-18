@@ -1,6 +1,6 @@
 # 任务运行合同拆分清单（P1 最后一步）
 
-状态：进行中，2026-10-19。已完成：入口、扩展工具面、bootstrap/合作政策注入、近期宿主观察、历史过程检查提示共 6 条已移入 `contracts/host-omp.md`；其余见下表。配套 [ADR-014](../adr/014-host-port-interface.md) 与[宿主接口合同](../../contracts/host-port.md)。本文件只规划拆分，不改语义。
+状态：进行中，2026-10-19。已完成：入口、扩展工具面、bootstrap/合作政策注入、近期宿主观察、历史过程检查提示共 6 条，以及检查者 OMP 实现与 review-model 预检，已移入 `contracts/host-omp.md`；角色池与 Root 模型段落已改为宿主中性表述。其余见下表。配套 [ADR-014](../adr/014-host-port-interface.md) 与[宿主接口合同](../../contracts/host-port.md)。本文件只规划拆分，不改语义。
 
 ## 1. 目标
 
