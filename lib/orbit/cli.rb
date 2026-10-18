@@ -241,6 +241,8 @@ module Orbit
         messages(argv)
       when "abort"
         abort_session(argv)
+      when "launch"
+        launch_spec(argv)
       when "model-evidence"
         model_evidence(argv)
       when "model-candidates"
@@ -341,6 +343,28 @@ module Orbit
       end
       record = TaskView.single!(argv.first)
       puts JSON.pretty_generate(Conversation.read(record, after: options[:after]))
+      0
+    end
+
+    def launch_spec(argv)
+      options = {}
+      OptionParser.new do |parser|
+        parser.on("--socket PATH") { |value| options[:socket] = value }
+        parser.on("--model MODEL") { |value| options[:model] = value }
+        parser.on("--resume ID") { |value| options[:resume] = value }
+        parser.on("--json") { }
+      end.parse!(argv)
+      raise ArgumentError, "usage: orbit launch --socket PATH (--model MODEL | --resume ID) --json" unless argv.empty?
+      raise ArgumentError, "--socket is required" unless options[:socket].is_a?(String) && !options[:socket].empty?
+      args = ["omp", "--mode", "rpc-ui"]
+      if options[:resume]
+        args += ["--resume", options[:resume]]
+      elsif options[:model]
+        args += ["--model", options[:model]]
+      else
+        raise ArgumentError, "--model or --resume is required"
+      end
+      puts JSON.generate({ "argv" => args, "socket" => options[:socket] })
       0
     end
 

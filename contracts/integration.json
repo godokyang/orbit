@@ -138,6 +138,14 @@
         "at"
       ],
       "note": "Abort the bound native session. scope=session means the session was aborted; it is not a task stop and never a business completion. A missing or foreign task fails."
+    },
+    "session_launch": {
+      "invocation": "orbit launch --socket PATH (--model MODEL | --resume ID) --json",
+      "stdout_fields": [
+        "argv",
+        "socket"
+      ],
+      "note": "Host-neutral launch spec for a controlled session. argv excludes the Orbit binary: the caller prepends its configured orbit path. The caller still owns the process (spawn and reap); this command does not start anything."
     }
   },
   "status_fields": [
@@ -575,6 +583,14 @@
       "since": "1.8",
       "command": "abort",
       "scope": "session",
+      "writes_task": false,
+      "calls_model": false
+    },
+    "session_launch": {
+      "since": "1.8",
+      "command": "launch",
+      "argv_excludes_binary": true,
+      "spawns": false,
       "writes_task": false,
       "calls_model": false
     }
