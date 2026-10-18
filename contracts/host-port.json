@@ -240,7 +240,17 @@
       "result": {
         "required": [
           "asks"
-        ]
+        ],
+        "items": {
+          "required": [
+            "id",
+            "questions",
+            "at"
+          ],
+          "optional": [
+            "tool_call_id"
+          ]
+        }
       }
     },
     "answer_ask": {

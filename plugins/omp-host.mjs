@@ -3192,11 +3192,11 @@ export function installOmpExtension(pi, sdk) {
       return parsed;
     });
   }
-  function relayAsk(raw, signal) {
+  function relayAsk(raw, signal, toolCallId) {
     const questions = normalizeAskQuestions(raw);
     const id = randomUUID();
     return new Promise((resolve, reject) => {
-      pendingAsks.set(id, { id, questions, at: new Date().toISOString(), resolve, reject });
+      pendingAsks.set(id, { id, questions, at: new Date().toISOString(), tool_call_id: toolCallId ?? null, resolve, reject });
       if (signal) {
         if (signal.aborted) {
           pendingAsks.delete(id);
@@ -3244,7 +3244,7 @@ export function installOmpExtension(pi, sdk) {
       }
       case 'session_state': return state(entry);
       case 'session_prompt': return promptUser(request.text);
-      case 'ask_requests': return { asks: [...pendingAsks.values()].map(pending => ({ id: pending.id, questions: pending.questions, at: pending.at })) };
+      case 'ask_requests': return { asks: [...pendingAsks.values()].map(pending => ({ id: pending.id, questions: pending.questions, at: pending.at, tool_call_id: pending.tool_call_id })) };
       case 'answer_ask': {
         const pending = pendingAsks.get(request.id);
         if (!pending) throw new Error('ask request is not pending');
@@ -4226,7 +4226,7 @@ export function installOmpExtension(pi, sdk) {
       }),
       async execute(_toolCallId, args, signal) {
         const questions = normalizeAskQuestions(args?.questions);
-        const answers = await relayAsk(questions, signal);
+        const answers = await relayAsk(questions, signal, _toolCallId);
         return askToolResult(questions, answers);
       },
     });
