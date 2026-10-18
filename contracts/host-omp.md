@@ -16,6 +16,24 @@
 
 - **近期宿主观察**：JEV 使用自最近一次检查之后的最新 20 条完整操作元数据，包含原生调用 ID、声明意图、工具、目标、状态和可得时间；不默认发送 Root 自由文本或工具输入输出。宿主仅跨越可证明属于当前任务的内部唤醒：唤醒 ID 已登记，且此前最近真实用户消息匹配原要求、续接来源或已登记修订。无关问答不并入任务历史；归属不可证时保留边界并报告缺口。超过窗口保留真实 omission 数量，缺失时间与目标不猜测。原始验证回执继续供独立检查按需取证，JEV 只收到来源、状态、覆盖及版本元数据。单次错误、正常恢复或串行等待不构成卡点证据；JEV 仍按每 5 分钟判断，独立检查的 observation key 去重保持。
 - **历史过程检查提示**：当一个过程检查的**唯一 stale 原因是 host 观察**（workspace/input/artifact/dispute 均未变）且 verdict 为 correct/continue 并有 findings、Root 未被中断且当前 turn 归属本任务时，程序经既有 Root 消息通道发送**一次**明确历史性质的提示——"此前过程检查的观察已经变化；以下是待核对线索，请按当前有效要求核对是否仍适用，已经恢复则继续当前工作"——附有界 finding evidence/action（≤3 条，各 400 字符）与检查号。该提示：**不构成当前纠正**（不写入 correction_sent）；**不给停止/完成/暂停授权**；**不新增当前 finding**；attempt 先持久化后发送（崩溃后不重发）；发送失败如实记 unconfirmed 且不自动重试；ACK 成功才记 sent_message_ids。既有 recheck 线索与后续独立核对资格完全保留；严格 host stale 判定、当前纠正路径、完成/停止门全部不变。
+## 成员登记实现
+
+- 受控任务的 Root 派发在扩展的 `tool_call` 门被拦截，每个 spawn 项被赋予请求名 `orbit-<uuid>`；调用者不是已验证主代理、或注册门不可用时，派发被阻断。没有活动任务时允许 OMP 原生 `task` 由主代理显式派发，但须明确标记该工作不受 Orbit 登记、检查或停止监督。
+- OMP 的 AgentRegistry `registered` 事件在 `createAgentSession` 内同步发出，早于成员的首次 provider 请求。扩展在该窗口内同步调用登记入口（`scripts/orbit-register-member`），由 TaskRecord 以临时文件 + fsync + rename + 目录 fsync 写入任务目录的 `members.json`。写入成功才放行；写入失败、清单损坏或实际注册 ID 漂移时，扩展将注册表状态翻转为 `aborted`（终态），并在 `members.json` 记录 `refused`（含原因与 `abort_confirmed`）。阻断以 `setStatus` 返回真且读回 `aborted` 为证。
+
+## 原生协作观察（hub 与成员状态）
+
+扩展把本任务的原生协作记入进程内、按任务隔离的有界缓冲，供 TaskRuntime 轮询：
+
+- `hub_events` 返回 `{ events, dropped_oldest, next_seq, buffer_cap }`；每条事件带按任务单调无隙的 `seq` 与稳定 `id`，以及 `task_dir` 归属。事件含原生 `hub` 或 OMP `write agent://<peer>` 的真实消息意图（op/to/from/message；Root 来自 awaited `tool_call` 门、成员来自所属会话的工具开始事件）、实际工具结果和原生 `task` 结果。缓冲内消息有界截断，同任务 `collaboration.jsonl` 按观察顺序保存未截断的原文和实际回执；调用意图不等于成功送达。seq 跳变或 `dropped_oldest` 增长是该任务真实的 observation_gap 信号。
+- 同宿主不同扩展实例共享按任务隔离的有界缓冲，成员 `work_unit_tool_blocked` 携带成员、单元、真实派发与阻断调用身份、工具、原因和时间。运行时将有界同类阻断摘要送入 Jev 与独立过程检查；跨重派且 Root 轮次推进的重复同墙触发具体过程核查。计数、时间或同类工具调用增长不单独生成新检查依据，过程观察合并并尊重间隔；旧检查只作诊断线索，须当前证据复核，不取得当前裁决资格。
+- 有界缓冲在 OMP 进程退出时丢失；任务目录的独立协作记录保留已归属事件。无绑定事件不追认给后来的任务，持久写入失败标明 gap，消费者仍须及时轮询。
+- 按实际成员 ID 可查 `member_state`（registry 状态、实际模型、会话是否存活、registry 生命周期 `acceptedAt/terminalAt`、`async_jobs` 快照、当前分支末条 assistant 为错误回合时的结构化原生错误事实 `last_turn_error`）、`member_result`（持久产物路径与有界内容）、`send_member`（向成员投递用户修改，steer；仅任务 starting/running 时允许，失败如实上报）与 `stop_member`。SDK 注册表 ref 被移除后，`member_state`／`member_result` 以注册窗口保留的身份、`history`（持久输出路径、解析型号）、`lifecycle` 快照与保留会话继续只读服务，已定位的实现缺陷是部分成员中止并移除后仍回旧缓存 `running`，保存终态与未知处理待修复，不能据本段声称所有分支已正确；任务所有权校验与停止屏障不因此放宽，无存活会话的成员不可 `send_member`。
+- **成员结算（2026-09-30 修订）：**成员终态集合为 `completed`／`failed`／`refused`／`rejected`，来源分级、互不冒充。原生接受：SDK 注册表 `lifecycle.acceptedAt`（仅成员经 yield 交卷路径产生；毫秒 epoch 数值或 ISO 字符串按原生单位解析）保持原生事实记入 `accepted_at`，不得伪造；已被失效结算的同一 acceptedAt 值不得再次结算。本派发核验完成：成员当前绑定的最新 dispatch（实际成员 ID 与 tool_call 精确匹配当前尝试，且该单元输入摘要与产物根仍为当前版本；成员记录未带单元关联时按同一精确身份从耐久单元记录唯一恢复，歧义或型号不符不恢复，不得按相似型号、时间或相邻事件归因）经 Root `accepted`，且该派发有真实原生交付——本派发绑定后写入的持久输出文件、大小或内容非空、结果文本经该文件读取——且当前无 running/streaming、在途工具为零、后台状态按完成门处理，记 `completed`、`result_delivery=work_unit_acceptance`。时间证据（回合时间、绑定时间、文件 mtime）缺失或不可解析时不视为当前，不据此结算。原生失败：桥暴露本回合真实 provider／原生错误（当前分支末条 assistant 的 `stopReason=error` 结构化字段；显式 null 表示已观察的最近回合非错误，清除旧事实；字段缺失才是未知），且该回合身份不早于本派发绑定，且回合与工具已结束，直接记 `failed` 并保存原生字段；不以 Root 文字、返回文本或 idle 推断失败。业务拒收：Root `rejected`／`failed` 且有真实原生输出、执行已结束、无当前原生错误，记 `rejected`；这不是原生失败，不记 provider error；成员无任何可归因原生事实时保持未结算。模型漂移仍是硬否决，优先于一切结算。执行终结与现行任务证据资格分离：物理派发身份取实际 thread_id、tool_call_id 与该成员最新尝试的唯一匹配（含实际 model 核验）；单元改派另一成员不撤销旧成员的执行终结，程序补记失败结束时间也不产生新执行；业务证据资格仍只取单元最新尝试，输入或产物根版本变化本身不撤销已发生的执行终结，也不伪造新执行；但旧版本上的结算只是该次执行事实，业务 accepted/rejected 的新结算仍须当前输入／根、真实交付和当前检查链，以下“停止后拒收”路径除外；原生 acceptedAt 是当前执行的接受事实、按自身路径结算，单凭它不授现行 ready／coverage。二者都不能替代当前版本终检。成员再现真实新轮（running/streaming/在途工具）、实际重派导致的派发身份变化、model drift 或更新原生回合错误时，旧结算失效回到未结算（历史保留在事件与 `settlement_history`）；重派／新回合不得借用旧验收，SDK 按轮次清除的 lifecycle 不跨轮恢复。
+- **旧派发停止后拒收：**当前版本已不再接纳该派发时，Root 对精确对应的旧派发所作 `rejected`／`failed` 仍授权结束该次执行，不授权接受旧交付。只有实际成员／tool call／model 匹配、存在该次派发的真实持久输出、已观察 idle／非 streaming／工具为零／owner 异步任务为空，且程序重新调用 `stop_member` 取得 `confirmed=true`、`active_tools_after=0`、`async_jobs_settled=true`，才记 `rejected`、`result_delivery=work_unit_rejected`，保留停止确认与 `settlement_basis.stopped_after_rejection=true`。未知或失败停止保持未结算；不伪造 `acceptedAt`／provider error，不改原单元或派发的失败记录，不接受旧 `accepted`，不取得当前覆盖／终检资格。真实新轮或重派仍使旧结算失效；新结算必须重新经过真实停止屏障，不能借旧停止回执。
+- 已确认停止的成员不能再经原生 `hub` 或 `write agent://<member>` 被唤醒；任务非活动状态时对本任务成员的两种发送在工具门被拒绝。非 Orbit 成员与其他任务的流量不受影响。
+- 终检就绪的 `pending_finalization` 等待成员结算有界：超过等待上限、版本仍有效（产物与输入摘要未变）而成员结算仍不可证实时，程序对该版本只发一次明确的 Root 收尾通知，列出未结算成员与各自缺失的事实，请 Root 显式结束成员／单元后再申请完成；不自动置 `needs_user`／`stop_unconfirmed`，不按时间推断失败，不停止任何进程，成员结算门、独立终检与真实停止门均不绕过。
+
 
 ## 检查者与模型
 
