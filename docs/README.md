@@ -15,6 +15,10 @@
 | JEV 输入、观察节奏与按需压缩的决定 | [ADR-012](adr/012-jev-purpose-specific-input-and-compaction.md)；行为规则见任务运行合同，实现和验证见交接 |
 | 终检范围、结论沿用与续查职责 | [ADR-013](adr/013-final-review-scope-and-continuation.md)；实施状态见总待办 |
 | OMP 适配细节 | [OMP 适配说明](../contracts/host-omp.md)；入口、注入位置与宿主观察窗口，不改变产品规则 |
+| 宿主接口与事件通路实施方案 | [实施方案](plan/host-port-and-events.md)；P0/P1/P2 的执行依据 |
+| P2 设计与实施状态 | [P2 设计](plan/p2-design.md)；能力、进程归属与受阻项 |
+| 文档对齐清单 | [文档对齐清单](plan/doc-march.md) |
+| DSH 迁移讨论记录 | [DSH 迁移讨论稿](plan/dsh-migration.md)；历史记录，实施以实施方案为准 |
 | 任务运行合同拆分计划（P1 最后一步） | [拆分清单](plan/task-runtime-split.md)；只规划，不改语义 |
 | 宿主接口与适配层（提议，未采纳） | [ADR-014](adr/014-host-port-interface.md)、[宿主接口合同](../contracts/host-port.md)（`host-port.json`）、[一致性测试方案](plan/host-conformance.md)；采纳前不改变现行规则 |
 | 当前阶段与待办 | [唯一总待办](plan/agent-autonomy-implementation.md) |
