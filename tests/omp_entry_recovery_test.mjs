@@ -348,13 +348,13 @@ try {
   const writeBindState = value => fs.writeFile(path.join(bindDir, 'state.json'), JSON.stringify(value));
   await writeBindState({ ...bindState, connection: { ...bindState.connection, thread_id: 'foreign' } });
   assert.match((await bridge({ method: 'bind_task', task_directory: bindDir })).error, /does not belong/);
-  assert.match((await bridge({ method: 'hub_events' })).error, /requires a bound/);
+  assert.match((await bridge({ method: 'collaboration_events' })).error, /requires a bound/);
   await writeBindState({ ...bindState, status: 'paused' });
   assert.match((await bridge({ method: 'bind_task', task_directory: bindDir })).error, /active runtime/);
   await writeBindState(bindState);
   const bound = await bridge({ method: 'bind_task', task_directory: bindDir });
   assert.equal(bound.result.task_directory, bindDir);
-  assert.ok(Array.isArray((await bridge({ method: 'hub_events' })).result.events));
+  assert.ok(Array.isArray((await bridge({ method: 'collaboration_events' })).result.events));
   const context = JSON.parse((await ext.definition.execute('context', { action: 'context' }, null, null, ext.ctx)).content[0].text);
   assert.equal(context.task_directory, bindDir, 'native context adopts external runtime binding');
   const otherDir = path.join(extProject, '.orbit', 'tasks', 'other');

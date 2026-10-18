@@ -401,11 +401,11 @@ try {
   await fs.chmod(taskDir3, 0o500);
   await emit('tool_call', { toolName: 'hub', toolCallId: 'gap-1', input: { op: 'send', to: 'nobody', message: 'lost one' } }, ctx3);
   await emit('tool_call', { toolName: 'hub', toolCallId: 'gap-2', input: { op: 'send', to: 'nobody', message: 'lost two' } }, ctx3);
-  await waitFor(async () => (await request(taskDir3, 'hub_events', { session: 'root3' }))
+  await waitFor(async () => (await request(taskDir3, 'collaboration_events', { session: 'root3' }))
     .events.some(e => e.kind === 'persistence_gap'), 'bridge persistence_gap mirror');
   // A real append failure is diagnostic evidence, never a failed execution
   // stop: the checkpoint names its cutoff and unrecorded gap explicitly.
-  const failedCheckpoint = await request(taskDir3, 'stop', { session: 'root3' });
+  const failedCheckpoint = await request(taskDir3, 'stop_root', { session: 'root3' });
   assert.equal(failedCheckpoint.confirmed, true, 'a broken log sink cannot prevent cancellation');
   const failedPersistence = failedCheckpoint.collaboration_persistence;
   assert.equal(failedPersistence.status, 'written_with_gaps');
@@ -427,7 +427,7 @@ try {
   assert.deepEqual(lines3.map(l => l.seq), [1, 2], 'sequence numbers stay contiguous across the loss');
   assert.equal(lines3.at(-1).tool_call_id, 'gap-3');
   assert.equal((await fs.stat(path.join(taskDir3, 'collaboration.jsonl'))).mode & 0o777, 0o600, 'recovered file is 0600');
-  const recoveredCheckpoint = await request(taskDir3, 'stop', { session: 'root3' });
+  const recoveredCheckpoint = await request(taskDir3, 'stop_root', { session: 'root3' });
   assert.equal(recoveredCheckpoint.confirmed, true);
   const recoveredPersistence = recoveredCheckpoint.collaboration_persistence;
   assert.equal(recoveredPersistence.observed_through, 3);

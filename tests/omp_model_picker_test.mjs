@@ -481,7 +481,7 @@ emitToRoot({ type: 'tool_execution_end', toolName: 'ask', toolCallId: 'ask-1', i
 emitToRoot({ type: 'tool_execution_end', toolName: 'ask', toolCallId: 'ask-1', isError: true,
   result: { content: [{ type: 'text', text: 'Skipped due to pending steering message.' }], details: { __synthetic: true, source: 'interrupt_skipped', executed: false } } });
 emitToRoot({ type: 'tool_execution_end', toolName: 'bash', toolCallId: 'b-1', isError: false, result: { details: {} } });
-let events = (await request('hub_events')).events;
+let events = (await request('collaboration_events')).events;
 const interrupted = events.filter(e => e.kind === 'ask_interrupted');
 assert.equal(interrupted.length, 1, 'the skip is recorded exactly once per invocation id');
 assert.equal(interrupted[0].tool_call_id, 'ask-1');
@@ -491,7 +491,7 @@ assert.equal(interrupted[0].skipped_source, 'pending steering message');
 assert.equal(interrupted[0].started, false);
 assert.equal(events.filter(e => e.kind === 'ask_resolved').length, 0, 'a non-ask tool end never resolves');
 emitToRoot({ type: 'tool_execution_end', toolName: 'ask', toolCallId: 'ask-2', isError: false, result: { content: [] } });
-events = (await request('hub_events')).events;
+events = (await request('collaboration_events')).events;
 const resolved = events.filter(e => e.kind === 'ask_resolved');
 assert.equal(resolved.length, 1, 'a successful ask end resolves');
 assert.equal(resolved[0].tool_call_id, 'ask-2');
