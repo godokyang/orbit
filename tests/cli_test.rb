@@ -451,7 +451,7 @@ module CliTest
       report = JSON.parse(cli("doctor", record.path, "--json"))
       assert(worker.join(3), "diagnostic requests completed")
       assert(report["ready"] && report.dig("connection", "project") == File.realpath(@project), "native state read verifies the connection")
-      assert(requests.all? { |r| r["method"] == "state" && r["session"] == "root" }, "diagnostics sends only read requests")
+      assert(requests.all? { |r| r["method"] == "session_state" && r["session"] == "root" }, "diagnostics sends only read requests")
       server.close
       File.unlink(socket)
     end
@@ -475,7 +475,7 @@ module CliTest
       2.times do
         peer = server.accept
         request = JSON.parse(peer.gets)
-        result = request["method"] == "state" ? { "cwd" => File.realpath(@project), "status" => "idle" } : { "confirmed" => true }
+        result = request["method"] == "session_state" ? { "cwd" => File.realpath(@project), "status" => "idle" } : { "confirmed" => true }
         peer.puts(JSON.generate("result" => result))
         peer.close
       end
@@ -505,7 +505,7 @@ module CliTest
       2.times do
         peer = server.accept
         request = JSON.parse(peer.gets)
-        result = request["method"] == "state" ? { "cwd" => File.realpath(@project), "status" => "idle" } : { "confirmed" => true }
+        result = request["method"] == "session_state" ? { "cwd" => File.realpath(@project), "status" => "idle" } : { "confirmed" => true }
         peer.puts(JSON.generate("result" => result))
         peer.close
       end
@@ -608,7 +608,7 @@ module CliTest
       2.times do
         peer = server.accept
         request = JSON.parse(peer.gets)
-        peer.puts(JSON.generate("result" => { "cwd" => File.realpath(@project), "status" => "idle" })) if request["method"] == "state"
+        peer.puts(JSON.generate("result" => { "cwd" => File.realpath(@project), "status" => "idle" })) if request["method"] == "session_state"
         peer.close
       end
     end
@@ -779,7 +779,7 @@ module CliTest
         peer = server.accept
         request = JSON.parse(peer.gets)
         result = case request["method"]
-                 when "state" then { "cwd" => File.realpath(@project), "status" => "idle" }
+                 when "session_state" then { "cwd" => File.realpath(@project), "status" => "idle" }
                  when "model_catalog" then { "current" => "root/model", "available" => ["root/model"], "families" => {} }
                  else []
                  end
@@ -1154,7 +1154,7 @@ module CliTest
         peer = server.accept
         request = JSON.parse(peer.gets)
         result = case request["method"]
-                 when "state" then { "cwd" => File.realpath(@project), "status" => "idle" }
+                 when "session_state" then { "cwd" => File.realpath(@project), "status" => "idle" }
                  when "messages" then [{ "id" => "m1", "text" => "对账实现", "internal" => false }]
                  when "model_catalog" then { "current" => "a/b", "available" => [], "families" => {}, "agents" => {},
                                              "routes" => {}, "limits" => {}, "agent_dir" => nil }

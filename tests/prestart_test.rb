@@ -324,8 +324,8 @@ module PrestartTest
 
     def handle(request)
       case request["method"]
-      when "state" then { "cwd" => @project, "status" => "idle" }
-      when "model" then "glm/x"
+      when "session_state" then { "cwd" => @project, "status" => "idle" }
+      when "current_model" then "glm/x"
       when "model_catalog" then { "current" => "glm/x", "available" => ["glm/x"], "families" => {} }
       when "messages"
         [{ "id" => "m1", "item_id" => "m1", "text" => "请使用 orbit 受控执行：实现 key-setup 命令并验证", "internal" => false },
