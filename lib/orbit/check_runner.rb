@@ -1155,6 +1155,12 @@ module Orbit
         "closing report; keep those obligations listed, but do not claim future events already happened. " \
         "The runtime separately verifies its manual finalization notice, closing turn and actual stop. " \
         "Only delivery items must be verified before that sequence can start. Test execution is never lifecycle. " \
+        "Preserve conditional requirements and inspect their triggering condition. If current authoritative " \
+        "observations establish that the condition did not occur, verify only that conditional obligation " \
+        "with evidence of the absent trigger; do not claim its consequent action was executed. Missing " \
+        "observations leave the trigger unknown and the item unverified. If triggered, verify the required " \
+        "action normally. Do not demand an unrequested trigger just to exercise the condition, and do not " \
+        "move arbitrary conditional requirements into lifecycle or waive explicitly requested scenario tests. " \
         "Empty findings, Root claims and Jev calibration are not coverage. Use evidence relevant to each " \
         "requirement and distinguish inspected material from attributed verification receipts; your " \
         "read-only session cannot run tests. Images show pixels for a particular captured image; they do not " \
