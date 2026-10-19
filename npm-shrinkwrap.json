@@ -1,12 +1,12 @@
 {
   "name": "@godokyang/orbit",
-  "version": "0.8.19",
+  "version": "0.8.20",
   "lockfileVersion": 3,
   "requires": true,
   "packages": {
     "": {
       "name": "@godokyang/orbit",
-      "version": "0.8.19",
+      "version": "0.8.20",
       "dependencies": {
         "zod": "4.6.5"
       },
