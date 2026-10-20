@@ -13,7 +13,7 @@ interface OrbitStatus {
   checksInFlight?: number | null
   openFindings?: string[]
   pendingQuestions?: Array<{ id: string; question: string }>
-  config?: { allowedModels: string[]; checkerProvider: string; checkerModel: string; jev: boolean; candidates?: string[] }
+  config?: { allowedModels: string[]; checkerProvider: string; checkerModel: string; jev: boolean; jevEndpoint?: string; candidates?: string[] }
   recentEvents?: Array<{ seq: number; type: string }>
 }
 
@@ -39,6 +39,16 @@ function OrbitPanel({ sessionId }: { sessionId: string }): unknown {
   const [data, setData] = useState<OrbitStatus | undefined>(undefined)
   const [instruction, setInstruction] = useState('')
   const [showSettings, setShowSettings] = useState(false)
+  const [allowedInput, setAllowedInput] = useState('')
+  const [checkerInput, setCheckerInput] = useState('')
+  const [jevInput, setJevInput] = useState('')
+  useEffect(() => {
+    const config = data?.config
+    if (config === undefined) return
+    setAllowedInput(config.allowedModels.join(', '))
+    setCheckerInput(config.checkerProvider.length > 0 ? `${config.checkerProvider}/${config.checkerModel}` : '')
+    setJevInput(config.jevEndpoint ?? '')
+  }, [data?.config])
   useEffect(() => {
     let alive = true
     const load = (): void => { void request(sessionId).then((next) => { if (alive && next !== undefined) setData(next) }) }
@@ -69,7 +79,26 @@ function OrbitPanel({ sessionId }: { sessionId: string }): unknown {
     createElement('div', { style: { opacity: 0.65 } }, `events: ${events}`),
     showSettings && config !== undefined
       ? createElement('div', { style: { opacity: 0.8, whiteSpace: 'pre-wrap' } },
-          `allowed: ${config.allowedModels.join(', ') || '(config pool)'}\nchecker: ${config.checkerProvider || '(default)'}/${config.checkerModel || '(default)'}\nJEV: ${config.jev ? 'on' : 'off'}\ncandidates: ${(config.candidates ?? []).join(', ') || '(none)'}`)
+          createElement('div', null,
+            createElement('label', null, 'allowed models '),
+            createElement('input', { value: allowedInput, onChange: (event: { target: { value: string } }) => setAllowedInput(event.target.value), style: { width: 220 } }),
+          ),
+          createElement('div', null,
+            createElement('label', null, 'checker provider/model '),
+            createElement('input', { value: checkerInput, onChange: (event: { target: { value: string } }) => setCheckerInput(event.target.value), style: { width: 200 } }),
+          ),
+          createElement('div', null,
+            createElement('label', null, 'JEV endpoint '),
+            createElement('input', { value: jevInput, onChange: (event: { target: { value: string } }) => setJevInput(event.target.value), style: { width: 240 } }),
+          ),
+          createElement('button', {
+            onClick: () => {
+              const allowedModels = allowedInput.split(',').map((item) => item.trim()).filter((item) => item.length > 0)
+              const [checkerProvider = '', checkerModel = ''] = checkerInput.trim().split('/')
+              void action(sessionId, { action: 'settings', allowedModels, checkerProvider, checkerModel, jevEndpoint: jevInput.trim() })
+            },
+          }, 'Save'),
+        )
       : null,
   )
 }

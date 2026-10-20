@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
-import { appendFileSync, readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs'
 import { readdir, readFile } from 'node:fs/promises'
 import { basename, dirname, join, resolve } from 'node:path'
 import { Service, type Context } from '@deepseek-ai/cordis'
@@ -333,8 +333,8 @@ export default class OrbitHost extends Service {
 
   private readonly maxTasks: number
   private readonly subagentTool: string
-  private readonly checkerModel: ModelIdentity | undefined
-  private readonly jevEndpoint: string | undefined
+  private checkerModel: ModelIdentity | undefined
+  private jevEndpoint: string | undefined
   private readonly jevModel: string | undefined
   private readonly jevThreshold: number
   private readonly jevIntervalMs: number
@@ -390,6 +390,7 @@ export default class OrbitHost extends Service {
     this.jevThreshold = config.jevThreshold ?? JEV_OBSERVATION_THRESHOLD
     this.jevIntervalMs = config.jevIntervalMs ?? 300_000
     this.jevFirstDelayMs = config.jevFirstDelayMs ?? 5_000
+    this.applyPersistedSettings()
     const host = this
 
     ctx.tools.register(
@@ -1194,6 +1195,7 @@ export default class OrbitHost extends Service {
                   checkerProvider: (host as any).checkerModel?.provider ?? '',
                   checkerModel: (host as any).checkerModel?.model ?? '',
                   jev: typeof (host as any).jevEndpoint === 'string' && (host as any).jevEndpoint.length > 0,
+                  jevEndpoint: (host as any).jevEndpoint ?? '',
                   candidates: ((host as any).memberCandidates as Array<{ label?: string; provider: string; model: string }>).map((candidate) => candidate.label || `${candidate.provider}/${candidate.model}`),
                 },
                 recentEvents: events,
@@ -1218,6 +1220,23 @@ export default class OrbitHost extends Service {
                 const state = await service.requestStop('user')
                 void host.performStopLater(service)
                 return send(200, { ok: true, taskId: state.id, status: state.status })
+              }
+              if (body.action === 'settings') {
+                const input = body as {
+                  allowedModels?: unknown; checkerProvider?: unknown; checkerModel?: unknown; jevEndpoint?: unknown
+                }
+                if (Array.isArray(input.allowedModels)) {
+                  const models = input.allowedModels.filter((item): item is string => typeof item === 'string' && item.length > 0)
+                  host.allowedModels.clear()
+                  for (const model of models) host.allowedModels.add(model)
+                }
+                if (typeof input.checkerProvider === 'string' && typeof input.checkerModel === 'string'
+                    && input.checkerProvider.length > 0 && input.checkerModel.length > 0) {
+                  host.checkerModel = { provider: input.checkerProvider, model: input.checkerModel }
+                }
+                if (typeof input.jevEndpoint === 'string') host.jevEndpoint = input.jevEndpoint.length === 0 ? undefined : input.jevEndpoint
+                host.persistSettings()
+                return send(200, { ok: true, allowedModels: [...host.allowedModels], checker: host.checkerModel ?? null, jev: host.jevEndpoint ?? '' })
               }
               if (body.action === 'prompt' && typeof body.message === 'string' && body.message.length > 0) {
                 const state = await service.state()
@@ -1410,6 +1429,48 @@ export default class OrbitHost extends Service {
     saveFenceRegistry(this.fencedSessions)
     setTimeout(() => { void this.performStop(service) }, delayMs)
     return state
+  }
+
+  private settingsFile(): string | undefined {
+    const home = process.env.DSH_HOME
+    return home === undefined || home.length === 0 ? undefined : join(home, 'orbit-settings.json')
+  }
+
+  private applyPersistedSettings(): void {
+    const path = this.settingsFile()
+    if (path === undefined || !existsSync(path)) return
+    try {
+      const value = JSON.parse(readFileSync(path, 'utf8')) as {
+        allowedModels?: unknown
+        checkerProvider?: unknown
+        checkerModel?: unknown
+        jevEndpoint?: unknown
+      }
+      if (Array.isArray(value.allowedModels)) {
+        const models = value.allowedModels.filter((item): item is string => typeof item === 'string' && item.length > 0)
+        this.allowedModels.clear()
+        for (const model of models) this.allowedModels.add(model)
+      }
+      if (typeof value.checkerProvider === 'string' && typeof value.checkerModel === 'string'
+          && value.checkerProvider.length > 0 && value.checkerModel.length > 0) {
+        this.checkerModel = { provider: value.checkerProvider, model: value.checkerModel }
+      }
+      if (typeof value.jevEndpoint === 'string') this.jevEndpoint = value.jevEndpoint.length === 0 ? undefined : value.jevEndpoint
+    } catch (error) {
+      console.error(`orbit: persisted settings ignored: ${(error as Error).message}`)
+    }
+  }
+
+  private persistSettings(): void {
+    const path = this.settingsFile()
+    if (path === undefined) return
+    const value = {
+      allowedModels: [...this.allowedModels],
+      checkerProvider: this.checkerModel?.provider ?? '',
+      checkerModel: this.checkerModel?.model ?? '',
+      jevEndpoint: this.jevEndpoint ?? '',
+    }
+    writeFileSync(path, JSON.stringify(value, null, 2), { mode: 0o600 })
   }
 
   private headlessDenial(exec: { name: string; arguments?: unknown }): string | undefined {

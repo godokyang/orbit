@@ -33,6 +33,16 @@ window.__ModuleLoader__.load({
 			const [data, setData] = (0, react.useState)(void 0);
 			const [instruction, setInstruction] = (0, react.useState)("");
 			const [showSettings, setShowSettings] = (0, react.useState)(false);
+			const [allowedInput, setAllowedInput] = (0, react.useState)("");
+			const [checkerInput, setCheckerInput] = (0, react.useState)("");
+			const [jevInput, setJevInput] = (0, react.useState)("");
+			(0, react.useEffect)(() => {
+				const config = data?.config;
+				if (config === void 0) return;
+				setAllowedInput(config.allowedModels.join(", "));
+				setCheckerInput(config.checkerProvider.length > 0 ? `${config.checkerProvider}/${config.checkerModel}` : "");
+				setJevInput(config.jevEndpoint ?? "");
+			}, [data?.config]);
 			(0, react.useEffect)(() => {
 				let alive = true;
 				const load = () => {
@@ -97,7 +107,29 @@ window.__ModuleLoader__.load({
 			} }, "Answer") : null), (0, react.createElement)("div", { style: { opacity: .65 } }, config === void 0 ? "config: unavailable" : `models ${config.allowedModels.join(", ") || "(pool)"} · checker ${config.checkerProvider || "(default)"}/${config.checkerModel || "(default)"} · JEV ${config.jev ? "on" : "off"}`), (0, react.createElement)("div", { style: { opacity: .65 } }, `events: ${events}`), showSettings && config !== void 0 ? (0, react.createElement)("div", { style: {
 				opacity: .8,
 				whiteSpace: "pre-wrap"
-			} }, `allowed: ${config.allowedModels.join(", ") || "(config pool)"}\nchecker: ${config.checkerProvider || "(default)"}/${config.checkerModel || "(default)"}\nJEV: ${config.jev ? "on" : "off"}\ncandidates: ${(config.candidates ?? []).join(", ") || "(none)"}`) : null);
+			} }, (0, react.createElement)("div", null, (0, react.createElement)("label", null, "allowed models "), (0, react.createElement)("input", {
+				value: allowedInput,
+				onChange: (event) => setAllowedInput(event.target.value),
+				style: { width: 220 }
+			})), (0, react.createElement)("div", null, (0, react.createElement)("label", null, "checker provider/model "), (0, react.createElement)("input", {
+				value: checkerInput,
+				onChange: (event) => setCheckerInput(event.target.value),
+				style: { width: 200 }
+			})), (0, react.createElement)("div", null, (0, react.createElement)("label", null, "JEV endpoint "), (0, react.createElement)("input", {
+				value: jevInput,
+				onChange: (event) => setJevInput(event.target.value),
+				style: { width: 240 }
+			})), (0, react.createElement)("button", { onClick: () => {
+				const allowedModels = allowedInput.split(",").map((item) => item.trim()).filter((item) => item.length > 0);
+				const [checkerProvider = "", checkerModel = ""] = checkerInput.trim().split("/");
+				action(sessionId, {
+					action: "settings",
+					allowedModels,
+					checkerProvider,
+					checkerModel,
+					jevEndpoint: jevInput.trim()
+				});
+			} }, "Save")) : null);
 		}
 		function apply(ctx) {
 			ctx.slots.register({
