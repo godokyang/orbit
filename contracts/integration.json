@@ -6,6 +6,10 @@
   "status_values": ["starting", "running", "complete", "paused", "needs_user", "failed", "stop_unconfirmed"],
   "terminal_status_values": ["complete", "paused", "needs_user", "failed", "stop_unconfirmed"],
   "commands": {
+    "version": {
+      "invocation": "orbit version --json",
+      "stdout_fields": ["version"]
+    },
     "capabilities": {
       "invocation": "orbit capabilities --json",
       "stdout_fields": ["integration_contract.version", "integration_contract.major", "orbit.version", "capabilities"]

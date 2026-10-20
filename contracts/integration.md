@@ -49,6 +49,7 @@
 
 | 命令 | 用途 |
 | --- | --- |
+| `orbit version --json` | 软件版本；只读、仅供显示 |
 | `orbit capabilities --json` | 能力协商；只读 |
 | `orbit launch --json [--profile P] [--home DIR] [--project DIR]` | 返回 DSH 启动参数；不启动进程 |
 | `orbit status [TASK] --json [--project DIR]` | 任务事实与阻塞原因；只读 |
