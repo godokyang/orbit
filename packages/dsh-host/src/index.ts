@@ -1,8 +1,8 @@
 import { execFileSync } from 'node:child_process'
-import { randomUUID } from 'node:crypto'
-import { readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs'
+import { createHash, randomUUID } from 'node:crypto'
+import { appendFileSync, readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs'
 import { readdir, readFile } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import { Service, type Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { defineTool } from '@deepseek-ai/dsh-tools'
@@ -119,6 +119,18 @@ async function taskDirs(projectRoot: string, limit: number): Promise<string[]> {
   const root = TaskStore.tasksRoot(projectRoot)
   const names = await readdir(root).catch(() => [] as string[])
   return names.filter((entry) => !entry.startsWith('.')).sort().slice(-limit).map((entry) => join(root, entry))
+}
+
+function canonicalPolicyPath(path: string): string {
+  try {
+    return realpathSync(path)
+  } catch {
+    try {
+      return join(realpathSync(dirname(path)), basename(path))
+    } catch {
+      return resolve(path)
+    }
+  }
 }
 
 async function findLatest(projectRoot: string, limit: number): Promise<TaskService | undefined> {
@@ -333,6 +345,8 @@ export default class OrbitHost extends Service {
   private readonly instanceId = randomUUID()
   private readonly activeCheckers = new Map<number, import('@deepseek-ai/dsh-subagent').SubagentActivation>()
   private readonly resumingSessions = new Set<string>()
+  private headlessPolicy: import('./headless.js').HeadlessSpec['policy']
+  private headlessCwd: string | undefined
   private readonly pendingQuestions = new Map<
     string,
     { resolve: (answer: { selected: string[]; custom?: string }) => void; reject: (error: Error) => void }
@@ -1046,6 +1060,14 @@ export default class OrbitHost extends Service {
     ;(ctx.root.on as any)('user-questions/request', questionRelay)
     ;(ctx.on as any)('user-questions/request', questionRelay)
 
+    // Source-preparation policy: a headless task may only read under the
+    // granted roots, write the declared result path, and never run bash.
+    ctx.on('tools/pre-execute', async (exec, next) => {
+      const denial = this.headlessDenial(exec)
+      if (denial !== undefined) return { kind: 'deny', reason: denial }
+      return next()
+    })
+
     // H3/H5: a stopped task's agents cannot use tools. The fence cache is
     // rebuilt from DSH_HOME at load; the durable task record remains the authority.
     // Strict model authorization: the listener must stay synchronous and
@@ -1191,6 +1213,58 @@ export default class OrbitHost extends Service {
     return state
   }
 
+  private headlessDenial(exec: { name: string; arguments?: unknown }): string | undefined {
+    const policy = this.headlessPolicy
+    if (policy === undefined) return undefined
+    const args = (exec.arguments ?? {}) as Record<string, unknown>
+    const pathOf = (): string | undefined => {
+      const value = args.file_path ?? args.path
+      return typeof value === 'string' ? value : undefined
+    }
+    const inside = (candidate: string, roots: string[]): boolean => {
+      let resolved: string
+      try { resolved = realpathSync(candidate) } catch { resolved = resolve(candidate) }
+      return roots.some((root) => resolved === root || resolved.startsWith(`${root}/`))
+    }
+    if (exec.name === 'bash') {
+      return policy.allowBash ? undefined : 'headless policy: bash is not allowed for this preparation task'
+    }
+    if (exec.name === 'edit' || exec.name === 'write' || exec.name === 'apply_patch') {
+      const target = pathOf()
+      if (target === undefined) return 'headless policy: write without an explicit path is refused'
+      const resolved = canonicalPolicyPath(target)
+      if (!policy.writePaths.includes(resolved)) return `headless policy: write outside the declared result path: ${target}`
+      return undefined
+    }
+    if (exec.name === 'read' || exec.name === 'grep' || exec.name === 'glob') {
+      const target = pathOf() ?? this.headlessCwd ?? process.cwd()
+      if (!inside(target, policy.readRoots)) return `headless policy: read outside the granted roots: ${target}`
+      if (policy.readLog !== undefined) {
+        try {
+          const entry: Record<string, unknown> = {
+            tool: exec.name === 'read' ? 'loom_read' : exec.name === 'grep' ? 'loom_search' : 'loom_list',
+            path: target,
+            at: new Date().toISOString(),
+          }
+          if (exec.name === 'read') {
+            try {
+              const bytes = readFileSync(target)
+              entry.sha256 = createHash('sha256').update(bytes).digest('hex')
+              entry.bytes = bytes.length
+              entry.size_bytes = bytes.length
+            } catch {}
+          }
+          if (exec.name === 'grep' && typeof args.query === 'string') entry.query = args.query
+          if (exec.name === 'grep' && typeof args.pattern === 'string') entry.query = args.pattern
+          appendFileSync(policy.readLog, `${JSON.stringify(entry)}\n`, { mode: 0o600 })
+        } catch (error) {
+          return `headless policy: cannot record the read: ${(error as Error).message}`
+        }
+      }
+    }
+    return undefined
+  }
+
   /** Unattended Loom node: create the Root from a frozen spec, start, adopt, prompt. */
   private async bootstrapHeadless(ctx: Context): Promise<void> {
     const specPath = process.env.ORBIT_BOOTSTRAP
@@ -1206,12 +1280,21 @@ export default class OrbitHost extends Service {
     try {
       if (specPath === undefined) throw new Error('ORBIT_BOOTSTRAP is unset')
       const spec = readHeadlessSpec(specPath)
+      this.headlessPolicy = spec.policy
+      if (spec.policy !== undefined) {
+        this.headlessPolicy = {
+          ...spec.policy,
+          readRoots: spec.policy.readRoots.map((root) => realpathSync(root)),
+          writePaths: spec.policy.writePaths.map(canonicalPolicyPath),
+        }
+      }
       let sessionId: string | undefined
       if (spec.action === 'resume') {
         const previous = await TaskService.open(join(TaskStore.tasksRoot(spec.project), spec.previousTask as string))
         sessionId = (await previous.state()).root.sessionId
       }
       if (sessionId !== undefined) this.resumingSessions.add(sessionId)
+      this.headlessCwd = spec.project
       const agent = await this.createHeadlessRoot(ctx, spec, sessionId)
       const workspace = workspaceInfo(spec.project)
       const options = {
