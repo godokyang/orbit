@@ -218,8 +218,8 @@ B 阶段开工前只需补一份短设计：JEV 观察输入在 DSH 事件下的
 
 ## 实施进展（2026-10-20，单一 npm 包）
 
-- 新增 `@orbit/orbit` 单包：`dist/host.mjs`（宿主服务）、`dist/cli.mjs`（bin `orbit`）、`dist/t0.mjs`（bin `orbit-t0`）、共享 `cordis.patch.yml` 与三个 profile overlay；打包时把 core/host/cli 全部内联，`dist/` 除 `@deepseek-ai/*` peer 外自包含。
-- bundle patch 的插入行指向 `@orbit/orbit/host`；`derive-profile.mjs` 改为一律安装单包并引导 app/checker profile；旧的 `packages/bundle` 已移除，避免两份 patch 漂移。
+- 新增 `@zeen/orbit` 单包：`dist/host.mjs`（宿主服务）、`dist/cli.mjs`（bin `orbit`）、`dist/t0.mjs`（bin `orbit-t0`）、共享 `cordis.patch.yml` 与三个 profile overlay；打包时把 core/host/cli 全部内联，`dist/` 除 `@deepseek-ai/*` peer 外自包含。
+- bundle patch 的插入行指向 `@zeen/orbit/host`；`derive-profile.mjs` 改为一律安装单包并引导 app/checker profile；旧的 `packages/bundle` 已移除，避免两份 patch 漂移。
 - 验证：单包构建后本地装入 web profile，`--dump-config` 191 行通过 T0，受控 app profile 启动无错误；app 与 checker 两个派生 profile 均通过 T0；CLI `orbit` 帮助与导出可用。
 - 仍未做：发布/版本与真实 npm scope（检查点 1）、真实模型（检查点 2）、Loom、D 阶段退场。
 
@@ -268,3 +268,10 @@ B 阶段开工前只需补一份短设计：JEV 观察输入在 DSH 事件下的
 - 当前未接入宿主 selection 调用：缺少可靠 token 计数/容量事实与压缩模型配置；接线前不宣称压缩已运行。
 - 验证：新增 6 个压缩单测（不触发、容量触发、缓存、重试、失败关闭、必保丢失、内容变化失效）；全套 101 个测试通过。
 - 仍未做：压缩模型选择、真实 token 计数、宿主接线、Loom。
+
+## 实施进展（2026-10-20，真实模型验收）
+
+- 用户确认最终单包名 `@zeen/orbit`、真实验收走 A（复制现有账户凭据到隔离 home）。
+- 在隔离 `/tmp/orbit-real`（web）与 `/tmp/orbit-real-checker`（sdk 只读）上，用 `deepseek-account/deepseek-flash` 跑通真实 Root + 独立检查者：Root 写 `hello.txt` → 手动 artifact 检查 → 检查者返回 complete/ready/coverage complete → 成员派发/结算 → finish/accept → `complete`，停止四项证据全 true。
+- 细节、证明与边界见[真实模型验收记录](../reference/ts-dsh-real-acceptance-20261020.md)。凭据只读副本验收后删除，原 `~/.dsh` 未改。
+- 仍未做：冻结验收 #1（真实缺陷纠正）与 #2（真实停止中断）、多任务/重启、JEV 校准、Loom、发布安装。

@@ -22,8 +22,8 @@ const dsh = process.env.DSH_BIN ?? '/Applications/DeepSeek Harness.app/Contents/
 const packageDist = join(repo, 'packages/orbit/dist/host.mjs')
 const t0 = join(repo, 'packages/orbit/dist/t0.mjs')
 
-if (!existsSync(packageDist)) throw new Error(`missing ${packageDist}; build @orbit/orbit first`)
-if (!existsSync(t0)) throw new Error(`missing ${t0}; build @orbit/orbit first`)
+if (!existsSync(packageDist)) throw new Error(`missing ${packageDist}; build @zeen/orbit first`)
+if (!existsSync(t0)) throw new Error(`missing ${t0}; build @zeen/orbit first`)
 
 const profileDir = join(home, 'profiles', profile)
 if (!existsSync(join(profileDir, 'package.json'))) {
@@ -34,7 +34,7 @@ if (!existsSync(join(profileDir, 'package.json'))) {
 }
 
 function installPackage(name, source) {
-  const target = join(profileDir, 'node_modules', '@orbit', name)
+  const target = join(profileDir, 'node_modules', ...name.split('/'))
   rmSync(target, { recursive: true, force: true })
   mkdirSync(target, { recursive: true })
   cpSync(join(source, 'package.json'), join(target, 'package.json'))
@@ -44,14 +44,14 @@ function installPackage(name, source) {
   return target
 }
 
-installPackage('orbit', join(repo, 'packages/orbit'))
+installPackage('@zeen/orbit', join(repo, 'packages/orbit'))
 
 const manifestPath = join(profileDir, 'package.json')
 const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
 manifest.dsh ??= { profile: {} }
 manifest.dsh.profile ??= {}
 const bundles = new Set(manifest.dsh.profile.bundles ?? [])
-bundles.add('@orbit/orbit')
+bundles.add('@zeen/orbit')
 manifest.dsh.profile.bundles = [...bundles]
 writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
 
@@ -68,4 +68,4 @@ writeFileSync(dumpPath, dump)
 execFileSync(process.execPath, [t0, '--dump', dumpPath, '--sandbox', checker ? 'read-only' : 'workspace-write', '--role', checker ? 'checker' : 'app'], {
   stdio: 'inherit',
 })
-console.log(`orbit-profile: ${profileDir} ready (bundle @orbit/orbit)`)
+console.log(`orbit-profile: ${profileDir} ready (bundle @zeen/orbit)`)
