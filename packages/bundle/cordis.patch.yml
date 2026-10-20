@@ -1,0 +1,64 @@
+# Orbit controlled-profile bundle patch. Applied over the DSH template bundle;
+# the user's profile patch is later, so T0 must run on the composed config.
+- insert:
+    - id: orbit-host
+      name: '@orbit/dsh-host'
+
+# Rows that would let a model run arbitrary code in the host or restart goal
+# loops must stay off in every controlled profile.
+- id: tool-plugin-manager
+  disabled: true
+- id: hmr
+  disabled: true
+- id: session-log-deepseek
+  disabled: true
+- id: session-title-llm
+  disabled: true
+- id: goal-round-driver
+  disabled: true
+- id: command-goal
+  disabled: true
+- id: tool-goal
+  disabled: true
+- id: cordis-host-runner
+  disabled: true
+- id: cordis-client-runner
+  disabled: true
+- id: cordis-inspect-providers
+  disabled: true
+- id: ui-cordis
+  disabled: true
+# The Creator preset is not used by controlled sessions.
+- id: preset-cordis
+  disabled: true
+
+- id: approval
+  config:
+    policy: never
+- id: sandbox-policy
+  config:
+    mode: workspace-write
+# The permission preset table must contain the composed sandbox/approval pair,
+# otherwise the preset service refuses to start. Keep the stock presets for the
+# UI and add the controlled one as the default.
+- id: permission
+  config:
+    defaultPreset: orbit-controlled
+    presets:
+      read-only:
+        sandbox: read-only
+        approval: ask
+        name: Read only
+      workspace-write:
+        sandbox: workspace-write
+        approval: ask
+        name: Workspace write
+      danger-full-access:
+        sandbox: danger-full-access
+        approval: never
+        name: Full access
+      orbit-controlled:
+        sandbox: workspace-write
+        approval: never
+        name: Orbit controlled
+        description: Orbit supervised sessions run without approval prompts in the workspace sandbox.

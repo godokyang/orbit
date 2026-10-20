@@ -138,3 +138,10 @@ B 阶段开工前只需补一份短设计：JEV 观察输入在 DSH 事件下的
 - 停止围栏改为任务边界：停止后除 `orbit` 工具外全部 fenced；同一 Root 会话成功 `start` 新任务会释放会话围栏，旧任务记录与成员仍保持终态。
 - 验证：DSH 探针装入 `@deepseek-ai/dsh-subagent-dsh-sdk` / `dsh-sdk-client`，用独立 checker profile 的假模型返回合法结果，跑通 start → declare → check（completed、finalization=true）→ subagent 登记 → finish/accept → complete（confirmed、missing=[]、completion 记录）→ 旧任务围栏拒绝派发 → 同会话新任务 start → CLI stop 后 paused。实时日志见 `$DSH_HOME/results/orbit-host.out`。
 - 仍未做：T0 组合断言、受控 profile bundle/preset、真实模型（checker 与 Root）、冻结验收 #1/#2、Loom。
+
+## 实施进展（2026-10-20，T0 与受控 bundle）
+
+- 新增 `@orbit/bundle`：`cordis.patch.yml` 禁用 `tool-plugin-manager`、`hmr`、`session-log-deepseek`、`session-title-llm`、goal 四行、`cordis-host-runner`、`cordis-client-runner`、`cordis-inspect-providers`、`ui-cordis`、Creator `preset-cordis`；固定 approval `never`、sandbox `workspace-write`，并补上匹配的 `orbit-controlled` permission preset（否则 permission-presets 拒绝启动）。checker overlay 把 sandbox 与 permission preset 改为只读。
+- 新增 T0：`packages/dsh-host/src/profile.ts` 解析 `dsh --dump-config` 的有效配置，要求禁用行、`approval.policy: never`、`sandbox-policy.mode`、`permission.defaultPreset` 与 `approval: never`；`orbit-t0` bin 直接对运行中的 profile 做断言。
+- 验证：在 web 模板 profile 装入本地 bundle 后，`--dump-config` 191 行通过 T0；用户 home patch 重新启用 `hmr` 时 T0 失败（T0b）。受控 profile 实际启动成功，无激活错误或 pending 行；T0 单测 9 个。
+- 仍未做：bundle 发布与 `orbit` 单包、真实模型、冻结验收 #1/#2、Loom。

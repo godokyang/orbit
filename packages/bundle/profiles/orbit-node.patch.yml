@@ -1,0 +1,5 @@
+# Orbit Loom-node profile overlay. The node owns the process; this profile only
+# pins the workspace write sandbox used by delegated work.
+- id: sandbox-policy
+  config:
+    mode: workspace-write

@@ -1,0 +1,16 @@
+# Orbit checker profile overlay: read-only tools, no write paths, no approvals.
+- id: sandbox-policy
+  config:
+    mode: read-only
+- id: approval
+  config:
+    policy: never
+- id: permission
+  config:
+    defaultPreset: orbit-checker
+    presets:
+      orbit-checker:
+        sandbox: read-only
+        approval: never
+        name: Orbit checker
+        description: Independent read-only checker process.
