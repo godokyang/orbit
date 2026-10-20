@@ -222,3 +222,11 @@ B 阶段开工前只需补一份短设计：JEV 观察输入在 DSH 事件下的
 - bundle patch 的插入行指向 `@orbit/orbit/host`；`derive-profile.mjs` 改为一律安装单包并引导 app/checker profile；旧的 `packages/bundle` 已移除，避免两份 patch 漂移。
 - 验证：单包构建后本地装入 web profile，`--dump-config` 191 行通过 T0，受控 app profile 启动无错误；app 与 checker 两个派生 profile 均通过 T0；CLI `orbit` 帮助与导出可用。
 - 仍未做：发布/版本与真实 npm scope（检查点 1）、真实模型（检查点 2）、Loom、D 阶段退场。
+
+## 实施进展（2026-10-20，JEV 选型问题与输入投影）
+
+- 新增 `jev-delegation-5`（handoff_fit、member_task_fit）、`jev-candidates-5`（逐候选 `candidate_N_task_fit`）、`jev-checker-task-fit-6`（逐检查者 `quality_N`）问题构造，文本与判定标准沿用现有校准版本。
+- 新增 `jev-selection-input-3` 投影：递归剥离 speed/latency/elapsed/duration/throughput/price/cost/quota 以及 comparison、usage、resource_calls、route_costs 等噪声，记录 `omitted_from_judgment`；保留任务要求、候选能力事实与 catalog/exact evidence。
+- 暂不应用阈值与决策组合：没有新的真实校准放行记录，阈值不得凭旧样本或猜测启用；先只固定问题与输入形状。
+- 验证：新增 5 个选型单测；全套 84 个测试通过。
+- 仍未做：选型调用接线、阈值放行、压缩、真实 key/模型、Loom。
