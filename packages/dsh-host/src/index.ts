@@ -1205,7 +1205,7 @@ export default class OrbitHost extends Service {
               const chunks: Buffer[] = []
               for await (const chunk of req) chunks.push(Buffer.from(chunk))
               const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as {
-                session?: string; action?: string; question?: string; selected?: string[]; custom?: string
+                session?: string; action?: string; question?: string; selected?: string[]; custom?: string; message?: string
               }
               const sessionId = body.session ?? ''
               const session = ctx.sessions.get(sessionId as never)
@@ -1217,6 +1217,18 @@ export default class OrbitHost extends Service {
                 const state = await service.requestStop('user')
                 void host.performStopLater(service)
                 return send(200, { ok: true, taskId: state.id, status: state.status })
+              }
+              if (body.action === 'prompt' && typeof body.message === 'string' && body.message.length > 0) {
+                const state = await service.state()
+                const agent = ctx.agents.get(state.root.sessionId as never)
+                if (agent === undefined) return send(409, { error: 'root session is not live' })
+                const messageId = randomUUID()
+                agent.followup({
+                  id: messageId as never, role: 'user',
+                  content: [{ type: 'text', text: body.message }],
+                  source: { kind: 'user' },
+                } as never)
+                return send(200, { ok: true, accepted: true, taskId: state.id, messageId })
               }
               if (body.action === 'answer' && typeof body.question === 'string') {
                 const selected = Array.isArray(body.selected) ? body.selected.filter((item) => typeof item === 'string') : []

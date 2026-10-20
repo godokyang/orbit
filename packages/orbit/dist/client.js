@@ -31,6 +31,7 @@ window.__ModuleLoader__.load({
 		}
 		function OrbitPanel({ sessionId }) {
 			const [data, setData] = (0, react.useState)(void 0);
+			const [instruction, setInstruction] = (0, react.useState)("");
 			(0, react.useEffect)(() => {
 				let alive = true;
 				const load = () => {
@@ -63,7 +64,27 @@ window.__ModuleLoader__.load({
 				display: "flex",
 				gap: 8,
 				alignItems: "center"
-			} }, (0, react.createElement)("strong", null, "Orbit"), (0, react.createElement)("span", null, `${data.taskId ?? ""} · ${data.status ?? "unknown"}${data.stopConfirmation?.confirmed ? " stopped" : ""} · checks ${data.checksInFlight ?? "none"} · findings ${data.openFindings?.length ?? 0} · questions ${pending.length}`), (0, react.createElement)("button", { onClick: () => {
+			} }, (0, react.createElement)("strong", null, "Orbit"), (0, react.createElement)("span", null, `${data.taskId ?? ""} · ${data.status ?? "unknown"}${data.stopConfirmation?.confirmed ? " stopped" : ""} · checks ${data.checksInFlight ?? "none"} · findings ${data.openFindings?.length ?? 0} · questions ${pending.length}`), (0, react.createElement)("input", {
+				value: instruction,
+				placeholder: "task instruction",
+				onChange: (event) => setInstruction(event.target.value),
+				style: { width: 140 }
+			}), (0, react.createElement)("button", { onClick: () => {
+				if (instruction.trim().length > 0) action(sessionId, {
+					action: "prompt",
+					message: `Call the orbit tool with action=start and instruction=${JSON.stringify(instruction.trim())}. Then reply OK.`
+				});
+			} }, "Start"), (0, react.createElement)("button", { onClick: () => {
+				action(sessionId, {
+					action: "prompt",
+					message: "Call the orbit tool with action=check now. Do not use other tools."
+				});
+			} }, "Check"), (0, react.createElement)("button", { onClick: () => {
+				action(sessionId, {
+					action: "prompt",
+					message: "If the latest independent check says complete, call the orbit tool with action=complete now."
+				});
+			} }, "Complete"), (0, react.createElement)("button", { onClick: () => {
 				action(sessionId, { action: "stop" });
 			} }, "Stop"), pending[0] !== void 0 ? (0, react.createElement)("button", { onClick: () => {
 				action(sessionId, {

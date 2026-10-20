@@ -13,6 +13,8 @@ interface OrbitStatus {
   checksInFlight?: number | null
   openFindings?: string[]
   pendingQuestions?: Array<{ id: string; question: string }>
+  config?: { allowedModels: string[]; checkerProvider: string; checkerModel: string; jev: boolean }
+  recentEvents?: Array<{ seq: number; type: string }>
 }
 
 async function request(sessionId: string, init?: RequestInit): Promise<OrbitStatus | undefined> {
@@ -35,6 +37,7 @@ function action(sessionId: string, body: Record<string, unknown>): Promise<Orbit
 
 function OrbitPanel({ sessionId }: { sessionId: string }): unknown {
   const [data, setData] = useState<OrbitStatus | undefined>(undefined)
+  const [instruction, setInstruction] = useState('')
   useEffect(() => {
     let alive = true
     const load = (): void => { void request(sessionId).then((next) => { if (alive && next !== undefined) setData(next) }) }
@@ -44,13 +47,24 @@ function OrbitPanel({ sessionId }: { sessionId: string }): unknown {
   }, [sessionId])
   if (data === undefined) return createElement('div', { style: { padding: '4px 12px', fontSize: 12, opacity: 0.65 } }, 'Orbit')
   const pending = data.pendingQuestions ?? []
-  return createElement('div', { style: { display: 'flex', gap: 8, alignItems: 'center', padding: '4px 12px', fontSize: 12 } },
+  const config = data.config
+  const events = (data.recentEvents ?? []).map((event) => event.type).join(', ') || 'none'
+  return createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: 2, padding: '4px 12px', fontSize: 12 } },
+    createElement('div', { style: { display: 'flex', gap: 8, alignItems: 'center' } },
     createElement('strong', null, 'Orbit'),
     createElement('span', null, `${data.taskId ?? ''} · ${data.status ?? 'unknown'}${data.stopConfirmation?.confirmed ? ' stopped' : ''} · checks ${data.checksInFlight ?? 'none'} · findings ${data.openFindings?.length ?? 0} · questions ${pending.length}`),
+    createElement('input', { value: instruction, placeholder: 'task instruction', onChange: (event: { target: { value: string } }) => setInstruction(event.target.value), style: { width: 140 } }),
+    createElement('button', { onClick: () => { if (instruction.trim().length > 0) void action(sessionId, { action: 'prompt', message: `Call the orbit tool with action=start and instruction=${JSON.stringify(instruction.trim())}. Then reply OK.` }) } }, 'Start'),
+    createElement('button', { onClick: () => { void action(sessionId, { action: 'prompt', message: 'Call the orbit tool with action=check now. Do not use other tools.' }) } }, 'Check'),
+    createElement('button', { onClick: () => { void action(sessionId, { action: 'prompt', message: 'If the latest independent check says complete, call the orbit tool with action=complete now.' }) } }, 'Complete'),
     createElement('button', { onClick: () => { void action(sessionId, { action: 'stop' }) } }, 'Stop'),
     pending[0] !== undefined ? createElement('button', {
       onClick: () => { void action(sessionId, { action: 'answer', question: pending[0]!.id, selected: [], custom: 'Continue.' }) },
     }, 'Answer') : null,
+    ),
+    createElement('div', { style: { opacity: 0.65 } },
+      config === undefined ? 'config: unavailable' : `models ${config.allowedModels.join(', ') || '(pool)'} · checker ${config.checkerProvider || '(default)'}/${config.checkerModel || '(default)'} · JEV ${config.jev ? 'on' : 'off'}`),
+    createElement('div', { style: { opacity: 0.65 } }, `events: ${events}`),
   )
 }
 
