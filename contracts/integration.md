@@ -99,6 +99,8 @@
   "status": "running",
   "inputVersion": 2,
   "artifactRoot": "/abs/project",
+  "projectRoot": "/abs/project",
+  "rootSessionId": "session-...",
   "externalRefs": ["loom:run-1"],
   "modelAuthorization": { "allowedModels": ["deepseek-account/deepseek-flash"] },
   "checksInFlight": null,

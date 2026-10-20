@@ -214,6 +214,8 @@ function summarize(state: TaskState): Record<string, unknown> {
     status: state.status,
     inputVersion: state.input.versions.length,
     artifactRoot: state.workspace.artifactRoot,
+    projectRoot: state.projectRoot,
+    rootSessionId: state.root.sessionId,
     externalRefs: state.externalRefs ?? [],
     modelAuthorization: state.authorization ?? null,
     checksInFlight: state.checks.inFlight,

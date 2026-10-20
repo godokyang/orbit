@@ -8,6 +8,8 @@ export interface StatusView {
   status: TaskState['status']
   inputVersion: number
   artifactRoot: string
+  projectRoot: string
+  rootSessionId: string
   externalRefs?: string[]
   modelAuthorization?: unknown
   checksInFlight: number | null
@@ -75,6 +77,8 @@ function viewOf(
     status: state.status,
     inputVersion: state.input.versions.length,
     artifactRoot: state.workspace.artifactRoot,
+    projectRoot: state.projectRoot,
+    rootSessionId: state.root.sessionId,
     ...(state.externalRefs === undefined ? {} : { externalRefs: state.externalRefs }),
     modelAuthorization: state.authorization ?? null,
     checksInFlight: state.checks.inFlight,

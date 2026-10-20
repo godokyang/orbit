@@ -76,6 +76,8 @@
     "status": "status_values",
     "inputVersion": "integer",
     "artifactRoot": "absolute path",
+    "projectRoot": "absolute path",
+    "rootSessionId": "string",
     "checksInFlight": "integer|null",
     "stop": "string|omitted",
     "stopConfirmation": "object|omitted",
