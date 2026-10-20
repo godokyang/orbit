@@ -390,3 +390,12 @@ B 阶段开工前只需补一份短设计：JEV 观察输入在 DSH 事件下的
 - 真实隔离验证：`/tmp/orbit-headless`（node profile，web 模板派生）+ 账户凭据，headless 启动成功写 result（taskId/sessionId），任务 running 且 `externalRefs=["loom:headless-1"]`；CLI 经 socket 读到 status、sessions，`orbit prompt` 返回 accepted/messageId。
 - 合同 2.0 增 `headless` 能力与 spec 说明；全套 122 个测试通过。
 - 仍未做：resume_from/resume_wake、latest_check/requirement_coverage 投影、model_authorization 能力、doctor、Loom 代码替换。
+
+## 实施进展（2026-10-20，检查投影、doctor 与续接）
+
+- status 增 `latestCheck`（完整检查记录，去除私有 snapshotDir）、`requirementCoverage`（最近覆盖记录）、`revision`（state.updatedAt）、`attention {phase,needsUser}`、`pendingQuestions`；合同增 `check_coverage`、`model_authorization` 能力与对应字段。
+- CLI 新增 `orbit doctor --json [--home DIR] [--profile P]`：检查 dsh 二进制、profile manifest、`@zeen/orbit` bundle、host dist；失败退出 1。合同增 `doctor` 能力。
+- headless spec 增 `action:'start'|'resume'` 与 `previousTask`；resume 用同一 Root session 经 `ctx.agents.resume` 载入，前序任务须已确认停止；成功后写 `{ok:true,action:'resume',taskId,sessionId}`。
+- 真实隔离验证：先 headless start → `orbit stop` 得到 paused/confirmed → 新进程 headless resume：result ok，同一 sessionId，新任务 running，`continuation.previousTaskId` 指向前序，Root 会话被恢复（无需新会话）。
+- 合同增 `resume_from` 能力（same_root_session，本版无 resume_wake）。
+- 全套 124 个测试通过。

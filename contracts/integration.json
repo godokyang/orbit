@@ -57,6 +57,10 @@
       "stdout_fields": ["ok", "taskId", "status", "fence", "stop", "stopConfirmation"],
       "note": "fence=armed is not confirmation; only stopConfirmation.confirmed=true means stopped."
     },
+    "doctor": {
+      "invocation": "orbit doctor [--json] [--home DIR] [--profile P]",
+      "stdout_fields": ["ok", "contract", "home", "profile", "dsh", "checks"]
+    },
     "export": {
       "invocation": "orbit export [TASK] --output FILE --json [--project DIR]",
       "stdout_fields": ["taskId", "bytes", "output", "files"]
@@ -76,6 +80,11 @@
     "workUnits": "array",
     "checks": "array",
     "externalRefs": "string[]|omitted",
+    "revision": "string",
+    "attention": "object",
+    "pendingQuestions": "string[]",
+    "latestCheck": "object|null",
+    "requirementCoverage": "object|null",
     "modelAuthorization": "object|null|omitted",
     "openFindings": "string[]",
     "openDisputes": "string[]|omitted"
@@ -100,8 +109,11 @@
   "capabilities": {
     "launch": { "since": "2.0.0", "stdin": "keep-open", "process_owner": "caller" },
     "headless": { "since": "2.0.0", "spec_version": 1, "env": ["ORBIT_BOOTSTRAP", "ORBIT_BOOTSTRAP_RESULT"] },
+    "resume_from": { "since": "2.0.0", "action": "headless", "same_root_session": true, "resume_wake": false },
     "status": { "since": "2.0.0" },
     "status_by_external_ref": { "since": "2.0.0", "max_refs": 8, "max_length": 256 },
+    "check_coverage": { "since": "2.0.0" },
+    "model_authorization": { "since": "2.0.0" },
     "events": { "since": "2.0.0", "cursor": "opaque" },
     "sessions": { "since": "2.0.0", "visible_text": true, "user_messages": true, "activities": true, "questions": true, "deliveries": true },
     "questions": { "since": "2.0.0" },
@@ -109,7 +121,8 @@
     "prompt": { "since": "2.0.0" },
     "abort": { "since": "2.0.0", "scope": "session" },
     "stop": { "since": "2.0.0", "receipt": "evidence" },
-    "export": { "since": "2.0.0", "self_contained": true }
+    "export": { "since": "2.0.0", "self_contained": true },
+    "doctor": { "since": "2.0.0" }
   },
   "removed_in_2_0": [
     "provider=omp",

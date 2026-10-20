@@ -376,3 +376,30 @@ describe('orbit-ts prompt and abort', () => {
     expect(sink.out()).toContain('session')
   })
 })
+
+describe('orbit-ts doctor', () => {
+  it('reports a healthy isolated profile and a missing bundle', async () => {
+    const home = await project()
+    const profile = join(home, 'profiles', 'orbit-app')
+    await mkdir(join(profile, 'node_modules', '@zeen', 'orbit', 'dist'), { recursive: true })
+    await writeFile(join(profile, 'package.json'), JSON.stringify({ dsh: { profile: { bundles: ['@zeen/orbit'] } } }))
+    await writeFile(join(profile, 'node_modules', '@zeen', 'orbit', 'dist', 'host.mjs'), '')
+    const bin = join(home, 'dsh')
+    await writeFile(bin, '#!/bin/sh\necho 0.2.1-rc.2\n', { mode: 0o755 })
+    const previous = process.env.DSH_BIN
+    process.env.DSH_BIN = bin
+    try {
+      const sink = capture()
+      expect(await runCli(['doctor', '--json', '--home', home, '--profile', 'orbit-app'], sink.io)).toBe(0)
+      expect(JSON.parse(sink.out())).toMatchObject({ ok: true, profile: 'orbit-app', dsh: { version: '0.2.1-rc.2' } })
+
+      await writeFile(join(profile, 'package.json'), JSON.stringify({ dsh: { profile: { bundles: [] } } }))
+      const bad = capture()
+      expect(await runCli(['doctor', '--json', '--home', home, '--profile', 'orbit-app'], bad.io)).toBe(1)
+      expect(JSON.parse(bad.out())).toMatchObject({ ok: false })
+    } finally {
+      if (previous === undefined) delete process.env.DSH_BIN
+      else process.env.DSH_BIN = previous
+    }
+  })
+})

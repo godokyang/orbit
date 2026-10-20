@@ -18,6 +18,11 @@ export interface StatusView {
   checks: Array<{ number: number; status: string; verdict?: string }>
   openFindings: string[]
   openDisputes?: string[]
+  revision?: string
+  attention?: { phase: string; needsUser: boolean }
+  pendingQuestions?: string[]
+  latestCheck?: unknown
+  requirementCoverage?: unknown
 }
 
 export async function taskDirs(projectRoot: string, limit = 64): Promise<string[]> {
@@ -58,6 +63,11 @@ function viewOf(
   checks: CheckRecord[],
   openFindings: string[],
   openDisputes: string[],
+  revision: string,
+  attention: { phase: string; needsUser: boolean },
+  pendingQuestions: string[],
+  latestCheck: unknown,
+  requirementCoverage: unknown,
 ): StatusView {
   return {
     ok: true,
@@ -79,6 +89,29 @@ function viewOf(
     })),
     openFindings,
     openDisputes,
+    revision,
+    attention,
+    pendingQuestions,
+    latestCheck,
+    requirementCoverage,
+  }
+}
+
+function latestCheckView(check: CheckRecord | undefined): unknown {
+  if (check === undefined) return null
+  return {
+    number: check.number,
+    role: check.role,
+    kind: check.kind,
+    trigger: check.trigger,
+    status: check.status,
+    inputVersion: check.inputVersion,
+    artifactDigest: check.artifactDigest,
+    requestedAt: check.requestedAt,
+    ...(check.finishedAt === undefined ? {} : { finishedAt: check.finishedAt }),
+    ...(check.result === undefined ? {} : { result: check.result }),
+    ...(check.failure === undefined ? {} : { failure: check.failure }),
+    ...(check.stale === undefined ? {} : { stale: check.stale }),
   }
 }
 
@@ -91,6 +124,16 @@ export async function statusOf(service: TaskService): Promise<StatusView> {
     status.checks,
     status.openFindings.map((finding) => finding.id),
     status.openDisputes.map((dispute) => dispute.id),
+    status.state.updatedAt,
+    {
+      phase: status.state.status === 'running'
+        ? (status.state.checks.inFlight === null ? 'working' : 'checking')
+        : status.state.status,
+      needsUser: status.state.status === 'needs_user' || status.questions.some((question) => question.status === 'pending'),
+    },
+    status.questions.filter((question) => question.status === 'pending').map((question) => question.id),
+    latestCheckView(status.checks.at(-1)),
+    status.coverage.records.at(-1) ?? null,
   )
 }
 

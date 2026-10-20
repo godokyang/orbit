@@ -6,6 +6,7 @@ import { localEvents, localQuestions, localStatus, localStatusByRef, type Status
 import { exportTask } from './export.js'
 import { localSessions } from './sessions.js'
 import { CAPABILITIES, INTEGRATION_CONTRACT, buildLaunchSpec } from './capabilities.js'
+import { doctor } from './doctor.js'
 
 export interface CliIo {
   out: (text: string) => void
@@ -23,6 +24,7 @@ Usage:
   orbit answer [TASK] --question ID --selected A,B [--custom TEXT] [--json] [--project DIR]
   orbit prompt [TASK] --message TEXT [--json] [--project DIR]
   orbit abort [TASK] [--json] [--project DIR]
+  orbit doctor [--json] [--home DIR] [--profile P]
   orbit export [TASK] --output FILE [--json] [--project DIR]
   orbit capabilities [--json]
   orbit launch [--json] [--profile P] [--home DIR] [--project DIR] [--bootstrap FILE] [--result FILE]
@@ -32,7 +34,7 @@ back to the durable task record when no host is running. stop requires the
 live host. export snapshots the task record into a self-contained JSON file.`
 
 interface Parsed {
-  command: 'status' | 'events' | 'stop' | 'export' | 'sessions' | 'capabilities' | 'launch' | 'questions' | 'answer' | 'prompt' | 'abort'
+  command: 'status' | 'events' | 'stop' | 'export' | 'sessions' | 'capabilities' | 'launch' | 'questions' | 'answer' | 'prompt' | 'abort' | 'doctor'
   question?: string
   selected?: string[]
   custom?: string
@@ -55,7 +57,7 @@ function parse(argv: string[]): Parsed | 'help' {
   if (argv.length === 0) throw new UsageError('missing command')
   const command = argv[0]
   if (command === '--help' || command === '-h' || command === 'help') return 'help'
-  const commands = ['status', 'events', 'stop', 'export', 'sessions', 'capabilities', 'launch', 'questions', 'answer', 'prompt', 'abort'] as const
+  const commands = ['status', 'events', 'stop', 'export', 'sessions', 'capabilities', 'launch', 'questions', 'answer', 'prompt', 'abort', 'doctor'] as const
   if (command === undefined || !(commands as readonly string[]).includes(command)) {
     throw new UsageError(`unknown command: ${String(command)}`)
   }
@@ -284,6 +286,12 @@ export async function runCli(argv: string[], io: Partial<CliIo> = {}): Promise<n
       const result = response.result as { question: { id: string; status: string } }
       out(parsed.json ? JSON.stringify(result, null, 2) : `answered ${result.question.id} (${result.question.status})`)
       return 0
+    }
+
+    if (parsed.command === 'doctor') {
+      const report = doctor(parsed.home ?? process.env.DSH_HOME ?? join(process.env.HOME ?? '', '.dsh'), parsed.profile ?? 'orbit-app')
+      out(parsed.json ? JSON.stringify(report, null, 2) : `${report.ok ? 'ok' : 'problems'}  ${report.profile}  ${report.checks.map((check) => `${check.name}:${check.ok ? 'ok' : 'FAIL'}`).join(' ')}`)
+      return report.ok ? 0 : 1
     }
 
     if (parsed.command === 'launch') {

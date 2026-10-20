@@ -23,8 +23,11 @@
   "capabilities": {
     "launch": { "since": "2.0.0", "stdin": "keep-open", "process_owner": "caller" },
     "headless": { "since": "2.0.0", "spec_version": 1, "env": ["ORBIT_BOOTSTRAP", "ORBIT_BOOTSTRAP_RESULT"] },
+    "resume_from": { "since": "2.0.0", "action": "headless", "same_root_session": true, "resume_wake": false },
     "status": { "since": "2.0.0" },
     "status_by_external_ref": { "since": "2.0.0", "max_refs": 8, "max_length": 256 },
+    "check_coverage": { "since": "2.0.0" },
+    "model_authorization": { "since": "2.0.0" },
     "events": { "since": "2.0.0", "cursor": "opaque" },
     "sessions": { "since": "2.0.0", "visible_text": true, "user_messages": true, "activities": true, "questions": true, "deliveries": true },
     "questions": { "since": "2.0.0" },
@@ -32,7 +35,8 @@
     "prompt": { "since": "2.0.0" },
     "abort": { "since": "2.0.0", "scope": "session" },
     "stop": { "since": "2.0.0", "receipt": "evidence" },
-    "export": { "since": "2.0.0", "self_contained": true }
+    "export": { "since": "2.0.0", "self_contained": true },
+    "doctor": { "since": "2.0.0" }
   }
 }
 ```
@@ -57,6 +61,7 @@
 | `orbit abort [TASK] --json` | 中止绑定会话；不等于任务停止 |
 | `orbit stop [TASK] --json [--project DIR]` | 请求停止；返回不表示已确认 |
 | `orbit export [TASK] --output FILE --json [--project DIR]` | 自包含证据包 |
+| `orbit doctor --json [--home DIR] [--profile P]` | 安装检查：profile、bundle、host dist、dsh 版本 |
 
 `--project` 省略时从当前目录定位项目。`TASK` 省略时取最新任务；有多个历史任务时优先 running。
 
@@ -80,7 +85,7 @@
 - `env` 只列必须覆盖的变量；调用方合并自己的环境。
 - `--bootstrap FILE` 时 spec 额外带 `bootstrap {path,result,sha256}`，env 带 `ORBIT_BOOTSTRAP`/`ORBIT_BOOTSTRAP_RESULT`；宿主读取冻结 spec 后自行创建 Root、start 任务并发送首条指令，成功后写 result `{ok:true,taskId,sessionId,project}`，失败写 `{ok:false,error}`。
 - 非 headless 调用方拉起进程后调用 `orbit start`，再轮询 `control_socket` 出现；socket 由任务接纳后创建。
-- headless spec v1：`{version:1,instruction,project,externalRefs?,allowedModels?,model:{provider,model}}`。
+- headless spec v1：`{version:1,action:'start'|'resume',previousTask?,instruction,project,externalRefs?,allowedModels?,model:{provider,model}}`。`resume` 从 `previousTask` 载入同一 Root 会话，要求前序任务已确认停止；本版不提供 `resume_wake`。
 
 ## 5. `status`
 
@@ -104,6 +109,11 @@
     "missing": []
   },
   "completionInvalidation": null,
+  "revision": "2026-10-20T...",
+  "attention": { "phase": "working", "needsUser": false },
+  "pendingQuestions": [],
+  "latestCheck": { "number": 1, "kind": "artifact", "status": "completed", "result": { "verdict": "continue" } },
+  "requirementCoverage": { "checkNumber": 1, "coverage": { "complete": true, "items": [] } },
   "members": [{ "id": "...", "status": "registered", "workUnitId": "wu-..." }],
   "workUnits": [{ "id": "wu-...", "status": "declared", "goal": "..." }],
   "checks": [{ "number": 1, "status": "completed", "verdict": "continue" }],

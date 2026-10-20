@@ -167,6 +167,25 @@ async function findTaskForSession(projectRoot: string, limit: number, sessionId:
   return fallback
 }
 
+function latestCheckView(check: import('@orbit/core').CheckRecord | undefined): Record<string, unknown> | null {
+  if (check === undefined) return null
+  return {
+    number: check.number,
+    role: check.role,
+    kind: check.kind,
+    trigger: check.trigger,
+    status: check.status,
+    inputVersion: check.inputVersion,
+    artifactDigest: check.artifactDigest,
+    requestedAt: check.requestedAt,
+    ...(check.startedAt === undefined ? {} : { startedAt: check.startedAt }),
+    ...(check.finishedAt === undefined ? {} : { finishedAt: check.finishedAt }),
+    ...(check.result === undefined ? {} : { result: check.result }),
+    ...(check.failure === undefined ? {} : { failure: check.failure }),
+    ...(check.stale === undefined ? {} : { stale: check.stale }),
+  }
+}
+
 async function projectStatus(service: TaskService): Promise<Record<string, unknown>> {
   const status = await service.status()
   return {
@@ -176,6 +195,16 @@ async function projectStatus(service: TaskService): Promise<Record<string, unkno
     checks: status.checks.map((check) => ({ number: check.number, status: check.status, verdict: check.result?.verdict })),
     openFindings: status.openFindings.map((finding) => finding.id),
     openDisputes: status.openDisputes.map((dispute) => dispute.id),
+    revision: status.state.updatedAt,
+    attention: {
+      phase: status.state.status === 'running'
+        ? (status.state.checks.inFlight === null ? 'working' : 'checking')
+        : status.state.status,
+      needsUser: status.state.status === 'needs_user' || status.questions.some((question) => question.status === 'pending'),
+    },
+    pendingQuestions: status.questions.filter((question) => question.status === 'pending').map((question) => question.id),
+    latestCheck: latestCheckView(status.checks.at(-1)),
+    requirementCoverage: status.coverage.records.at(-1) ?? null,
   }
 }
 
@@ -301,6 +330,7 @@ export default class OrbitHost extends Service {
   private readonly allowedModels: Set<string>
   private readonly instanceId = randomUUID()
   private readonly activeCheckers = new Map<number, import('@deepseek-ai/dsh-subagent').SubagentActivation>()
+  private readonly resumingSessions = new Set<string>()
   private readonly pendingQuestions = new Map<
     string,
     { resolve: (answer: { selected: string[]; custom?: string }) => void; reject: (error: Error) => void }
@@ -924,7 +954,12 @@ export default class OrbitHost extends Service {
     })
 
     ctx.on('agent/created', async ({ agent }) => {
-      if (host.fencedSessions.has(agent.id)) throw new Error('orbit: session belongs to a stopped task')
+      if (host.resumingSessions.delete(agent.id)) {
+        host.fencedSessions.delete(agent.id)
+        saveFenceRegistry(host.fencedSessions)
+      } else if (host.fencedSessions.has(agent.id)) {
+        throw new Error('orbit: session belongs to a stopped task')
+      }
       const session = ctx.sessions.get(agent.id)
       const parent = session?.header.parentSession
       if (parent === undefined) return
@@ -1160,18 +1195,32 @@ export default class OrbitHost extends Service {
     try {
       if (specPath === undefined) throw new Error('ORBIT_BOOTSTRAP is unset')
       const spec = readHeadlessSpec(specPath)
-      const agent = await this.createHeadlessRoot(ctx, spec)
+      let sessionId: string | undefined
+      if (spec.action === 'resume') {
+        const previous = await TaskService.open(join(TaskStore.tasksRoot(spec.project), spec.previousTask as string))
+        sessionId = (await previous.state()).root.sessionId
+      }
+      if (sessionId !== undefined) this.resumingSessions.add(sessionId)
+      const agent = await this.createHeadlessRoot(ctx, spec, sessionId)
       const workspace = workspaceInfo(spec.project)
-      const { service, state } = await TaskService.start({
+      const options = {
         projectRoot: spec.project,
         rootSessionId: agent.id,
         instruction: spec.instruction,
-        source: { kind: 'explicit-text', verbatim: true, at: new Date().toISOString() },
         workspace,
         runtime: this.runtimeInfo(),
         ...(spec.externalRefs.length === 0 ? {} : { externalRefs: spec.externalRefs }),
         ...(spec.allowedModels.length === 0 ? {} : { allowedModels: spec.allowedModels }),
-      })
+      }
+      const { service, state } = spec.action === 'resume'
+        ? await TaskService.resumeFrom(join(TaskStore.tasksRoot(spec.project), spec.previousTask as string), {
+            ...options,
+            source: { kind: 'continuation', verbatim: true, at: new Date().toISOString() },
+          })
+        : await TaskService.start({
+            ...options,
+            source: { kind: 'explicit-text', verbatim: true, at: new Date().toISOString() },
+          })
       await this.adopt(service, agent as never, spec.project)
       agent.followup({
         id: randomUUID() as never,
@@ -1179,7 +1228,7 @@ export default class OrbitHost extends Service {
         content: [{ type: 'text', text: spec.instruction }],
         source: { kind: 'user' },
       } as never)
-      report({ ok: true, taskId: state.id, sessionId: agent.id, project: spec.project })
+      report({ ok: true, action: spec.action, taskId: state.id, sessionId: agent.id, project: spec.project })
     } catch (error) {
       const message = (error as Error).message
       console.error(`orbit: headless bootstrap failed: ${message}`)
@@ -1187,7 +1236,7 @@ export default class OrbitHost extends Service {
     }
   }
 
-  private async createHeadlessRoot(ctx: Context, spec: HeadlessSpec): Promise<any> {
+  private async createHeadlessRoot(ctx: Context, spec: HeadlessSpec, sessionId?: string): Promise<any> {
     const c = ctx as any
     let preset: { id: string } | undefined
     for (let attempt = 0; attempt < 120 && preset === undefined; attempt += 1) {
@@ -1201,14 +1250,19 @@ export default class OrbitHost extends Service {
     await c.agentPresets.acquireScope(preset.id)
     for (let attempt = 0; attempt < 120; attempt += 1) {
       try {
-        const handle = await c.agents.create({
-          sessionId: randomUUID() as never,
+        const options = {
           agentOptions: { provider: spec.model.provider, model: spec.model.model } as never,
-          meta: { cwd: spec.project, agentPreset: preset.id },
           setup: async (agentCtx: unknown) => {
             await c.agentPresets.mount(agentCtx, preset?.id as string)
           },
-        } as never)
+        }
+        const handle = sessionId === undefined
+          ? await c.agents.create({
+              sessionId: randomUUID() as never,
+              ...options,
+              meta: { cwd: spec.project, agentPreset: preset.id },
+            } as never)
+          : await c.agents.resume({ resumeSessionId: sessionId as never, ...options } as never)
         return handle.agent
       } catch (error) {
         if (!String((error as Error).message).includes('no agent factory')) throw error
