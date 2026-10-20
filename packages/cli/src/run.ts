@@ -21,16 +21,18 @@ Usage:
   orbit sessions [TASK] [--json] [--project DIR]
   orbit questions [TASK] [--json] [--project DIR]
   orbit answer [TASK] --question ID --selected A,B [--custom TEXT] [--json] [--project DIR]
+  orbit prompt [TASK] --message TEXT [--json] [--project DIR]
+  orbit abort [TASK] [--json] [--project DIR]
   orbit export [TASK] --output FILE [--json] [--project DIR]
   orbit capabilities [--json]
-  orbit launch [--json] [--profile P] [--home DIR] [--project DIR]
+  orbit launch [--json] [--profile P] [--home DIR] [--project DIR] [--bootstrap FILE] [--result FILE]
 
 status/events read the live host through the project control socket and fall
 back to the durable task record when no host is running. stop requires the
 live host. export snapshots the task record into a self-contained JSON file.`
 
 interface Parsed {
-  command: 'status' | 'events' | 'stop' | 'export' | 'sessions' | 'capabilities' | 'launch' | 'questions' | 'answer'
+  command: 'status' | 'events' | 'stop' | 'export' | 'sessions' | 'capabilities' | 'launch' | 'questions' | 'answer' | 'prompt' | 'abort'
   question?: string
   selected?: string[]
   custom?: string
@@ -38,6 +40,9 @@ interface Parsed {
   home?: string
   after?: string
   externalRef?: string
+  bootstrap?: string
+  resultFile?: string
+  message?: string
   task?: string
   project: string
   json: boolean
@@ -50,7 +55,7 @@ function parse(argv: string[]): Parsed | 'help' {
   if (argv.length === 0) throw new UsageError('missing command')
   const command = argv[0]
   if (command === '--help' || command === '-h' || command === 'help') return 'help'
-  const commands = ['status', 'events', 'stop', 'export', 'sessions', 'capabilities', 'launch', 'questions', 'answer'] as const
+  const commands = ['status', 'events', 'stop', 'export', 'sessions', 'capabilities', 'launch', 'questions', 'answer', 'prompt', 'abort'] as const
   if (command === undefined || !(commands as readonly string[]).includes(command)) {
     throw new UsageError(`unknown command: ${String(command)}`)
   }
@@ -65,6 +70,9 @@ function parse(argv: string[]): Parsed | 'help' {
   let custom: string | undefined
   let after: string | undefined
   let externalRef: string | undefined
+  let bootstrap: string | undefined
+  let resultFile: string | undefined
+  let message: string | undefined
   for (let index = 1; index < argv.length; index += 1) {
     const arg = argv[index]
     if (arg === '--json') {
@@ -74,6 +82,12 @@ function parse(argv: string[]): Parsed | 'help' {
       if (value === undefined) throw new UsageError('--project requires a directory')
       project = resolve(value)
       index += 1
+    } else if (arg === '--message') {
+      message = argv[++index]
+    } else if (arg === '--bootstrap') {
+      bootstrap = argv[++index]
+    } else if (arg === '--result') {
+      resultFile = argv[++index]
     } else if (arg === '--external-ref') {
       externalRef = argv[++index]
     } else if (arg === '--after') {
@@ -119,6 +133,9 @@ function parse(argv: string[]): Parsed | 'help' {
     ...(custom === undefined ? {} : { custom }),
     ...(after === undefined ? {} : { after }),
     ...(externalRef === undefined ? {} : { externalRef }),
+    ...(bootstrap === undefined ? {} : { bootstrap }),
+    ...(resultFile === undefined ? {} : { resultFile }),
+    ...(message === undefined ? {} : { message }),
   }
 }
 
@@ -207,6 +224,34 @@ export async function runCli(argv: string[], io: Partial<CliIo> = {}): Promise<n
       return 0
     }
 
+    if (parsed.command === 'prompt') {
+      if (parsed.message === undefined) throw new UsageError('prompt requires --message TEXT')
+      const response = await control(parsed.project, {
+        id: randomUUID(),
+        method: 'prompt',
+        message: parsed.message,
+        ...(parsed.task === undefined ? {} : { task: parsed.task }),
+      })
+      if (response === undefined) throw new Error(`no live Orbit host for ${parsed.project} (control socket missing)`)
+      if (!response.ok) throw new Error(response.error.message)
+      const result = response.result as { taskId: string; messageId: string }
+      out(parsed.json ? JSON.stringify(result, null, 2) : `prompt accepted for ${result.taskId} (${result.messageId})`)
+      return 0
+    }
+
+    if (parsed.command === 'abort') {
+      const response = await control(parsed.project, {
+        id: randomUUID(),
+        method: 'abort',
+        ...(parsed.task === undefined ? {} : { task: parsed.task }),
+      })
+      if (response === undefined) throw new Error(`no live Orbit host for ${parsed.project} (control socket missing)`)
+      if (!response.ok) throw new Error(response.error.message)
+      const result = response.result as { taskId: string; scope: string }
+      out(parsed.json ? JSON.stringify(result, null, 2) : `aborted session for ${result.taskId} (${result.scope})`)
+      return 0
+    }
+
     if (parsed.command === 'questions') {
       const response = await control(parsed.project, {
         id: randomUUID(),
@@ -246,6 +291,8 @@ export async function runCli(argv: string[], io: Partial<CliIo> = {}): Promise<n
         projectRoot: parsed.project,
         ...(parsed.profile === undefined ? {} : { profile: parsed.profile }),
         ...(parsed.home === undefined ? {} : { home: parsed.home }),
+        ...(parsed.bootstrap === undefined ? {} : { bootstrap: parsed.bootstrap }),
+        ...(parsed.resultFile === undefined ? {} : { result: parsed.resultFile }),
       })
       out(parsed.json ? JSON.stringify(spec, null, 2) : `${spec.profile}  cwd ${spec.cwd}  socket ${spec.control_socket}`)
       return 0

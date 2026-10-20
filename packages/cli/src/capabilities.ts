@@ -1,15 +1,20 @@
-import { join } from 'node:path'
+import { createHash } from 'node:crypto'
+import { readFileSync } from 'node:fs'
+import { isAbsolute, join, resolve } from 'node:path'
 
 export const INTEGRATION_CONTRACT = { name: 'orbit-integration', version: '2.0.0', major: 2 } as const
 
 export const CAPABILITIES = {
   launch: { since: '2.0.0', stdin: 'keep-open', process_owner: 'caller' },
+  headless: { since: '2.0.0', spec_version: 1, env: ['ORBIT_BOOTSTRAP', 'ORBIT_BOOTSTRAP_RESULT'] },
   status: { since: '2.0.0' },
   status_by_external_ref: { since: '2.0.0', max_refs: 8, max_length: 256 },
   events: { since: '2.0.0', cursor: 'opaque' },
   sessions: { since: '2.0.0', visible_text: true, user_messages: true, activities: true, questions: true, deliveries: true },
   questions: { since: '2.0.0' },
   answer: { since: '2.0.0' },
+  prompt: { since: '2.0.0' },
+  abort: { since: '2.0.0', scope: 'session' },
   stop: { since: '2.0.0', receipt: 'evidence' },
   export: { since: '2.0.0', self_contained: true },
 
@@ -25,6 +30,7 @@ export interface LaunchSpec {
   stdin: 'keep-open'
   control_socket: string
   ready: { kind: 'socket'; timeout_ms: number }
+  bootstrap?: { path: string; result: string; sha256: string }
 }
 
 export function buildLaunchSpec(input: {
@@ -32,10 +38,12 @@ export function buildLaunchSpec(input: {
   profile?: string
   home?: string
   dshBin?: string
+  bootstrap?: string
+  result?: string
 }): LaunchSpec {
   const profile = input.profile ?? 'orbit-node'
   const home = input.home ?? process.env.DSH_HOME ?? join(process.env.HOME ?? '', '.dsh')
-  return {
+  const spec: LaunchSpec = {
     kind: 'dsh',
     contract: INTEGRATION_CONTRACT.version,
     profile,
@@ -46,4 +54,14 @@ export function buildLaunchSpec(input: {
     control_socket: join(input.projectRoot, '.orbit', 'orbit.sock'),
     ready: { kind: 'socket', timeout_ms: 30_000 },
   }
+  if (input.bootstrap !== undefined) {
+    const path = resolve(input.bootstrap)
+    if (!isAbsolute(path)) throw new Error('bootstrap path must be absolute')
+    const result = resolve(input.result ?? `${path}.result.json`)
+    const sha256 = createHash('sha256').update(readFileSync(path)).digest('hex')
+    spec.bootstrap = { path, result, sha256 }
+    spec.env.ORBIT_BOOTSTRAP = path
+    spec.env.ORBIT_BOOTSTRAP_RESULT = result
+  }
+  return spec
 }

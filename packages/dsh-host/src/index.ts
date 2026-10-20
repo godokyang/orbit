@@ -38,6 +38,7 @@ import {
   type TaskState,
 } from '@orbit/core'
 import { ControlServer } from './control.js'
+import { readHeadlessSpec, type HeadlessSpec } from './headless.js'
 import { buildCheckerPrompt, buildProcessCheckerPrompt, runChecker } from './checker.js'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import { observationWindow, orbitObservationDefinition } from './observation.js'
@@ -268,7 +269,7 @@ async function bounded(promise: Promise<unknown>, ms: number): Promise<boolean> 
  * agents are fenced, and stop teardown records the evidence it actually saw.
  */
 export default class OrbitHost extends Service {
-  static inject = ['tools', 'sessions', 'agents', 'systemPrompt', 'subagents', 'sessionProjections', 'credentials', 'jobs', 'sessionQuery']
+  static inject = ['tools', 'sessions', 'agents', 'agentPresets', 'systemPrompt', 'subagents', 'sessionProjections', 'credentials', 'jobs', 'sessionQuery']
 
   static Config: z<Config> = z.object({
     maxTasks: z.number().step(1).min(1).default(64),
@@ -339,6 +340,10 @@ export default class OrbitHost extends Service {
         ? { provider: config.checkerProvider, model: config.checkerModel }
         : undefined
     this.jevEndpoint = config.jevEndpoint === undefined || config.jevEndpoint.length === 0 ? undefined : config.jevEndpoint
+    if (process.env.ORBIT_BOOTSTRAP !== undefined) {
+      void this.bootstrapHeadless(ctx)
+    }
+
     this.jevModel = config.jevModel === undefined || config.jevModel.length === 0 ? undefined : config.jevModel
     this.jevThreshold = config.jevThreshold ?? JEV_OBSERVATION_THRESHOLD
     this.jevIntervalMs = config.jevIntervalMs ?? 300_000
@@ -835,6 +840,7 @@ export default class OrbitHost extends Service {
           },
           multiSelect: { type: 'boolean', description: 'Whether several options may be selected.' },
         },
+        output: TEXT_OUTPUT,
         async execute(args: {
           question: string
           id?: string
@@ -1067,6 +1073,29 @@ export default class OrbitHost extends Service {
       const service = await this.open(projectRoot, this.maxTasks, request.task)
       return { ok: true, taskId: (await service.state()).id, events: await service.store.events() }
     }
+    if (request.method === 'prompt') {
+      if (request.message === undefined || request.message.length === 0) throw new Error('prompt requires message')
+      const service = await this.open(projectRoot, this.maxTasks, request.task)
+      const state = await service.state()
+      const agent = this.ctx.agents.get(state.root.sessionId as never)
+      if (agent === undefined) throw new Error('root session is not live in this host')
+      const messageId = randomUUID()
+      agent.followup({
+        id: messageId as never,
+        role: 'user',
+        content: [{ type: 'text', text: request.message }],
+        source: { kind: 'user' },
+      } as never)
+      return { ok: true, accepted: true, taskId: state.id, messageId }
+    }
+    if (request.method === 'abort') {
+      const service = await this.open(projectRoot, this.maxTasks, request.task)
+      const state = await service.state()
+      const agent = this.ctx.agents.get(state.root.sessionId as never)
+      if (agent === undefined) throw new Error('root session is not live in this host')
+      agent.cancel({ kind: 'user' })
+      return { ok: true, taskId: state.id, scope: 'session', aborted: true }
+    }
     if (request.method === 'questions') {
       const service = await this.open(projectRoot, this.maxTasks, request.task)
       const file = await service.store.questions()
@@ -1114,6 +1143,79 @@ export default class OrbitHost extends Service {
     saveFenceRegistry(this.fencedSessions)
     setTimeout(() => { void this.performStop(service) }, delayMs)
     return state
+  }
+
+  /** Unattended Loom node: create the Root from a frozen spec, start, adopt, prompt. */
+  private async bootstrapHeadless(ctx: Context): Promise<void> {
+    const specPath = process.env.ORBIT_BOOTSTRAP
+    const resultPath = process.env.ORBIT_BOOTSTRAP_RESULT
+    const report = (value: Record<string, unknown>): void => {
+      if (resultPath === undefined) return
+      try {
+        writeFileSync(resultPath, JSON.stringify(value), { mode: 0o600 })
+      } catch (error) {
+        console.error(`orbit: cannot write bootstrap result: ${(error as Error).message}`)
+      }
+    }
+    try {
+      if (specPath === undefined) throw new Error('ORBIT_BOOTSTRAP is unset')
+      const spec = readHeadlessSpec(specPath)
+      const agent = await this.createHeadlessRoot(ctx, spec)
+      const workspace = workspaceInfo(spec.project)
+      const { service, state } = await TaskService.start({
+        projectRoot: spec.project,
+        rootSessionId: agent.id,
+        instruction: spec.instruction,
+        source: { kind: 'explicit-text', verbatim: true, at: new Date().toISOString() },
+        workspace,
+        runtime: this.runtimeInfo(),
+        ...(spec.externalRefs.length === 0 ? {} : { externalRefs: spec.externalRefs }),
+        ...(spec.allowedModels.length === 0 ? {} : { allowedModels: spec.allowedModels }),
+      })
+      await this.adopt(service, agent as never, spec.project)
+      agent.followup({
+        id: randomUUID() as never,
+        role: 'user',
+        content: [{ type: 'text', text: spec.instruction }],
+        source: { kind: 'user' },
+      } as never)
+      report({ ok: true, taskId: state.id, sessionId: agent.id, project: spec.project })
+    } catch (error) {
+      const message = (error as Error).message
+      console.error(`orbit: headless bootstrap failed: ${message}`)
+      report({ ok: false, error: message })
+    }
+  }
+
+  private async createHeadlessRoot(ctx: Context, spec: HeadlessSpec): Promise<any> {
+    const c = ctx as any
+    let preset: { id: string } | undefined
+    for (let attempt = 0; attempt < 120 && preset === undefined; attempt += 1) {
+      try {
+        preset = await c.agentPresets.resolve('standard')
+      } catch {
+        await new Promise((resolve) => setTimeout(resolve, 500))
+      }
+    }
+    if (preset === undefined) throw new Error('no agent preset is registered')
+    await c.agentPresets.acquireScope(preset.id)
+    for (let attempt = 0; attempt < 120; attempt += 1) {
+      try {
+        const handle = await c.agents.create({
+          sessionId: randomUUID() as never,
+          agentOptions: { provider: spec.model.provider, model: spec.model.model } as never,
+          meta: { cwd: spec.project, agentPreset: preset.id },
+          setup: async (agentCtx: unknown) => {
+            await c.agentPresets.mount(agentCtx, preset?.id as string)
+          },
+        } as never)
+        return handle.agent
+      } catch (error) {
+        if (!String((error as Error).message).includes('no agent factory')) throw error
+        await new Promise((resolve) => setTimeout(resolve, 500))
+      }
+    }
+    throw new Error('no agent factory registered')
   }
 
   private runtimeInfo(): { pid: number; instanceId: string; startedAt: string } {

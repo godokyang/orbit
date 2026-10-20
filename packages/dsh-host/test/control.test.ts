@@ -48,6 +48,29 @@ describe('control server', () => {
     }
   })
 
+  it('forwards prompt and answer payload fields', async () => {
+    const path = await socketPath()
+    const server = new ControlServer(path, async (request) => ({
+      message: request.message ?? null,
+      question: request.question ?? null,
+      selected: request.selected ?? null,
+      custom: request.custom ?? null,
+    }))
+    await server.start()
+    try {
+      const line = await exchange(
+        path,
+        JSON.stringify({ id: 'r2', method: 'prompt', message: 'go', question: 'q1', selected: ['a'], custom: 'x' }),
+      )
+      expect(JSON.parse(line)).toMatchObject({
+        ok: true,
+        result: { message: 'go', question: 'q1', selected: ['a'], custom: 'x' },
+      })
+    } finally {
+      await server.close()
+    }
+  })
+
   it('returns a structured error for a malformed request', async () => {
     const path = await socketPath()
     const server = new ControlServer(path, async () => ({}))

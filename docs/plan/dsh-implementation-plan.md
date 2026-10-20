@@ -380,3 +380,13 @@ B 阶段开工前只需补一份短设计：JEV 观察输入在 DSH 事件下的
 - Orbit 侧先补外部引用：TaskState 持久化 `externalRefs`（最多 8 条、每条 ≤256、精确、去重、无控制字符）；宿主 start 接受并投影；CLI 新增 `status --external-ref REF --json`，成功恒返回 `{tasks:[...]}`，无匹配空数组；合同 2.0 增 `status_by_external_ref` 能力。
 - 验证：Core 与 CLI 外部引用单测；全套 118 个测试通过。
 - 仍未做：headless bootstrap/start、resume/prompt/abort、coverage/model authorization/doctor、Loom 代码替换。
+
+## 实施进展（2026-10-20，无头 Root 启动与 prompt/abort）
+
+- 新增 headless bootstrap：`orbit launch --bootstrap FILE --result FILE` 返回带 `ORBIT_BOOTSTRAP`/`ORBIT_BOOTSTRAP_RESULT` 的 dsh 规格；宿主读取冻结 spec v1（instruction/project/externalRefs/allowedModels/model），自行创建 Root、start 任务、adopt 并发送首条指令，成功/失败写 result。
+- 新增 `orbit prompt --message` 与 `orbit abort` 控制面：prompt 注入原生用户消息并返回 messageId；abort 只中止绑定会话（scope=session），不等于任务停止。
+- 修正 control server 丢弃 `message/question/selected/custom` 的缺陷（此前 prompt/answer 的实际载荷到不了宿主）。
+- 节点 profile 派生：`derive-profile` 支持 node overlay 与 T0 role=node；node overlay 禁用 web Cordis runner，T0 191 行、workspace-write 通过。
+- 真实隔离验证：`/tmp/orbit-headless`（node profile，web 模板派生）+ 账户凭据，headless 启动成功写 result（taskId/sessionId），任务 running 且 `externalRefs=["loom:headless-1"]`；CLI 经 socket 读到 status、sessions，`orbit prompt` 返回 accepted/messageId。
+- 合同 2.0 增 `headless` 能力与 spec 说明；全套 122 个测试通过。
+- 仍未做：resume_from/resume_wake、latest_check/requirement_coverage 投影、model_authorization 能力、doctor、Loom 代码替换。

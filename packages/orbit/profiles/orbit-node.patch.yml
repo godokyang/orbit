@@ -1,5 +1,16 @@
 # Orbit Loom-node profile overlay. The node owns the process; this profile only
-# pins the workspace write sandbox used by delegated work.
+# pins the workspace write sandbox used by delegated work and removes the web
+# Cordis runners that must not exist in an unattended profile.
 - id: sandbox-policy
   config:
     mode: workspace-write
+- id: cordis-host-runner
+  disabled: true
+- id: cordis-client-runner
+  disabled: true
+- id: cordis-inspect-providers
+  disabled: true
+- id: ui-cordis
+  disabled: true
+- id: preset-cordis
+  disabled: true

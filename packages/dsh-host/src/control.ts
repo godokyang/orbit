@@ -101,6 +101,12 @@ export class ControlServer {
         id,
         method: request.method as ControlRequest['method'],
         ...(typeof request.task === 'string' ? { task: request.task } : {}),
+        ...(typeof request.question === 'string' ? { question: request.question } : {}),
+        ...(Array.isArray(request.selected) && request.selected.every((item) => typeof item === 'string')
+          ? { selected: request.selected }
+          : {}),
+        ...(typeof request.custom === 'string' ? { custom: request.custom } : {}),
+        ...(typeof request.message === 'string' ? { message: request.message } : {}),
       })
       response = { id, ok: true, result }
     } catch (error) {

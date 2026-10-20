@@ -22,12 +22,15 @@
   "orbit": { "version": "<软件版本，仅供显示>" },
   "capabilities": {
     "launch": { "since": "2.0.0", "stdin": "keep-open", "process_owner": "caller" },
+    "headless": { "since": "2.0.0", "spec_version": 1, "env": ["ORBIT_BOOTSTRAP", "ORBIT_BOOTSTRAP_RESULT"] },
     "status": { "since": "2.0.0" },
     "status_by_external_ref": { "since": "2.0.0", "max_refs": 8, "max_length": 256 },
     "events": { "since": "2.0.0", "cursor": "opaque" },
     "sessions": { "since": "2.0.0", "visible_text": true, "user_messages": true, "activities": true, "questions": true, "deliveries": true },
     "questions": { "since": "2.0.0" },
     "answer": { "since": "2.0.0" },
+    "prompt": { "since": "2.0.0" },
+    "abort": { "since": "2.0.0", "scope": "session" },
     "stop": { "since": "2.0.0", "receipt": "evidence" },
     "export": { "since": "2.0.0", "self_contained": true }
   }
@@ -50,6 +53,8 @@
 | `orbit sessions [TASK] --json [--project DIR]` | Root/成员会话投影；只读 |
 | `orbit questions [TASK] --json [--project DIR]` | 问题记录；只读 |
 | `orbit answer [TASK] --question ID --selected A,B [--custom TEXT] --json` | 答复待答问题；需要活宿主 |
+| `orbit prompt [TASK] --message TEXT --json` | 向绑定 Root 注入原生用户消息；需要活宿主 |
+| `orbit abort [TASK] --json` | 中止绑定会话；不等于任务停止 |
 | `orbit stop [TASK] --json [--project DIR]` | 请求停止；返回不表示已确认 |
 | `orbit export [TASK] --output FILE --json [--project DIR]` | 自包含证据包 |
 
@@ -73,7 +78,9 @@
 
 - 进程所有权属于调用方（Loom）；Orbit 不启动、不托管进程。
 - `env` 只列必须覆盖的变量；调用方合并自己的环境。
-- 调用方拉起进程后调用 `orbit start`，再轮询 `control_socket` 出现；socket 由任务接纳后创建。
+- `--bootstrap FILE` 时 spec 额外带 `bootstrap {path,result,sha256}`，env 带 `ORBIT_BOOTSTRAP`/`ORBIT_BOOTSTRAP_RESULT`；宿主读取冻结 spec 后自行创建 Root、start 任务并发送首条指令，成功后写 result `{ok:true,taskId,sessionId,project}`，失败写 `{ok:false,error}`。
+- 非 headless 调用方拉起进程后调用 `orbit start`，再轮询 `control_socket` 出现；socket 由任务接纳后创建。
+- headless spec v1：`{version:1,instruction,project,externalRefs?,allowedModels?,model:{provider,model}}`。
 
 ## 5. `status`
 
@@ -163,6 +170,8 @@
 - 只有 `status=pending` 的问题可答复；`answer` 校验选项、记录时间。
 - `orbit answer` 返回 `{ "question": { ... } }`；需要活宿主，否则失败。
 - 成员通过 `orbit_ask` 工具提问；Root/用户答复。`accepted` 不表示模型已采用答案。
+- `prompt` 返回 `accepted` 与 `messageId`；不写任务、不直接调用模型。
+- `abort` 的 `scope=session` 只表示会话已中止，不等于任务停止或业务完成。
 - 停止时 pending 问题取消，等待中的调用失败；迟到答复不得绕过停止围栏。
 
 ## 9. `stop`

@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { createServer, type Server } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -339,5 +339,40 @@ describe('orbit-ts status by external ref', () => {
     const empty = capture()
     expect(await runCli(['status', '--external-ref', 'missing', '--json', '--project', projectRoot], empty.io)).toBe(0)
     expect(JSON.parse(empty.out())).toEqual({ tasks: [] })
+  })
+})
+
+describe('orbit-ts launch bootstrap', () => {
+  it('passes a frozen headless spec through env with a digest', async () => {
+    const dir = await project()
+    const specPath = join(dir, 'task.json')
+    await writeFile(specPath, JSON.stringify({ version: 1, instruction: 'work', project: dir, model: { provider: 'p', model: 'm' } }))
+    const sink = capture()
+    expect(
+      await runCli(['launch', '--json', '--project', dir, '--bootstrap', specPath, '--result', join(dir, 'result.json')], sink.io),
+    ).toBe(0)
+    const spec = JSON.parse(sink.out()) as { env: Record<string, string>; bootstrap: { path: string; result: string; sha256: string } }
+    expect(spec.bootstrap).toMatchObject({ path: specPath, result: join(dir, 'result.json') })
+    expect(spec.bootstrap.sha256).toMatch(/^[0-9a-f]{64}$/)
+    expect(spec.env.ORBIT_BOOTSTRAP).toBe(specPath)
+    expect(spec.env.ORBIT_BOOTSTRAP_RESULT).toBe(join(dir, 'result.json'))
+  })
+})
+
+describe('orbit-ts prompt and abort', () => {
+  it('sends a prompt through the live host', async () => {
+    const dir = await project()
+    await fakeControl(dir, () => ({ ok: true, accepted: true, taskId: 'task-1', messageId: 'message-1' }))
+    const sink = capture()
+    expect(await runCli(['prompt', '--project', dir, '--message', 'continue'], sink.io)).toBe(0)
+    expect(sink.out()).toContain('message-1')
+  })
+
+  it('aborts the bound session through the live host', async () => {
+    const dir = await project()
+    await fakeControl(dir, () => ({ ok: true, taskId: 'task-1', scope: 'session', aborted: true }))
+    const sink = capture()
+    expect(await runCli(['abort', '--project', dir], sink.io)).toBe(0)
+    expect(sink.out()).toContain('session')
   })
 })

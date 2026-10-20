@@ -3,7 +3,7 @@
 export const CONTROL_SOCKET_FILE = 'orbit.sock'
 export const CONTROL_MAX_BYTES = 1_048_576
 
-export type ControlMethod = 'status' | 'events' | 'stop' | 'sessions' | 'questions' | 'answer'
+export type ControlMethod = 'status' | 'events' | 'stop' | 'sessions' | 'questions' | 'answer' | 'prompt' | 'abort'
 
 export interface ControlRequest {
   id: string
@@ -14,6 +14,8 @@ export interface ControlRequest {
   question?: string
   selected?: string[]
   custom?: string
+  /** Prompt text for method=prompt. */
+  message?: string
 }
 
 export interface ControlError {

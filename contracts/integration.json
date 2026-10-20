@@ -28,6 +28,16 @@
       "stdout_fields": ["as_of_seq", "root", "members"],
       "note": "Read-only projection. state=unavailable means no live or archived session, not an empty live session."
     },
+    "prompt": {
+      "invocation": "orbit prompt [TASK] --message TEXT --json [--project DIR]",
+      "stdout_fields": ["ok", "accepted", "taskId", "messageId"],
+      "note": "Injects a native user message into the bound Root session. accepted is not model adoption."
+    },
+    "abort": {
+      "invocation": "orbit abort [TASK] --json [--project DIR]",
+      "stdout_fields": ["ok", "taskId", "scope", "aborted"],
+      "note": "Aborts the bound session only; it does not stop the task or prove completion."
+    },
     "questions": {
       "invocation": "orbit questions [TASK] --json [--project DIR]",
       "stdout_fields": ["questions"]
@@ -89,12 +99,15 @@
   },
   "capabilities": {
     "launch": { "since": "2.0.0", "stdin": "keep-open", "process_owner": "caller" },
+    "headless": { "since": "2.0.0", "spec_version": 1, "env": ["ORBIT_BOOTSTRAP", "ORBIT_BOOTSTRAP_RESULT"] },
     "status": { "since": "2.0.0" },
     "status_by_external_ref": { "since": "2.0.0", "max_refs": 8, "max_length": 256 },
     "events": { "since": "2.0.0", "cursor": "opaque" },
     "sessions": { "since": "2.0.0", "visible_text": true, "user_messages": true, "activities": true, "questions": true, "deliveries": true },
     "questions": { "since": "2.0.0" },
     "answer": { "since": "2.0.0" },
+    "prompt": { "since": "2.0.0" },
+    "abort": { "since": "2.0.0", "scope": "session" },
     "stop": { "since": "2.0.0", "receipt": "evidence" },
     "export": { "since": "2.0.0", "self_contained": true }
   },

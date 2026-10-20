@@ -55,7 +55,8 @@ bundles.add('@zeen/orbit')
 manifest.dsh.profile.bundles = [...bundles]
 writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
 
-const overlayName = checker ? 'orbit-checker.patch.yml' : 'orbit-app.patch.yml'
+const role = checker ? 'checker' : profile.includes('node') ? 'node' : 'app'
+const overlayName = checker ? 'orbit-checker.patch.yml' : profile.includes('node') ? 'orbit-node.patch.yml' : 'orbit-app.patch.yml'
 const overlay = join(repo, 'packages/orbit/profiles', overlayName)
 cpSync(overlay, join(profileDir, 'cordis.patch.yml'))
 
