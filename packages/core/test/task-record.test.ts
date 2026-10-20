@@ -82,6 +82,15 @@ describe('task record', () => {
     expect(new Set(events.map((event) => event.seq)).size).toBe(events.length)
   })
 
+  it('writes task-local archives and rejects path traversal', async () => {
+    const service = await startService()
+    const path = await service.store.writeArchive('sessions/root.json', { format: 'test', events: 3 })
+    expect(JSON.parse(await readFile(path, 'utf8'))).toEqual({ format: 'test', events: 3 })
+    await expect(service.store.writeArchive('../escape.json', {})).rejects.toSatisfy(
+      (error) => isOrbitError(error) && error.code === 'invalid_input',
+    )
+  })
+
   it('freezes the strict model list on the task record', async () => {
     const service = await startService({ allowedModels: ['p/m', 'p/n'] })
     const state = await service.state()

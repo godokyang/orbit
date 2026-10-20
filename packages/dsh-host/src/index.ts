@@ -10,6 +10,7 @@ import type {} from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent-loop'
 import type {} from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-jobs'
+import type {} from '@deepseek-ai/dsh-session-query'
 import {
   CONTROL_SOCKET_FILE,
   JEV_OBSERVATION_QUESTIONS,
@@ -19,6 +20,7 @@ import {
   TaskStore,
   buildJevObservationState,
   digestWorkspace,
+  sha256Hex,
   snapshotWorkspace,
   jevObservationKey,
   type ControlRequest,
@@ -245,7 +247,7 @@ async function bounded(promise: Promise<unknown>, ms: number): Promise<boolean> 
  * agents are fenced, and stop teardown records the evidence it actually saw.
  */
 export default class OrbitHost extends Service {
-  static inject = ['tools', 'sessions', 'agents', 'systemPrompt', 'subagents', 'sessionProjections', 'credentials', 'jobs']
+  static inject = ['tools', 'sessions', 'agents', 'systemPrompt', 'subagents', 'sessionProjections', 'credentials', 'jobs', 'sessionQuery']
 
   static Config: z<Config> = z.object({
     maxTasks: z.number().step(1).min(1).default(64),
@@ -416,6 +418,7 @@ export default class OrbitHost extends Service {
             } else {
               artifactDigest = (await digestWorkspace(state.workspace.artifactRoot)).digest
             }
+            await host.archiveSession(service, state.root.sessionId)
             const check = await service.requestCheck({
               role: 'reviewer',
               kind,
@@ -440,6 +443,7 @@ export default class OrbitHost extends Service {
                 ...(checkerModel === undefined ? {} : { model: checkerModel }),
               })
               const recorded = await service.recordCheckResult(check.number, raw)
+              await host.archiveSession(service, state.root.sessionId)
               return JSON.stringify({
                 ok: true,
                 checkNumber: check.number,
@@ -888,6 +892,30 @@ export default class OrbitHost extends Service {
     }
   }
 
+  /** B layer: persist one full session snapshot as task-local evidence. */
+  private async archiveSession(service: TaskService, sessionId: string): Promise<void> {
+    try {
+      const snapshot = await this.ctx.sessionQuery.readSession(sessionId as never)
+      if (snapshot === undefined) return
+      const events = snapshot.events ?? []
+      const first = events[0]?.seq ?? null
+      const last = events.at(-1)?.seq ?? null
+      const payload = {
+        format: 'orbit-session-archive-v1',
+        capturedAt: new Date().toISOString(),
+        sessionId,
+        sessionVersion: snapshot.session.version ?? null,
+        inheritedEventCount: snapshot.inheritedEventCount ?? 0,
+        seq: { first, last, count: events.length },
+        sha256: sha256Hex(JSON.stringify(events)),
+        snapshot,
+      }
+      await service.store.writeArchive(`sessions/${sessionId}.json`, payload)
+    } catch (error) {
+      console.error(`orbit: session archive failed for ${sessionId}: ${(error as Error).message}`)
+    }
+  }
+
   /** Strict tasks must name a checker inside the frozen list; others stay optional. */
   private strictCheckerModel(): ModelIdentity | undefined {
     if (this.allowedModels.size === 0) return this.checkerModel
@@ -1013,6 +1041,8 @@ export default class OrbitHost extends Service {
       evidence.checks_settled = (await service.state()).checks.inFlight === null
 
       await service.confirmStop({ artifactDigest, evidence })
+      await this.archiveSession(service, state.root.sessionId)
+      for (const member of members.members) await this.archiveSession(service, member.id)
     } catch (error) {
       // Never fabricate confirmation: a failed teardown leaves the durable stop
       // record unconfirmed for a later explicit retry.

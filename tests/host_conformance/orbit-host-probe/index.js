@@ -243,7 +243,16 @@ async function run(ctx) {
   await handle.agent.whenIdle()
   task = readTask(WORK)
   const check = readChecks(task).filter((candidate) => candidate.kind === 'artifact').at(-1)
+  const archivePath = join(task.dir, 'sessions', `${handle.agent.id}.json`)
+  const archive = existsSync(archivePath) ? JSON.parse(readFileSync(archivePath, 'utf8')) : undefined
   const checkResults = await toolResults(ctx, handle.agent.id)
+  log({
+    step: 'archive',
+    exists: Boolean(archive),
+    seqCount: archive?.seq?.count,
+    seqLast: archive?.seq?.last,
+    digest: archive?.sha256?.slice(0, 12),
+  })
   log({
     step: 'check',
     checkNumber: check?.number,

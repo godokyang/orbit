@@ -1,6 +1,6 @@
 import { readdir, readFile, rename } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { isAbsolute, join } from 'node:path'
 import { atomicWriteJson, appendLineDurable, ensureDir, readJsonFile } from './durable.js'
 import { OrbitError } from './errors.js'
 import { Mutex } from './mutex.js'
@@ -178,6 +178,18 @@ export class TaskStore {
       await atomicWriteJson(this.path('requirement-coverage.json'), file)
       return file
     })
+  }
+
+  /** Write one evidence artifact under the task directory (no traversal). */
+  async writeArchive(relativePath: string, value: unknown): Promise<string> {
+    if (relativePath.length === 0 || isAbsolute(relativePath) || relativePath.split('/').includes('..')) {
+      throw new OrbitError('invalid_input', `archive path must stay inside the task: ${relativePath}`)
+    }
+    const target = join(this.dir, relativePath)
+    await this.mutex.run(async () => {
+      await atomicWriteJson(target, value)
+    })
+    return target
   }
 
   async readCheck(number: number): Promise<CheckRecord> {
