@@ -127,6 +127,7 @@ importers:
       '@deepseek-ai/schemastery':
         specifier: ~3.18.5
         version: 3.18.5
+    devDependencies:
       '@orbit/cli':
         specifier: workspace:*
         version: link:../cli
