@@ -201,6 +201,7 @@ function encodeCursor(seq: number | undefined): string | null {
 
 function decodeCursor(cursor: string | undefined): number | undefined {
   if (cursor === undefined) return undefined
+  if (/^\d+$/.test(cursor)) return Number(cursor)
   try {
     const parsed = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) as { seq?: unknown }
     if (typeof parsed.seq !== 'number' || !Number.isInteger(parsed.seq) || parsed.seq < 0) throw new Error('bad seq')
