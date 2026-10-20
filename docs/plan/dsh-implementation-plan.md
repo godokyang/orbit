@@ -309,3 +309,9 @@ B 阶段开工前只需补一份短设计：JEV 观察输入在 DSH 事件下的
 - 私有 socket 新增 `sessions` 方法：返回 Root 与全部已登记成员的投影及 `as_of_seq`；CLI 新增 `orbit sessions [TASK] --json`，仅在有活宿主时可用。
 - 验证：投影单测 2 个、CLI fake socket 单测 1 个；DSH 探针 CLI 读取 `asOfSeq=22`、visible=1、userMessages=1、activities=1；全套 105 个测试通过。
 - 仍未做：投影字段最终按合同 2.0 冻结、离线归档投影、问题/送达的更细分类、Loom 消费。
+
+## 实施进展（2026-10-20，离线会话投影）
+
+- CLI `orbit sessions` 在无活宿主时回退到任务内增量归档：合并 `sessions/<id>/seq-*.json` 的事件，投影可见文本、真实用户消息、工具活动（按 tool/result 判 ok/error/not_observed）、turn 完成送达、归档段数与 gap；无归档时返回 `unavailable`，不伪造在线状态。
+- 验证：CLI 归档投影 2 个单测（可用字段、gap、无归档 unavailable）；用真实验收留下的 `/tmp/orbit-real` 任务离线投影，得到 as_of_seq=39、Root 可见文本 2 条、真实用户消息 1 条、活动与成员投影；全套 107 个测试通过。
+- 仍未做：合同 2.0 字段冻结、问题/送达细分、离线 gap 与 Loom 消费约定。

@@ -172,3 +172,50 @@ describe('orbit-ts export', () => {
     expect(sink.err()).toContain('--output')
   })
 })
+
+describe('orbit-ts sessions (offline archive)', () => {
+  it('projects visible text, user messages, activities and gaps from archives', async () => {
+    const dir = await project()
+    const taskId = await startTask(dir)
+    const { TaskService } = await import('@orbit/core')
+    const service = await TaskService.open(join(dir, '.orbit', 'tasks', taskId))
+    const state = await service.state()
+    await service.store.writeArchive(`sessions/${state.root.sessionId}/seq-1-3.json`, {
+      seq: { first: 1, last: 3 },
+      events: [
+        { seq: 1, type: 'user/message', data: { id: 'u1', content: [{ type: 'text', text: 'go' }], source: { kind: 'user' } } },
+        { seq: 2, type: 'assistant/message', data: { message: { content: [{ type: 'text', text: 'working' }] } } },
+        { seq: 3, type: 'tool/call', data: { callId: 'c1', name: 'bash', arguments: '{"description":"x"}' } },
+      ],
+    })
+    await service.store.writeArchive(`sessions/${state.root.sessionId}/seq-5-5.json`, {
+      seq: { first: 5, last: 5 },
+      gap: { from: 4, to: 4 },
+      events: [
+        { seq: 5, type: 'turn/end', data: { reason: { kind: 'completed' } } },
+        { seq: 5, type: 'tool/result', data: { message: { toolCallId: 'c1', isError: false } } },
+      ],
+    })
+
+    const sink = capture()
+    expect(await runCli(['sessions', '--json', '--project', dir], sink.io)).toBe(0)
+    const view = JSON.parse(sink.out()) as {
+      root: { state: string; visible_text: unknown[]; user_messages: unknown[]; activities: Array<{ status: string }>; gaps: unknown[]; archive_segments: number }
+    }
+    expect(view.root.state).toBe('available')
+    expect(view.root.visible_text).toHaveLength(1)
+    expect(view.root.user_messages).toHaveLength(1)
+    expect(view.root.activities[0]?.status).toBe('ok')
+    expect(view.root.gaps).toHaveLength(1)
+    expect(view.root.archive_segments).toBe(2)
+  })
+
+  it('returns unavailable when no archive exists', async () => {
+    const dir = await project()
+    await startTask(dir)
+    const sink = capture()
+    expect(await runCli(['sessions', '--json', '--project', dir], sink.io)).toBe(0)
+    const view = JSON.parse(sink.out()) as { root: { state: string } }
+    expect(view.root.state).toBe('unavailable')
+  })
+})

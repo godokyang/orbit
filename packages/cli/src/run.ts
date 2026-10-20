@@ -4,6 +4,7 @@ import { CONTROL_SOCKET_FILE, type ControlRequest, type ControlResponse } from '
 import { requestControl } from './client.js'
 import { localEvents, localStatus, type StatusView } from './tasks.js'
 import { exportTask } from './export.js'
+import { localSessions } from './sessions.js'
 
 export interface CliIo {
   out: (text: string) => void
@@ -172,7 +173,21 @@ export async function runCli(argv: string[], io: Partial<CliIo> = {}): Promise<n
         method: 'sessions',
         ...(parsed.task === undefined ? {} : { task: parsed.task }),
       })
-      if (response === undefined) throw new Error(`no live Orbit host for ${parsed.project} (control socket missing)`)
+      if (response === undefined) {
+        const result = await localSessions(parsed.project, parsed.task)
+        if (parsed.json) {
+          out(JSON.stringify(result, null, 2))
+        } else {
+          const sessions = [result.root, ...result.members]
+          out(`as_of_seq ${result.as_of_seq} (archived)`)
+          for (const session of sessions) {
+            out(
+              `${session.session_id}  ${session.state}  segments ${session.archive_segments}  visible ${session.visible_text.length}  user ${session.user_messages.length}  activities ${session.activities.length}  gaps ${session.gaps.length}`,
+            )
+          }
+        }
+        return 0
+      }
       if (!response.ok) throw new Error(response.error.message)
       const result = response.result as {
         as_of_seq: number
