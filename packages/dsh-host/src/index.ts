@@ -11,6 +11,7 @@ import type {} from '@deepseek-ai/dsh-session'
 import { CONTROL_SOCKET_FILE, TaskService, TaskStore, digestWorkspace, type ControlRequest, type ModelIdentity, type TaskState } from '@orbit/core'
 import { ControlServer } from './control.js'
 import { buildCheckerPrompt, runChecker } from './checker.js'
+import { orbitObservationDefinition } from './observation.js'
 
 export { ControlServer } from './control.js'
 
@@ -215,7 +216,7 @@ async function bounded(promise: Promise<unknown>, ms: number): Promise<boolean> 
  * agents are fenced, and stop teardown records the evidence it actually saw.
  */
 export default class OrbitHost extends Service {
-  static inject = ['tools', 'sessions', 'agents', 'systemPrompt', 'subagents']
+  static inject = ['tools', 'sessions', 'agents', 'systemPrompt', 'subagents', 'sessionProjections']
 
   static Config: z<Config> = z.object({
     maxTasks: z.number().step(1).min(1).default(64),
@@ -552,6 +553,8 @@ export default class OrbitHost extends Service {
       }
       return undefined
     })
+
+    ctx.effect(() => ctx.root.sessionProjections.register(orbitObservationDefinition), 'orbit.observation()')
 
     ctx.effect(() => () => {
       for (const server of host.controls.values()) void server.close()

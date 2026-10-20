@@ -163,3 +163,11 @@ B 阶段开工前只需补一份短设计：JEV 观察输入在 DSH 事件下的
 - `status`/CLI 增加 open disputes 计数与字段。
 - 验证：新增 5 个争议/重绑定单测；DSH 探针跑通 process check → artifact check → 完成链路，24 次模型调用。
 - 仍未做：JEV、角色池/严格模型授权、drift 校验、takeover、真实模型、冻结验收 #1/#2、Loom。
+
+## 实施进展（2026-10-20，观察投影与判断客户端）
+
+- 新增 `orbitObservation` 会话投影单元（`stateVersion=1`，仅 host 侧）：把 `turn/*`、`step/start`、`tool/call`、`tool/result` 折叠成操作环，记录 id/seq/turn/step/名称/声明目的/产物根相对目标/状态/起止时间；状态区分 `ok`、`error`、`aborted`、`interrupted`、`not_observed`，`turn/end interrupted` 会标记未完成操作并记 `crashGap`；只保留最近 50 条，窗口取最近 20 条并给出省略数与 history/crash gap。宿主启动时注册，DSH 探针实测 3 条操作、`lastTurnStatus=completed`。
+- 新增 `observation-key`：按合同把输入摘要、产物根真实路径、产物摘要、host 稳定状态（最近 10 条操作哈希）、open findings、dispute、trigger 规范化后哈希为 64 hex；字符串超过 2000 字符时保留前缀 + 长度 + 全文 SHA-256；对象键排序、数组顺序保留。
+- 新增 TypeSafe System One 客户端：`POST /v1/systemone`，`questions[].true_criterion/false_criterion` 线格式；任何 HTTP/网络/缺答案/越界概率都返回 `unavailable`，保留可得实际模型与 usage，不产生部分答案。
+- 验证：观察投影 6 个、观察键 5 个、TypeSafe 4 个单测；全套测试继续通过。
+- 仍未做：JEV 观察输入组装与 5s/5min 调度、成员/检查者选型问题集、真实 key 与真实模型、Loom。

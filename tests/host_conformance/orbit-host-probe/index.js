@@ -9,7 +9,7 @@ import { join } from 'node:path'
 import { LlmAdapter } from '@deepseek-ai/dsh-llm'
 
 export const name = 'orbit-host-probe'
-export const inject = ['llm', 'agents', 'sessions', 'tools', 'sessionQuery']
+export const inject = ['llm', 'agents', 'sessions', 'tools', 'sessionQuery', 'sessionProjections']
 
 const HOME = process.env.DSH_HOME
 const WORK = join(HOME, 'project')
@@ -154,6 +154,16 @@ async function run(ctx) {
   task = readTask(WORK)
   const unit = task?.units?.units?.[0]
   log({ step: 'declare', unitId: unit?.id, unitStatus: unit?.status, inputVersion: unit?.inputVersion })
+
+  const observation = ctx.sessionProjections.stateOf(handle.agent.session, 'orbitObservation')
+  log({
+    step: 'observation',
+    operations: observation?.operations?.length,
+    activeTools: observation?.activeTools,
+    lastTurnStatus: observation?.lastTurnStatus,
+    last: observation?.operations?.at(-1)?.name,
+    lastTarget: observation?.operations?.at(-1)?.target,
+  })
 
   // Process check first: it must never create a finalization notice.
   scripts.length = 0
