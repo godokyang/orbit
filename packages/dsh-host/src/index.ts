@@ -32,6 +32,7 @@ import { observationWindow, orbitObservationDefinition } from './observation.js'
 import { allowedSet, authorizeRoute, routeKey, type ModelRoute } from './authorization.js'
 
 export { ControlServer } from './control.js'
+export * from './profile.js'
 
 export const name = 'orbit'
 

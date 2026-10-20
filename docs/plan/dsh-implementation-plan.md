@@ -215,3 +215,10 @@ B 阶段开工前只需补一份短设计：JEV 观察输入在 DSH 事件下的
 - 检查快照目录改为 `check-<n>-<random>`，避免并发检查按 nextNumber 命名冲突；快照仍不自动回收（证据保留），导出会带上快照文件。
 - 验证：Core 接管声明 1 个新单测（含幂等、非 takeover 拒绝）；DSH 探针 takeover 后声明落盘 `count=1`，随后 stop 正常；全套 79 个测试通过。
 - 仍未做：快照回收策略、完整 B 层会话归档、JEV 选型/压缩、单一 npm 包、真实模型、Loom。
+
+## 实施进展（2026-10-20，单一 npm 包）
+
+- 新增 `@orbit/orbit` 单包：`dist/host.mjs`（宿主服务）、`dist/cli.mjs`（bin `orbit`）、`dist/t0.mjs`（bin `orbit-t0`）、共享 `cordis.patch.yml` 与三个 profile overlay；打包时把 core/host/cli 全部内联，`dist/` 除 `@deepseek-ai/*` peer 外自包含。
+- bundle patch 的插入行指向 `@orbit/orbit/host`；`derive-profile.mjs` 改为一律安装单包并引导 app/checker profile；旧的 `packages/bundle` 已移除，避免两份 patch 漂移。
+- 验证：单包构建后本地装入 web profile，`--dump-config` 191 行通过 T0，受控 app profile 启动无错误；app 与 checker 两个派生 profile 均通过 T0；CLI `orbit` 帮助与导出可用。
+- 仍未做：发布/版本与真实 npm scope（检查点 1）、真实模型（检查点 2）、Loom、D 阶段退场。

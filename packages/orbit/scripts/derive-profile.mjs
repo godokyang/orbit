@@ -19,11 +19,11 @@ const profile = arg('profile', 'orbit-app')
 const template = arg('template', 'web')
 const checker = process.argv.includes('--checker')
 const dsh = process.env.DSH_BIN ?? '/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh'
-const hostDist = join(repo, 'packages/dsh-host/dist/index.mjs')
-const t0 = join(repo, 'packages/dsh-host/dist/t0.mjs')
+const packageDist = join(repo, 'packages/orbit/dist/host.mjs')
+const t0 = join(repo, 'packages/orbit/dist/t0.mjs')
 
-if (!existsSync(hostDist)) throw new Error(`missing ${hostDist}; build @orbit/dsh-host first`)
-if (!existsSync(t0)) throw new Error(`missing ${t0}; build @orbit/dsh-host first`)
+if (!existsSync(packageDist)) throw new Error(`missing ${packageDist}; build @orbit/orbit first`)
+if (!existsSync(t0)) throw new Error(`missing ${t0}; build @orbit/orbit first`)
 
 const profileDir = join(home, 'profiles', profile)
 if (!existsSync(join(profileDir, 'package.json'))) {
@@ -44,20 +44,19 @@ function installPackage(name, source) {
   return target
 }
 
-installPackage('dsh-host', join(repo, 'packages/dsh-host'))
-installPackage('bundle', join(repo, 'packages/bundle'))
+installPackage('orbit', join(repo, 'packages/orbit'))
 
 const manifestPath = join(profileDir, 'package.json')
 const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
 manifest.dsh ??= { profile: {} }
 manifest.dsh.profile ??= {}
 const bundles = new Set(manifest.dsh.profile.bundles ?? [])
-bundles.add('@orbit/bundle')
+bundles.add('@orbit/orbit')
 manifest.dsh.profile.bundles = [...bundles]
 writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
 
 const overlayName = checker ? 'orbit-checker.patch.yml' : 'orbit-app.patch.yml'
-const overlay = join(repo, 'packages/bundle/profiles', overlayName)
+const overlay = join(repo, 'packages/orbit/profiles', overlayName)
 cpSync(overlay, join(profileDir, 'cordis.patch.yml'))
 
 const dump = execFileSync(dsh, ['--profile', profile, '--dump-config'], {
@@ -69,4 +68,4 @@ writeFileSync(dumpPath, dump)
 execFileSync(process.execPath, [t0, '--dump', dumpPath, '--sandbox', checker ? 'read-only' : 'workspace-write', '--role', checker ? 'checker' : 'app'], {
   stdio: 'inherit',
 })
-console.log(`orbit-profile: ${profileDir} ready (bundle @orbit/bundle)`)
+console.log(`orbit-profile: ${profileDir} ready (bundle @orbit/orbit)`)

@@ -2,7 +2,7 @@
 # the user's profile patch is later, so T0 must run on the composed config.
 - insert:
     - id: orbit-host
-      name: '@orbit/dsh-host'
+      name: '@orbit/orbit/host'
 
 # Rows that would let a model run arbitrary code in the host or restart goal
 # loops must stay off in every controlled profile.

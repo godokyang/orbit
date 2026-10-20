@@ -1,0 +1,62 @@
+{
+  "name": "@orbit/orbit",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Single Orbit DSH bundle: host service, CLI, T0 and controlled profile patches.",
+  "main": "./dist/host.mjs",
+  "types": "./dist/host.d.mts",
+  "bin": {
+    "orbit": "./dist/cli.mjs",
+    "orbit-t0": "./dist/t0.mjs"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/host.d.mts",
+      "import": "./dist/host.mjs"
+    },
+    "./host": {
+      "types": "./dist/host.d.mts",
+      "import": "./dist/host.mjs"
+    },
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./profiles/orbit-app.patch.yml": "./profiles/orbit-app.patch.yml",
+    "./profiles/orbit-node.patch.yml": "./profiles/orbit-node.patch.yml",
+    "./profiles/orbit-checker.patch.yml": "./profiles/orbit-checker.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "files": [
+    "dist",
+    "cordis.patch.yml",
+    "profiles"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@orbit/cli": "workspace:*",
+    "@orbit/core": "workspace:*",
+    "@orbit/dsh-host": "workspace:*",
+    "@deepseek-ai/schemastery": "~3.18.5"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "~4.0.5",
+    "@deepseek-ai/dsh-agent": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-commands": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-credentials": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-jobs": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-llm": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-session": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-session-projection": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-session-query": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-subagent": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-system-prompt": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-tools": "0.2.1-rc.2"
+  }
+}

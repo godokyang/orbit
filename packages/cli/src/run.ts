@@ -10,7 +10,7 @@ export interface CliIo {
   err: (text: string) => void
 }
 
-const USAGE = `orbit-ts — Orbit thin client
+const USAGE = `orbit — Orbit thin client
 
 Usage:
   orbit-ts status [TASK] [--json] [--project DIR]
@@ -184,7 +184,7 @@ export async function runCli(argv: string[], io: Partial<CliIo> = {}): Promise<n
     out(parsed.json ? JSON.stringify(result, null, 2) : `stop armed for ${String(result.taskId)}; status ${String(result.status)}`)
     return 0
   } catch (error) {
-    err(`orbit-ts: ${(error as Error).message}`)
+    err(`orbit: ${(error as Error).message}`)
     return 1
   }
 }
