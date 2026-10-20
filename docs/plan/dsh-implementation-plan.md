@@ -413,3 +413,9 @@ B 阶段开工前只需补一份短设计：JEV 观察输入在 DSH 事件下的
 - 修复：带 `--bootstrap` 的 headless launch 规格设置 `ELECTRON_RUN_AS_NODE=1`，DSH 以 Node 模式运行，不创建桌面窗口/浏览器标签；Loom discovery 三轮在该模式下真实验证通过。
 - 浏览器操作改用 ego-browser（已安装 v2.1.0），复用同一 TaskSpace/Page，不再为每次检查新开标签。
 - 全套 126 个测试通过。
+
+## 实施进展（2026-10-20，doctor --t0 与 discovery 去 OMP）
+
+- `orbit doctor --t0`：在 profile 内运行单包自带的 T0，断言受控行、sandbox 与 approval；T0 改为只内联 `profile` 子路径，不再依赖 `@deepseek-ai/cordis` 等 peer。真实 `/tmp/orbit-headless` node profile 返回 `t0 ok (191 rows)`。
+- Loom discovery 的暂停重连不再创建 OMP 会话，只按 2.0 status 恢复绑定；移除 discovery 中未用的 OMP 导入。
+- 验证：Orbit 126、Loom 91 个测试通过。
