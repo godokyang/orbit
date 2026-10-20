@@ -3,21 +3,26 @@
 // model run code in the host, re-open goals, or skip approval/sandbox policy.
 import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
-import { assertControlledProfile } from './profile.js'
+import { assertControlledProfile, CONTROLLED_CORE_DISABLED, CONTROLLED_DISABLED } from './profile.js'
 
 interface Args {
   profile?: string
   dump?: string
   sandbox: 'workspace-write' | 'read-only' | 'danger-full-access'
+  role: 'app' | 'node' | 'checker'
 }
 
 function parse(argv: string[]): Args {
-  const args: Args = { sandbox: 'workspace-write' }
+  const args: Args = { sandbox: 'workspace-write', role: 'app' }
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index]
     if (arg === '--profile') args.profile = argv[++index]
     else if (arg === '--dump') args.dump = argv[++index]
-    else if (arg === '--sandbox') {
+    else if (arg === '--role') {
+      const value = argv[++index]
+      if (value !== 'app' && value !== 'node' && value !== 'checker') throw new Error(`invalid --role ${String(value)}`)
+      args.role = value
+    } else if (arg === '--sandbox') {
       const value = argv[++index]
       if (value !== 'workspace-write' && value !== 'read-only' && value !== 'danger-full-access') {
         throw new Error(`invalid --sandbox ${String(value)}`)
@@ -41,7 +46,10 @@ function main(): number {
     const bin = process.env.DSH_BIN ?? '/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh'
     dump = execFileSync(bin, ['--profile', args.profile, '--dump-config'], { encoding: 'utf8' })
   }
-  const result = assertControlledProfile(dump, { sandboxMode: args.sandbox })
+  const result = assertControlledProfile(dump, {
+    sandboxMode: args.sandbox,
+    requireDisabled: args.role === 'app' ? CONTROLLED_DISABLED : CONTROLLED_CORE_DISABLED,
+  })
   if (result.ok) {
     console.log(`orbit-t0: controlled profile OK (${result.entries.size} rows, sandbox ${args.sandbox})`)
     return 0

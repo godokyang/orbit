@@ -238,10 +238,12 @@ export default class OrbitHost extends Service {
           action: {
             type: 'string',
             required: true,
-            enum: ['start', 'status', 'stop', 'declare', 'finish', 'accept', 'reject', 'check', 'complete'],
-            description: 'start | status | stop | declare | finish | accept | reject | check | complete',
+            enum: ['start', 'status', 'stop', 'declare', 'finish', 'accept', 'reject', 'check', 'complete', 'amend'],
+            description: 'start | status | stop | declare | finish | accept | reject | check | complete | amend',
           },
           instruction: { type: 'string', description: 'The user instruction, verbatim. Required for action=start.' },
+          amendment: { type: 'string', description: 'The user amendment text, verbatim. Required for action=amend.' },
+          messageId: { type: 'string', description: 'Native user message id that carries the amendment. Optional for action=amend.' },
           task: { type: 'string', description: 'Optional task id; defaults to the latest task.' },
           goal: { type: 'string', description: 'Work-unit goal. Required for action=declare.' },
           acceptance: { type: 'string', description: 'Work-unit acceptance criteria. Required for action=declare.' },
@@ -344,6 +346,22 @@ export default class OrbitHost extends Service {
               await service.failCheck(check.number, { kind: 'checker_error', message: (error as Error).message }).catch(() => undefined)
               throw new Error(`orbit: independent check failed: ${(error as Error).message}`)
             }
+          }
+
+          if (action === 'amend') {
+            const { amendment, messageId } = args as { amendment?: string; messageId?: string }
+            if (typeof amendment !== 'string' || amendment.trim().length === 0) {
+              throw new Error('orbit: action=amend requires the verbatim amendment text')
+            }
+            const service = await openTask(projectRoot, maxTasks, (args as { task?: string }).task)
+            const state = await service.state()
+            const updated = await service.amend(amendment, {
+              kind: messageId === undefined ? 'explicit-text' : 'user-message',
+              ...(messageId === undefined ? {} : { messageId, sessionId: state.root.sessionId }),
+              verbatim: messageId !== undefined,
+              at: new Date().toISOString(),
+            })
+            return JSON.stringify({ ok: true, inputVersion: updated.input.versions.length })
           }
 
           if (action === 'complete') {

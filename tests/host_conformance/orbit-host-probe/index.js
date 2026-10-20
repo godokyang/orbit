@@ -57,7 +57,10 @@ class ProbeAdapter extends LlmAdapter {
   async resolveModel(provider, model) { return { provider, id: model, name: model, model, context: { contextWindow: 100000 } } }
   async *stream(options) {
     const serialized = JSON.stringify(options)
-    calls.push({ sawOrbitContext: serialized.includes('Orbit 受控任务') && serialized.includes('Build the migration slice.') })
+    calls.push({
+      sawOrbitContext: serialized.includes('Orbit 受控任务') && serialized.includes('Build the migration slice.'),
+      sawAmendment: serialized.includes('Also cover the CLI.'),
+    })
     const script = scripts.shift()
     yield* script ? script() : textChunks('ok')
   }
@@ -134,6 +137,15 @@ async function run(ctx) {
   log({ step: 'cli-status', source: 'socket', taskId: cliStatus.taskId, status: cliStatus.status })
   const cliEvents = JSON.parse(await cli(['events', '--json', '--project', WORK]))
   log({ step: 'cli-events', count: cliEvents.events?.length })
+
+  // Amendment: the durable version becomes v2 and the next admission sees it.
+  scripts.length = 0
+  scripts.push(() => toolChunks('orbit', { action: 'amend', amendment: 'Also cover the CLI.', messageId: 'msg-amend-1' }))
+  scripts.push(() => textChunks('amended'))
+  handle.agent.followup(msg('Amend the requirement.'))
+  await handle.agent.whenIdle()
+  task = readTask(WORK)
+  log({ step: 'amend', inputVersion: task?.state?.input?.versions?.length, versions: task?.state?.input?.versions?.map((v) => v.version) })
 
   scripts.push(() => toolChunks('orbit', { action: 'declare', goal: 'Implement slice', acceptance: 'Tests pass', dependencies: [] }))
   scripts.push(() => textChunks('declared'))
@@ -234,6 +246,11 @@ async function run(ctx) {
   const after = await toolResults(ctx, handle.agent.id)
   log({ step: 'fenced-dispatch', newResults: after.length - beforeFence, last: after.at(-1) })
 
+  const exportPath = join(HOME, 'results', 'export.json')
+  const exportOut = await cli(['export', '--output', exportPath, '--project', WORK])
+  const exported = JSON.parse(readFileSync(exportPath, 'utf8'))
+  log({ step: 'cli-export', output: exportOut.trim(), taskId: exported.taskId, files: Object.keys(exported.files).length, versions: exported.state?.input?.versions?.length })
+
   // A stopped session may start a fresh task; the old fence must not block it.
   scripts.length = 0
   scripts.push(() => toolChunks('orbit', { action: 'start', instruction: 'Second supervised task.' }))
@@ -259,6 +276,7 @@ async function run(ctx) {
     memberRegistered: Boolean(registered),
     modelCalls: calls.length,
     callsWithOrbitContext: calls.filter((call) => call.sawOrbitContext).length,
+    callsWithAmendment: calls.filter((call) => call.sawAmendment).length,
   })
 }
 

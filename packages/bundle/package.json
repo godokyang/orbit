@@ -12,7 +12,8 @@
   "exports": {
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./profiles/orbit-checker.patch.yml": "./profiles/orbit-checker.patch.yml",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./profiles/orbit-app.patch.yml": "./profiles/orbit-app.patch.yml"
   },
   "files": [
     "cordis.patch.yml",

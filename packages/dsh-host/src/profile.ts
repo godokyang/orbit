@@ -4,7 +4,7 @@
  * layers, so this checks the composed config, not just our patch.
  */
 
-export const CONTROLLED_DISABLED = [
+export const CONTROLLED_CORE_DISABLED = [
   'tool-plugin-manager',
   'hmr',
   'session-log-deepseek',
@@ -12,9 +12,11 @@ export const CONTROLLED_DISABLED = [
   'goal-round-driver',
   'command-goal',
   'tool-goal',
-  'cordis-host-runner',
-  'cordis-client-runner',
 ] as const
+
+export const CONTROLLED_WEB_DISABLED = ['cordis-host-runner', 'cordis-client-runner'] as const
+
+export const CONTROLLED_DISABLED = [...CONTROLLED_CORE_DISABLED, ...CONTROLLED_WEB_DISABLED] as const
 
 export interface ProfileEntry {
   id: string

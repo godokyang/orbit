@@ -15,5 +15,14 @@ DSH_HOME=... orbit-t0 --profile orbit-app
 ```
 
 The checker profile additionally installs `profiles/orbit-checker.patch.yml` as
-its own `cordis.patch.yml` (read-only sandbox). The bundle is not published yet;
-the final single npm package and profile derivation land in phase D.
+its own `cordis.patch.yml` (read-only sandbox). For local development use
+`scripts/derive-profile.mjs`, which copies the built host/bundle into the
+profile, applies the app or checker overlay, and runs T0:
+
+```sh
+node packages/bundle/scripts/derive-profile.mjs --home /tmp/orbit-profile --profile orbit-app --template web
+node packages/bundle/scripts/derive-profile.mjs --home /tmp/orbit-checker --profile orbit-checker --template sdk --checker
+```
+
+The bundle is not published yet; the final single npm package and profile
+derivation land in phase D.

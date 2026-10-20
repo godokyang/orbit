@@ -3,6 +3,7 @@ import { join, resolve } from 'node:path'
 import { CONTROL_SOCKET_FILE, type ControlRequest, type ControlResponse } from '@orbit/core'
 import { requestControl } from './client.js'
 import { localEvents, localStatus, type StatusView } from './tasks.js'
+import { exportTask } from './export.js'
 
 export interface CliIo {
   out: (text: string) => void
@@ -15,16 +16,18 @@ Usage:
   orbit-ts status [TASK] [--json] [--project DIR]
   orbit-ts events [TASK] [--json] [--project DIR]
   orbit-ts stop   [TASK] [--json] [--project DIR]
+  orbit-ts export [TASK] --output FILE [--json] [--project DIR]
 
 status/events read the live host through the project control socket and fall
 back to the durable task record when no host is running. stop requires the
-live host.`
+live host. export snapshots the task record into a self-contained JSON file.`
 
 interface Parsed {
-  command: 'status' | 'events' | 'stop'
+  command: 'status' | 'events' | 'stop' | 'export'
   task?: string
   project: string
   json: boolean
+  output?: string
 }
 
 class UsageError extends Error {}
@@ -33,12 +36,13 @@ function parse(argv: string[]): Parsed | 'help' {
   if (argv.length === 0) throw new UsageError('missing command')
   const command = argv[0]
   if (command === '--help' || command === '-h' || command === 'help') return 'help'
-  if (command !== 'status' && command !== 'events' && command !== 'stop') {
+  if (command !== 'status' && command !== 'events' && command !== 'stop' && command !== 'export') {
     throw new UsageError(`unknown command: ${String(command)}`)
   }
   let task: string | undefined
   let project = process.cwd()
   let json = false
+  let output: string | undefined
   for (let index = 1; index < argv.length; index += 1) {
     const arg = argv[index]
     if (arg === '--json') {
@@ -47,6 +51,11 @@ function parse(argv: string[]): Parsed | 'help' {
       const value = argv[index + 1]
       if (value === undefined) throw new UsageError('--project requires a directory')
       project = resolve(value)
+      index += 1
+    } else if (arg === '--output') {
+      const value = argv[index + 1]
+      if (value === undefined) throw new UsageError('--output requires a file')
+      output = resolve(value)
       index += 1
     } else if (arg === '--help' || arg === '-h') {
       return 'help'
@@ -58,7 +67,8 @@ function parse(argv: string[]): Parsed | 'help' {
       throw new UsageError(`unexpected argument: ${arg}`)
     }
   }
-  return { command, project, json, ...(task === undefined ? {} : { task }) }
+  if (command === 'export' && output === undefined) throw new UsageError('export requires --output FILE')
+  return { command, project, json, ...(task === undefined ? {} : { task }), ...(output === undefined ? {} : { output }) }
 }
 
 async function control(project: string, request: ControlRequest): Promise<ControlResponse | undefined> {
@@ -152,6 +162,12 @@ export async function runCli(argv: string[], io: Partial<CliIo> = {}): Promise<n
       }
       if (!response.ok) throw new Error(response.error.message)
       printEvents(response.result as { taskId: string; events: [] }, parsed.json, out)
+      return 0
+    }
+
+    if (parsed.command === 'export') {
+      const result = await exportTask(parsed.project, parsed.task, parsed.output as string)
+      out(parsed.json ? JSON.stringify({ taskId: result.taskId, bytes: result.bytes, output: result.output, files: Object.keys(result.files).length }, null, 2) : `exported ${result.taskId} (${Object.keys(result.files).length} files, ${result.bytes} bytes) to ${result.output}`)
       return 0
     }
 

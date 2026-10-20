@@ -119,3 +119,36 @@ describe('orbit-ts stop', () => {
     expect(sink.err()).toContain('no live Orbit host')
   })
 })
+
+describe('orbit-ts export', () => {
+  it('writes a self-contained evidence package', async () => {
+    const dir = await project()
+    const taskId = await startTask(dir)
+    const service = await (await import('@orbit/core')).TaskService.open(join(dir, '.orbit', 'tasks', taskId))
+    await service.amend('Second requirement.', { kind: 'explicit-text', verbatim: false, at: new Date().toISOString() })
+
+    const output = join(dir, 'evidence.json')
+    const sink = capture()
+    expect(await runCli(['export', '--output', output, '--project', dir], sink.io)).toBe(0)
+    expect(sink.out()).toContain(taskId)
+
+    const parsed = JSON.parse(await (await import('node:fs/promises')).readFile(output, 'utf8')) as {
+      format: string
+      taskId: string
+      state: { input: { versions: unknown[] } }
+      files: Record<string, { encoding: string; content: string }>
+    }
+    expect(parsed.format).toBe('orbit-export-v1')
+    expect(parsed.taskId).toBe(taskId)
+    expect(parsed.state.input.versions).toHaveLength(2)
+    expect(parsed.files['events.jsonl']?.content).toContain('input/amended')
+    expect(parsed.files['state.json']?.encoding).toBe('utf8')
+  })
+
+  it('requires --output', async () => {
+    const dir = await project()
+    const sink = capture()
+    expect(await runCli(['export', '--project', dir], sink.io)).toBe(2)
+    expect(sink.err()).toContain('--output')
+  })
+})

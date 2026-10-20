@@ -20,17 +20,6 @@
   disabled: true
 - id: tool-goal
   disabled: true
-- id: cordis-host-runner
-  disabled: true
-- id: cordis-client-runner
-  disabled: true
-- id: cordis-inspect-providers
-  disabled: true
-- id: ui-cordis
-  disabled: true
-# The Creator preset is not used by controlled sessions.
-- id: preset-cordis
-  disabled: true
 
 - id: approval
   config:

@@ -145,3 +145,12 @@ B 阶段开工前只需补一份短设计：JEV 观察输入在 DSH 事件下的
 - 新增 T0：`packages/dsh-host/src/profile.ts` 解析 `dsh --dump-config` 的有效配置，要求禁用行、`approval.policy: never`、`sandbox-policy.mode`、`permission.defaultPreset` 与 `approval: never`；`orbit-t0` bin 直接对运行中的 profile 做断言。
 - 验证：在 web 模板 profile 装入本地 bundle 后，`--dump-config` 191 行通过 T0；用户 home patch 重新启用 `hmr` 时 T0 失败（T0b）。受控 profile 实际启动成功，无激活错误或 pending 行；T0 单测 9 个。
 - 仍未做：bundle 发布与 `orbit` 单包、真实模型、冻结验收 #1/#2、Loom。
+
+## 实施进展（2026-10-20，修订、导出与 profile 派生）
+
+- `orbit` 工具新增 `amend`：Root 提交用户修订原文与可选原生 message id，Core 追加输入版本；后续每次 admission 的要求上下文自动读到新版本，旧版本工作单元自然失去派发资格。
+- `orbit-ts export [TASK] --output FILE`：只读快照任务目录为自包含 JSON（state、events、members、units、checks、coverage 等，文本 UTF-8 / 二进制 base64），不联系宿主、不上传。
+- 新增 `packages/bundle/scripts/derive-profile.mjs`：从 web/sdk 模板派生 profile，拷入本地构建的 host 与 bundle，写入 `dsh.profile.bundles`，应用 app/checker overlay，并运行 T0。app 与 checker 两个 profile 都派生成功并通过 T0；app profile 实际启动无错误。
+- bundle 的 web 专属禁用行移到 `profiles/orbit-app.patch.yml`，避免 sdk/checker profile 出现“entry not found”；共享 patch 只保留各模板都存在的核心行。
+- 探针新增 amend 与 CLI export 断言：输入版本变为 2、模型上下文在 18/22 次调用中看到修订、导出 7 个文件且包含两个输入版本。
+- 仍未做：单一 npm 包、真实模型、冻结验收 #1/#2、Loom、B2 其余义务。
