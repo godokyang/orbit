@@ -19,12 +19,20 @@ import {
   TaskService,
   TaskStore,
   buildJevObservationState,
+  candidateQuestions,
+  checkerQuestions,
+  decideChecker,
+  decideDelegation,
+  delegationQuestions,
   digestWorkspace,
+  loadSelectionRelease,
+  projectSelectionState,
   sha256Hex,
   snapshotWorkspace,
   jevObservationKey,
   type ControlRequest,
   type ModelIdentity,
+  type SelectionRelease,
   type TaskState,
 } from '@orbit/core'
 import { ControlServer } from './control.js'
@@ -62,6 +70,10 @@ export interface Config {
   jevFirstDelayMs?: number
   /** Frozen strict model list (exact `provider/model`). Empty means no freeze. */
   allowedModels?: string[]
+  /** Candidate pool used only for advisory selection facts. */
+  memberCandidates?: Array<{ label?: string; provider: string; model: string }>
+  /** Optional orbit-quality-decision-4 release file; absent means facts only. */
+  selectionReleaseFile?: string
 }
 
 interface PendingDispatch {
@@ -260,6 +272,10 @@ export default class OrbitHost extends Service {
     jevIntervalMs: z.number().step(1).min(1).default(300_000),
     jevFirstDelayMs: z.number().step(1).min(1).default(5_000),
     allowedModels: z.array(z.string()).default([]),
+    memberCandidates: z
+      .array(z.object({ label: z.string().default(''), provider: z.string(), model: z.string() }))
+      .default([]),
+    selectionReleaseFile: z.string().default(''),
   })
 
   private readonly maxTasks: number
@@ -273,6 +289,8 @@ export default class OrbitHost extends Service {
   private readonly jevTimers = new Map<string, NodeJS.Timeout>()
   private readonly lastSignalKey = new Map<string, string>()
   private readonly allowedModels: Set<string>
+  private readonly memberCandidates: Array<{ label?: string; provider: string; model: string }>
+  private readonly selectionRelease: SelectionRelease | undefined
   private readonly modelBindings = new Map<
     string,
     { taskDir: string; role: 'root' | 'member'; allowed: Set<string>; bound?: ModelRoute }
@@ -288,6 +306,18 @@ export default class OrbitHost extends Service {
     const maxTasks = config.maxTasks ?? 64
     this.maxTasks = maxTasks
     this.allowedModels = allowedSet(config.allowedModels)
+    this.memberCandidates = [...(config.memberCandidates ?? [])]
+    this.selectionRelease =
+      config.selectionReleaseFile === undefined || config.selectionReleaseFile.length === 0
+        ? undefined
+        : (() => {
+            try {
+              return loadSelectionRelease(config.selectionReleaseFile as string)
+            } catch (error) {
+              console.error(`orbit: selection release ignored: ${(error as Error).message}`)
+              return undefined
+            }
+          })()
     this.subagentTool = config.subagentTool ?? 'subagent'
     this.checkerModel =
       config.checkerProvider !== undefined && config.checkerProvider.length > 0 && config.checkerModel !== undefined && config.checkerModel.length > 0
@@ -311,8 +341,8 @@ export default class OrbitHost extends Service {
           action: {
             type: 'string',
             required: true,
-            enum: ['start', 'status', 'stop', 'declare', 'finish', 'accept', 'reject', 'check', 'complete', 'amend', 'dispute', 'ruling', 'rebind', 'resume', 'takeover', 'takeover-scope'],
-            description: 'start | status | stop | declare | finish | accept | reject | check | complete | amend | dispute | ruling | rebind | resume | takeover | takeover-scope',
+            enum: ['start', 'status', 'stop', 'declare', 'finish', 'accept', 'reject', 'check', 'complete', 'amend', 'dispute', 'ruling', 'rebind', 'resume', 'takeover', 'takeover-scope', 'assess'],
+            description: 'start | status | stop | declare | finish | accept | reject | check | complete | amend | dispute | ruling | rebind | resume | takeover | takeover-scope | assess',
           },
           instruction: { type: 'string', description: 'The user instruction, verbatim. Required for action=start.' },
           amendment: { type: 'string', description: 'The user amendment text, verbatim. Required for action=amend.' },
@@ -332,6 +362,11 @@ export default class OrbitHost extends Service {
           artifactRoot: { type: 'string', description: 'New artifact root. Required for action=rebind.' },
           from: { type: 'string', description: 'Previous task id. Required for action=resume.' },
           priorScope: { type: 'string', description: 'Root-declared scope before takeover. Optional for action=takeover; declaration text for action=takeover-scope.' },
+          assessKind: {
+            type: 'string',
+            enum: ['members', 'checker'],
+            description: 'Advisory selection kind. Default members.',
+          },
           task: { type: 'string', description: 'Optional task id; defaults to the latest task.' },
           goal: { type: 'string', description: 'Work-unit goal. Required for action=declare.' },
           acceptance: { type: 'string', description: 'Work-unit acceptance criteria. Required for action=declare.' },
@@ -543,6 +578,74 @@ export default class OrbitHost extends Service {
             })
             await host.adopt(service, agent, projectRoot)
             return JSON.stringify({ ok: true, ...summarize(state), taskDir: service.store.dir })
+          }
+
+          if (action === 'assess') {
+            const service = await openTask(projectRoot, maxTasks, (args as { task?: string }).task)
+            const state = await service.state()
+            if (state.status !== 'running') throw new Error(`orbit: cannot assess a ${state.status} task`)
+            const credential = await ctx.credentials.resolve(credentialRef('TYPESAFE_API_KEY'))
+            const apiKey = credential?.value
+            if (apiKey === undefined || apiKey.trim().length === 0) {
+              return JSON.stringify({ ok: false, code: 'jev_unavailable', reason: 'TYPESAFE_API_KEY is not configured' })
+            }
+            const status = await service.status()
+            const assessKind = (args as { assessKind?: 'members' | 'checker' }).assessKind ?? 'members'
+            const unit = status.workUnits.units.filter((candidate) => candidate.status === 'declared' || candidate.status === 'bound').at(-1)
+            const candidates = host.memberCandidates
+            const projected = projectSelectionState({
+              task_context: {
+                instruction: status.state.input.versions.map((version) => ({ version: version.version, text: version.text })),
+                unit: unit === undefined ? null : { id: unit.id, goal: unit.goal, acceptance: unit.acceptance, scope: unit.scope },
+                candidates: candidates.map((candidate) => ({ provider: candidate.provider, model: candidate.model })),
+              },
+              catalog_priors: [],
+              exact_evidence: [],
+            })
+            const checkerRoute = host.checkerModel
+            const questions =
+              assessKind === 'members'
+                ? [...delegationQuestions(), ...candidateQuestions(candidates)]
+                : checkerQuestions(checkerRoute === undefined ? [] : [{ model: `${checkerRoute.provider}/${checkerRoute.model}` }])
+            const client = new TypeSafeJudgmentClient({
+              apiKey,
+              ...(host.jevEndpoint === undefined ? {} : { endpoint: host.jevEndpoint }),
+              ...(host.jevModel === undefined ? {} : { model: host.jevModel }),
+            })
+            const judgment = await client.judge({ state: projected as unknown as Record<string, unknown>, questions })
+            if (judgment.status !== 'answered') {
+              await service.store.appendEvent('jev/selection', { kind: assessKind, status: 'unavailable', reason: judgment.reason })
+              return JSON.stringify({ ok: false, code: 'jev_unavailable', reason: judgment.reason })
+            }
+            let decision: unknown
+            if (assessKind === 'members') {
+              const handoff = judgment.answers.handoff_fit
+              if (handoff === undefined) throw new Error('orbit: judgment is missing handoff_fit')
+              decision = decideDelegation(
+                {
+                  handoffFit: handoff,
+                  ...(judgment.answers.member_task_fit === undefined ? {} : { memberTaskFit: judgment.answers.member_task_fit }),
+                  candidates: candidates.map((_, index) => ({
+                    index,
+                    probability: judgment.answers[`candidate_${index}_task_fit`] ?? 0,
+                  })),
+                },
+                host.selectionRelease,
+              )
+            } else {
+              decision = decideChecker(
+                checkerRoute === undefined ? [] : [{ index: 0, probability: judgment.answers.quality_0 ?? 0 }],
+                host.selectionRelease,
+              )
+            }
+            await service.store.appendEvent('jev/selection', {
+              kind: assessKind,
+              status: 'answered',
+              model: judgment.model,
+              answers: judgment.answers,
+              decision,
+            })
+            return JSON.stringify({ ok: true, judgment: { status: 'answered', model: judgment.model, answers: judgment.answers }, decision })
           }
 
           if (action === 'takeover-scope') {

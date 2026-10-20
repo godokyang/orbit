@@ -246,3 +246,10 @@ B 阶段开工前只需补一份短设计：JEV 观察输入在 DSH 事件下的
 - 尚未接线到宿主工具与真实 JEV 调用；当前只有 Core 决策函数，避免没有放行记录时产生自动推荐。
 - 验证：新增 6 个放行/决策单测；全套 91 个测试通过。
 - 仍未做：宿主 assess 动作与调用接线、输入压缩、真实校准放行、真实模型、Loom。
+
+## 实施进展（2026-10-20，宿主 assess 接线）
+
+- `orbit` 工具新增 `assess`（`assessKind=members|checker`）：用配置的 `memberCandidates` 或显式 checker 路由构造 `jev-selection-input-3` 状态与问题，调用 TypeSafe，写 `jev/selection` 事件并返回概率与决策。
+- 没有 `TYPESAFE_API_KEY` 时返回 `jev_unavailable`；没有 `selectionReleaseFile` 或放行无效时只返回 `facts_only`，不产生 `recommended`；放行文件只在启动时加载一次，无效则失败关闭为 facts-only。
+- 验证：DSH 探针本地端点返回 `handoff_fit=0.9, candidate_0=0.7`，`assess` 返回 `facts_only` 且无推荐，事件落盘；全套 91 个测试仍通过。
+- 仍未做：真实放行文件与真实 key、输入压缩、推荐结果进入自动派发（仍由 Root 决定）、Loom。

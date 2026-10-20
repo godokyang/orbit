@@ -61,12 +61,16 @@ function startJevServer() {
       request.setEncoding('utf8')
       request.on('data', (chunk) => { body += chunk })
       request.on('end', () => {
+        let ids = []
+        try {
+          const parsed = JSON.parse(body)
+          ids = Array.isArray(parsed.questions) ? parsed.questions.map((question) => question.id) : []
+        } catch {}
+        const answers = ids.includes('handoff_fit')
+          ? { handoff_fit: { noul: 0.9 }, member_task_fit: { noul: 0.8 }, candidate_0_task_fit: { noul: 0.7 } }
+          : { stuck: { noul: 0.9 }, off_track: { noul: 0.1 } }
         response.writeHead(200, { 'content-type': 'application/json' })
-        response.end(JSON.stringify({
-          model: 'jev-probe',
-          answers: { stuck: { noul: 0.9 }, off_track: { noul: 0.1 } },
-          usage: { input_tokens: 20, output_tokens: 2 },
-        }))
+        response.end(JSON.stringify({ model: 'jev-probe', answers, usage: { input_tokens: 20, output_tokens: 2 } }))
       })
     })
     jevServer.once('error', reject)
@@ -208,6 +212,20 @@ async function run(ctx) {
     status: autoCheck?.status,
     verdict: autoCheck?.result?.verdict,
   })
+
+  scripts.length = 0
+  scripts.push(() => toolChunks('orbit', { action: 'assess', assessKind: 'members' }))
+  scripts.push(() => textChunks('assessed'))
+  handle.agent.followup(msg('Assess member candidates.'))
+  await handle.agent.whenIdle()
+  task = readTask(WORK)
+  const selectionEvent = readFileSync(join(task.dir, 'events.jsonl'), 'utf8')
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line))
+    .filter((event) => event.type === 'jev/selection')
+    .at(-1)
+  log({ step: 'assess', status: selectionEvent?.data?.status, decision: selectionEvent?.data?.decision })
 
   const observation = ctx.sessionProjections.stateOf(handle.agent.session, 'orbitObservation')
   log({

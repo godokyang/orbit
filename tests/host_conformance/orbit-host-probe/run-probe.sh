@@ -64,6 +64,9 @@ cat > "$DSH_HOME/probe.patch.yml" <<EOF
         allowedModels: ['probe/probe-1']
         checkerProvider: probe
         checkerModel: probe-1
+        memberCandidates:
+          - provider: probe
+            model: probe-1
     - id: orbit-host-probe
       name: '$PROBE_RUN/index.js'
     - id: subagent-dsh-sdk
