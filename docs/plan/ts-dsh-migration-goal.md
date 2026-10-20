@@ -11,30 +11,30 @@
 5. `docs/plan/jev-observation-projection.md`：观察投影单元设计。
 6. `contracts/task-runtime.md`（产品语义权威）、`contracts/check-result.schema.json`、`contracts/integration.md` 与 `docs/adr/010-integration-contract.md`（现行 1.8 合同与兼容规则，2.0 要替代它）。
 7. ADR-009、011、012、013：模型池、Agent 自主、JEV 用途、终检范围。这些产品语义不随语言改变。
-8. DSH 源码 `~/Workspace/deepseek-harness`（提交 687f282e）：`docs/architecture.md`、`docs/user/develop/`、`packages/preset/agent-preset/skills/cordis-plugin-development/references/`。DSH 是"一切皆插件"，按它的写法写。
-9. Loom 仓库 `/Users/dy/Workspace/loom`：`AGENTS.md`、`docs/execution.md`、`docs/integration-readiness.md`、`services/node/`。C 阶段才动它。
+8. DSH 源码 [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness/tree/687f282e8625c6b8d11ff58211a90524be2e4317)（提交 `687f282e`）：`docs/architecture.md`、`docs/user/develop/`、`packages/preset/agent-preset/skills/cordis-plugin-development/references/`。DSH 是"一切皆插件"，按它的写法写。
+9. Loom 仓库 `/Users/yangke/Personal/workspace/ai-tools/loom`：`AGENTS.md`、`docs/execution.md`、`docs/integration-readiness.md`、`services/node/`。C 阶段才动它。
 10. 行为参照：`lib/orbit/*.rb`、`plugins/*.mjs`、`runners/omp-reviewer/`。只参照行为，不逐行翻译，不调用 Ruby。
 
 ## 2. 工作区规则（硬性）
 
 Orbit 与 Loom 在现有分支上都有正在运行的实例，**不能影响正常的分支流程**。
 
-- Orbit：不在 `/Users/dy/Workspace/orbit` 现有工作树里改代码，不碰 `main`。第一步：
+- Orbit：不在 `/Users/yangke/Personal/workspace/ai-tools/orbit` 现有工作树里改代码，不碰 `main`。第一步：
 
   ```sh
-  cd /Users/dy/Workspace/orbit
+  cd /Users/yangke/Personal/workspace/ai-tools/orbit
   git worktree add ../orbit-ts -b feat/ts-core-dsh docs/dsh-typescript-migration-plan
   ```
 
-  之后 Orbit 的所有工作在 `/Users/dy/Workspace/orbit-ts`，提交只落在 `feat/ts-core-dsh`。
+  之后 Orbit 的所有工作在 `/Users/yangke/Personal/workspace/ai-tools/orbit-ts`，提交只落在 `feat/ts-core-dsh`。
 - Loom：现有工作树在 `feat/sso-login` 上有人在用，不碰。C3 开始时从 Loom 的默认分支另建工作树与分支：
 
   ```sh
-  cd /Users/dy/Workspace/loom
+  cd /Users/yangke/Personal/workspace/ai-tools/loom
   git worktree add ../loom-orbit-dsh -b feat/orbit-dsh <默认分支>
   ```
 
-  Loom 的所有工作在 `/Users/dy/Workspace/loom-orbit-dsh`，遵守 Loom 自己的 `AGENTS.md`。
+  Loom 的所有工作在 `/Users/yangke/Personal/workspace/ai-tools/loom-orbit-dsh`，遵守 Loom 自己的 `AGENTS.md`。
 - 两个仓库都不合并、不 rebase 其他分支；推送前向用户报告。
 - DSH 相关测试与试跑一律用独立的 `DSH_HOME`（例如 `/tmp/orbit-dsh-dev`），不碰 `~/.dsh`、`desktop` 与 `omdsh` profile，不改用户凭据文件。
 - D 阶段之前：不发布 npm 包，不全局安装，不改 `install.sh`，不升 `package.json` 版本，不删除 Ruby/OMP 代码。D 阶段的每个破坏性步骤单独取得用户授权。
