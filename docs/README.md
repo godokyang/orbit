@@ -14,7 +14,9 @@
 | Agent 自主判断与程序职责 | [ADR-011](adr/011-agent-autonomy-and-runtime-responsibility.md)；阶段一与 Loom 协同的当前验证边界见交接 |
 | JEV 输入、观察节奏与按需压缩的决定 | [ADR-012](adr/012-jev-purpose-specific-input-and-compaction.md)；行为规则见任务运行合同，实现和验证见交接 |
 | 终检范围、结论沿用与续查职责 | [ADR-013](adr/013-final-review-scope-and-continuation.md)；实施状态见总待办 |
-| 本次迁移统一 TypeScript Core 与 DSH | [ADR-015](adr/015-typescript-core-and-dsh-migration.md)；用户已确认技术路线，仅文档准备，重写与 P3 均未开始 |
+| 本次迁移统一 TypeScript Core 与 DSH | [ADR-015](adr/015-typescript-core-and-dsh-migration.md)；2026-10-20 修订确认 Core 同进程、受控 profile、不钉版、单包分发、凭据机制、采纳 ADR-014 义务清单、工具链七项；重写未开始 |
+| TypeScript Core 与 DSH 实施计划 | [实施计划](plan/dsh-implementation-plan.md)；结构、受控 profile、义务到接缝、停止与日志设计、Loom 能力、阶段顺序 |
+| DSH 宿主接缝探针结果 | [探针记录](plan/dsh-host-probes.md)；九项探针与组合断言在桌面版 0.2.1-rc.2 上的结果与实现约束；复跑方法见 `tests/host_conformance/dsh-probe/` |
 | OMP 适配细节 | [OMP 适配说明](../contracts/host-omp.md)；入口、注入位置与宿主观察窗口，不改变产品规则 |
 | 宿主接口与事件通路实施方案 | [实施方案](plan/host-port-and-events.md)；P0/P1/P2 原阶段依据，P3 仅为宿主接缝试验，不覆盖完整重写 |
 | P2 设计与实施状态 | [P2 设计](plan/p2-design.md)；能力、进程归属与受阻项 |

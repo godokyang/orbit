@@ -1,6 +1,6 @@
 # Orbit → DSH 能力整合与源码复核
 
-状态：2026-10-20，用户已确认本次迁移统一重写为 TypeScript/Node.js，技术决定见 [ADR-015](../adr/015-typescript-core-and-dsh-migration.md)。下方 R1 保留原双方复核记录，其中“保留 Ruby Core”已被新决定替代；其他监督和兼容义务保留。独立 Coding Agent、DSH 应用入口及证据反馈目标不变。当前只完善文档，不开始重写或 P3；不宣称新路线已获原 R1 的独立复核或运行验收。
+状态：2026-10-20，用户已确认本次迁移统一重写为 TypeScript/Node.js，技术决定见 [ADR-015](../adr/015-typescript-core-and-dsh-migration.md)。同日 [ADR-015 修订](../adr/015-typescript-core-and-dsh-migration.md#2026-10-20-修订)改为 Core 与宿主插件同进程，本文引用的"进程隔离"与"失联不放行"以修订为准；实施依据见[实施计划](dsh-implementation-plan.md)。下方 R1 保留原双方复核记录，其中“保留 Ruby Core”已被新决定替代；其他监督和兼容义务保留。独立 Coding Agent、DSH 应用入口及证据反馈目标不变。当前只完善文档，不开始重写或 P3；不宣称新路线已获原 R1 的独立复核或运行验收。
 
 基线：Orbit `2c6c3a1d6013d447cdae18020bb934b2c0de7258`（0.8.22）；DSH `687f282e8625c6b8d11ff58211a90524be2e4317`（0.2.1-rc.2）。工作区与验证状态见[交接](handoff.md)，唯一任务入口见[总待办](agent-autonomy-implementation.md)。多 Agent 具体流程见[协作专题](dsh-collaboration.md)；本文件负责跨功能的整合与退场判据，不重复定义该流程。
 

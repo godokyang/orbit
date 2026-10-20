@@ -4,7 +4,7 @@
 
 关联：[ADR-010](010-integration-contract.md)（集成合同）、[ADR-011](011-agent-autonomy-and-runtime-responsibility.md)（Agent 判断与程序职责）、[宿主接口与事件通路实施方案](../plan/host-port-and-events.md)（本仓 docs/plan）。
 
-后续关系：2026-10-20 用户通过 [ADR-015](015-typescript-core-and-dsh-migration.md)选择本次迁移重写 TypeScript Core。本文仍为未采纳提议，其 Ruby 文件布局与“只换适配层”理由保留为当时背景，不作为新核心实现方案；新决定也不自动采纳本文全部协议和能力分级。
+后续关系：2026-10-20 用户通过 [ADR-015](015-typescript-core-and-dsh-migration.md)选择本次迁移重写 TypeScript Core。同日的 [ADR-015 修订](015-typescript-core-and-dsh-migration.md#2026-10-20-修订)第 6 条**部分采纳本文**：H1–H7、O1–O4 义务清单与一致性测试思路生效，作为 DSH 宿主插件的义务依据；本文的 Ruby 文件布局、`lib/orbit/hosts/<host>/` 目录、”只换适配层”的理由与控制协议改名清单废弃。
 
 ## 背景
 

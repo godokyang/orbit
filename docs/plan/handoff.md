@@ -34,6 +34,14 @@ P1 已有协议改名、适配目录迁移和合同拆分；P2 的 Orbit 侧公�
 - 本次新文档由用户指定的相邻 OMP `w28:p2`（会话 `01a1585f-0096-70e9-bac5-1bd1e81ff2cf`）独立复核。对方提出 3 项阻断及 8 项建议；双方核对反例、收紧过强论断并修订后，对方再次读取修订段、核对版本，明确确认“同意此版本TypeScript重写+DSH文档方案；当前无未解决分歧”。这次确认与原 R1 分开，只证明文档方案已联合复核，不代表 P3、重写、安装或真实运行验收完成。
   - 确认版本 SHA256：`docs/adr/015-typescript-core-and-dsh-migration.md` 为 `7d37099f9815f706ffa772839a357ddbaebb5a8c818cca25f18141485b2452ff`；`docs/plan/dsh-capability-consolidation.md` 为 `a1cf752af22306745e284693705979baf5d7a2fd74290742f51d14ee5c62fbcc`。关联索引、总待办及阶段/一致性方案的修订同步复核；后续只追加交接结果，并按用户新授权更新分支和提交推送边界，未改上述两份确认稿。
 
+### 2026-10-20 审计、决定与宿主探针
+
+- 本机工作区为 `/Users/dy/Workspace/orbit`（分支同上）；上文的 `/Users/yangke/...` 路径是另一台机器的。
+- 对迁移方案做了审计并与用户讨论，用户确认七项决定，已写入 [ADR-015 修订](../adr/015-typescript-core-and-dsh-migration.md#2026-10-20-修订)；实施依据见[实施计划](dsh-implementation-plan.md)。
+- 在隔离的 `DSH_HOME` 下用桌面版 0.2.1-rc.2 的 `dsh` 跑了九项宿主探针与组合断言，全部通过，结论与实现约束见[探针记录](dsh-host-probes.md)，脚本在 `tests/host_conformance/dsh-probe/`。探针用假模型驱动真实 agent 循环，不是真实模型验收，也未接 Loom。
+- 本机 `~/Workspace/deepseek-harness` 已更新到 687f282e。未改产品代码，未安装 Orbit，未提交。
+- 上文"本轮验证边界"记录的 ADR-015 确认版 SHA256 对应修订前的文件；今日追加的"2026-10-20 修订"节按用户授权写入，**不在相邻 OMP 的联合复核范围内**，尚未经第二方复核。
+
 ## 当前实现
 
 已确认需求见[总待办](agent-autonomy-implementation.md)，运行规则见[任务运行合同](../../contracts/task-runtime.md)。JEV 输入与按需压缩、终检范围与续查均已实现。Root 决定何时交卷，检查者判断成果，程序记录版本、完成与停止事实。
