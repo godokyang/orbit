@@ -261,15 +261,17 @@ async function run(ctx) {
   await handle.agent.whenIdle()
   task = readTask(WORK)
   const check = readChecks(task).filter((candidate) => candidate.kind === 'artifact').at(-1)
-  const archivePath = join(task.dir, 'sessions', `${handle.agent.id}.json`)
-  const archive = existsSync(archivePath) ? JSON.parse(readFileSync(archivePath, 'utf8')) : undefined
+  const archiveDir = join(task.dir, 'sessions', handle.agent.id)
+  const archiveFiles = existsSync(archiveDir) ? readdirSync(archiveDir).filter((entry) => entry.endsWith('.json')) : []
+  const archives = archiveFiles.map((entry) => JSON.parse(readFileSync(join(archiveDir, entry), 'utf8')))
   const checkResults = await toolResults(ctx, handle.agent.id)
   log({
     step: 'archive',
-    exists: Boolean(archive),
-    seqCount: archive?.seq?.count,
-    seqLast: archive?.seq?.last,
-    digest: archive?.sha256?.slice(0, 12),
+    segments: archives.length,
+    seqRanges: archives.map((archive) => archive.seq),
+    gaps: archives.filter((archive) => archive.gap !== undefined).map((archive) => archive.gap),
+    totalEvents: archives.reduce((sum, archive) => sum + (archive.seq?.count ?? 0), 0),
+    digest: archives.at(-1)?.sha256?.slice(0, 12),
   })
   log({
     step: 'check',

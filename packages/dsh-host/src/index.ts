@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs'
-import { readdir } from 'node:fs/promises'
+import { readdir, readFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { Service, type Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
@@ -26,6 +26,7 @@ import {
   delegationQuestions,
   digestWorkspace,
   loadSelectionRelease,
+  planArchiveSegment,
   projectSelectionState,
   sha256Hex,
   snapshotWorkspace,
@@ -995,25 +996,42 @@ export default class OrbitHost extends Service {
     }
   }
 
-  /** B layer: persist one full session snapshot as task-local evidence. */
+  /** B layer: append only events not yet archived for one session. */
   private async archiveSession(service: TaskService, sessionId: string): Promise<void> {
     try {
+      if (sessionId.includes('/') || sessionId.includes('\0')) return
       const snapshot = await this.ctx.sessionQuery.readSession(sessionId as never)
       if (snapshot === undefined) return
-      const events = snapshot.events ?? []
-      const first = events[0]?.seq ?? null
-      const last = events.at(-1)?.seq ?? null
+      const all = snapshot.events ?? []
+      if (all.length === 0) return
+      const directory = join(service.store.dir, 'sessions', sessionId)
+      const names = await readdir(directory).catch(() => [] as string[])
+      let lastArchived = 0
+      for (const name of names.filter((entry) => /^seq-\d+-\d+\.json$/.test(entry))) {
+        try {
+          const previous = JSON.parse(await readFile(join(directory, name), 'utf8')) as { seq?: { last?: number } }
+          lastArchived = Math.max(lastArchived, previous.seq?.last ?? 0)
+        } catch {
+          // A corrupt archive cannot lower the cursor; keep the highest valid one.
+        }
+      }
+      const segment = planArchiveSegment(
+        all.map((event) => ({ seq: event.seq as unknown as number, event })),
+        lastArchived,
+      )
+      if (segment === undefined) return
       const payload = {
-        format: 'orbit-session-archive-v1',
+        format: 'orbit-session-archive-v2',
         capturedAt: new Date().toISOString(),
         sessionId,
         sessionVersion: snapshot.session.version ?? null,
         inheritedEventCount: snapshot.inheritedEventCount ?? 0,
-        seq: { first, last, count: events.length },
-        sha256: sha256Hex(JSON.stringify(events)),
-        snapshot,
+        seq: { first: segment.first, last: segment.last, count: segment.count, previous_last: segment.previousLast },
+        ...(segment.gap === undefined ? {} : { gap: segment.gap }),
+        sha256: sha256Hex(JSON.stringify(segment.events.map((entry) => entry.event))),
+        events: segment.events.map((entry) => entry.event),
       }
-      await service.store.writeArchive(`sessions/${sessionId}.json`, payload)
+      await service.store.writeArchive(`sessions/${sessionId}/seq-${segment.first}-${segment.last}.json`, payload)
     } catch (error) {
       console.error(`orbit: session archive failed for ${sessionId}: ${(error as Error).message}`)
     }

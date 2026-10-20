@@ -253,3 +253,10 @@ B 阶段开工前只需补一份短设计：JEV 观察输入在 DSH 事件下的
 - 没有 `TYPESAFE_API_KEY` 时返回 `jev_unavailable`；没有 `selectionReleaseFile` 或放行无效时只返回 `facts_only`，不产生 `recommended`；放行文件只在启动时加载一次，无效则失败关闭为 facts-only。
 - 验证：DSH 探针本地端点返回 `handoff_fit=0.9, candidate_0=0.7`，`assess` 返回 `facts_only` 且无推荐，事件落盘；全套 91 个测试仍通过。
 - 仍未做：真实放行文件与真实 key、输入压缩、推荐结果进入自动派发（仍由 Root 决定）、Loom。
+
+## 实施进展（2026-10-20，增量会话归档）
+
+- 会话归档从整份覆盖改为增量段 `sessions/<sessionId>/seq-<first>-<last>.json`：读取已有段的最大 `seq.last` 作为游标，只写新事件；段内记录首/末 seq、事件数、上一游标、事件 JSON 摘要与完整事件。
+- 宿主重启或丢失观察导致首事件 > 上一游标+1 时，段内写 `gap {from,to}`；没有新事件时不写空段；损坏的旧段不降低游标。
+- 验证：Core 段规划 4 个单测（首段、续段、gap、空）；DSH 探针归档为 2 段（seq 1–69、70–82），无 gap，总事件 82；全套 95 个测试通过。
+- 仍未做：归档点与宿主死亡之间的不可观察缺口只能事后标记、无法补齐；快照/归档回收、Loom。
