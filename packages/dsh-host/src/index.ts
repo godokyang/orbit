@@ -464,6 +464,30 @@ export default class OrbitHost extends Service {
           reason: { type: 'string', description: 'Rejection reason. Required for action=reject.' },
         },
         output: TEXT_OUTPUT,
+        presentCall(args: unknown) {
+          const action = (args as { action?: string }).action ?? 'status'
+          return { card: 'generic', title: `Orbit ${action}`, kind: 'other', rawInput: action }
+        },
+        presentResult(args: unknown, result: { content: Array<{ type?: string; text?: string }>; isError: boolean }) {
+          const action = (args as { action?: string }).action ?? 'status'
+          const raw = result.content.find((block) => block.type === 'text')?.text ?? ''
+          let body = raw
+          try {
+            const parsed = JSON.parse(raw) as Record<string, unknown>
+            if (typeof parsed.error === 'string') body = `**${action} failed** · ${parsed.error}`
+            else if (typeof parsed.status === 'string') {
+              body = `**${String(parsed.taskId ?? parsed.id ?? 'task')}** · ${String(parsed.status)}`
+              if (typeof parsed.inputVersion === 'number') body += ` · input v${parsed.inputVersion}`
+              if (parsed.checksInFlight !== undefined && parsed.checksInFlight !== null) body += ` · check #${String(parsed.checksInFlight)}`
+              if (typeof parsed.unit === 'object' && parsed.unit !== null && 'id' in parsed.unit) body += ` · unit ${String((parsed.unit as { id: unknown }).id)}`
+            } else if (typeof parsed.verdict === 'string') {
+              body = `Check ${String(parsed.checkNumber ?? '')} · ${String(parsed.verdict)}`
+            }
+          } catch {
+            // Non-JSON results stay as their text.
+          }
+          return { card: 'generic', title: `Orbit ${action}`, content: [{ type: 'text', text: body }] }
+        },
         timeoutMs: 600_000,
         async execute(args, exec) {
           const agent = exec.agent
