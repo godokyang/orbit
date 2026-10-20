@@ -23,11 +23,21 @@
     "./profiles/orbit-app.patch.yml": "./profiles/orbit-app.patch.yml",
     "./profiles/orbit-node.patch.yml": "./profiles/orbit-node.patch.yml",
     "./profiles/orbit-checker.patch.yml": "./profiles/orbit-checker.patch.yml",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./client": {
+      "default": "./dist/client.js"
+    }
   },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-slots"
+      ],
+      "platform": "web"
     }
   },
   "files": [
