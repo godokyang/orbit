@@ -306,8 +306,8 @@ export default class OrbitHost extends Service {
           action: {
             type: 'string',
             required: true,
-            enum: ['start', 'status', 'stop', 'declare', 'finish', 'accept', 'reject', 'check', 'complete', 'amend', 'dispute', 'ruling', 'rebind'],
-            description: 'start | status | stop | declare | finish | accept | reject | check | complete | amend | dispute | ruling | rebind',
+            enum: ['start', 'status', 'stop', 'declare', 'finish', 'accept', 'reject', 'check', 'complete', 'amend', 'dispute', 'ruling', 'rebind', 'resume', 'takeover'],
+            description: 'start | status | stop | declare | finish | accept | reject | check | complete | amend | dispute | ruling | rebind | resume | takeover',
           },
           instruction: { type: 'string', description: 'The user instruction, verbatim. Required for action=start.' },
           amendment: { type: 'string', description: 'The user amendment text, verbatim. Required for action=amend.' },
@@ -325,6 +325,8 @@ export default class OrbitHost extends Service {
             description: 'Ruling decision. Required for action=ruling.',
           },
           artifactRoot: { type: 'string', description: 'New artifact root. Required for action=rebind.' },
+          from: { type: 'string', description: 'Previous task id. Required for action=resume.' },
+          priorScope: { type: 'string', description: 'Root-declared scope before takeover. Optional for action=takeover.' },
           task: { type: 'string', description: 'Optional task id; defaults to the latest task.' },
           goal: { type: 'string', description: 'Work-unit goal. Required for action=declare.' },
           acceptance: { type: 'string', description: 'Work-unit acceptance criteria. Required for action=declare.' },
@@ -377,13 +379,7 @@ export default class OrbitHost extends Service {
               role: 'root',
               allowed: new Set(host.allowedModels),
             })
-            host.fencedSessions.delete(agent.id)
-            saveFenceRegistry(host.fencedSessions)
-            host.attachRequirements(agent, service)
-            host.startJev(service, agent)
-            await host.ensureControl(projectRoot).catch((error: Error) => {
-              console.error(`orbit: control socket unavailable: ${error.message}`)
-            })
+            await host.adopt(service, agent, projectRoot)
             return JSON.stringify({ ok: true, ...summarize(state), taskDir: service.store.dir })
           }
 
@@ -464,6 +460,66 @@ export default class OrbitHost extends Service {
             if (!gate.ok) return JSON.stringify({ ...gate })
             setTimeout(() => { void host.performStop(service, snapshot.digest) }, 50)
             return JSON.stringify({ ok: true, completion: 'scheduled', artifactDigest: snapshot.digest })
+          }
+
+          if (action === 'resume') {
+            const { from, instruction, messageId } = args as { from?: string; instruction?: string; messageId?: string }
+            if (from === undefined || instruction === undefined) throw new Error('orbit: action=resume requires from and instruction')
+            const active = await findLatest(projectRoot, maxTasks)
+            if (active !== undefined && (await active.state()).status === 'running') {
+              throw new Error('orbit: this workspace already has a running task')
+            }
+            const { service, state } = await TaskService.resumeFrom(join(TaskStore.tasksRoot(projectRoot), from), {
+              projectRoot,
+              rootSessionId: agent.id,
+              instruction,
+              source: {
+                kind: 'continuation',
+                verbatim: true,
+                at: new Date().toISOString(),
+                ...(messageId === undefined ? {} : { messageId }),
+              },
+              workspace: workspaceInfo(projectRoot),
+              ...(host.allowedModels.size === 0 ? {} : { allowedModels: [...host.allowedModels] }),
+            })
+            await host.adopt(service, agent, projectRoot)
+            return JSON.stringify({ ok: true, ...summarize(state), taskDir: service.store.dir })
+          }
+
+          if (action === 'takeover') {
+            const { instruction, reason, priorScope, messageId } = args as {
+              instruction?: string
+              reason?: string
+              priorScope?: string
+              messageId?: string
+            }
+            if (instruction === undefined || reason === undefined) throw new Error('orbit: action=takeover requires instruction and reason')
+            const active = await findLatest(projectRoot, maxTasks)
+            if (active !== undefined && (await active.state()).status === 'running') {
+              throw new Error('orbit: this workspace already has a running task')
+            }
+            const snapshot = await digestWorkspace(projectRoot)
+            const { service, state } = await TaskService.start({
+              projectRoot,
+              rootSessionId: agent.id,
+              instruction,
+              source: {
+                kind: messageId === undefined ? 'explicit-text' : 'user-message',
+                verbatim: messageId !== undefined,
+                at: new Date().toISOString(),
+                ...(messageId === undefined ? {} : { messageId, sessionId: agent.id }),
+              },
+              workspace: workspaceInfo(projectRoot),
+              takeover: {
+                reason,
+                ...(priorScope === undefined ? {} : { priorScope }),
+                ...(messageId === undefined ? {} : { messageId }),
+                snapshot: { ...snapshot, at: new Date().toISOString() },
+              },
+              ...(host.allowedModels.size === 0 ? {} : { allowedModels: [...host.allowedModels] }),
+            })
+            await host.adopt(service, agent, projectRoot)
+            return JSON.stringify({ ok: true, ...summarize(state), taskDir: service.store.dir })
           }
 
           if (action === 'dispute') {
@@ -695,6 +751,22 @@ export default class OrbitHost extends Service {
     saveFenceRegistry(this.fencedSessions)
     setTimeout(() => { void this.performStop(service) }, delayMs)
     return state
+  }
+
+  /** Shared post-start wiring for start/resume/takeover. */
+  private async adopt(
+    service: TaskService,
+    agent: NonNullable<import('@deepseek-ai/dsh-tools').ToolRunContext['agent']>,
+    projectRoot: string,
+  ): Promise<void> {
+    this.modelBindings.set(agent.id, { taskDir: service.store.dir, role: 'root', allowed: new Set(this.allowedModels) })
+    this.fencedSessions.delete(agent.id)
+    saveFenceRegistry(this.fencedSessions)
+    this.attachRequirements(agent, service)
+    this.startJev(service, agent)
+    await this.ensureControl(projectRoot).catch((error: Error) => {
+      console.error(`orbit: control socket unavailable: ${error.message}`)
+    })
   }
 
   /** First observation after the start grace period; then a fixed cadence. */

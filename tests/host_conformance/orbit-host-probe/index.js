@@ -347,6 +347,39 @@ async function run(ctx) {
   }, 12000, 'second stop confirmation').catch(() => readTask(WORK))
   log({ step: 'second-stop', status: secondState?.state?.status, confirmed: secondState?.state?.stop?.confirmation?.confirmed })
 
+  // Resume the paused second task, then stop the continuation.
+  scripts.length = 0
+  scripts.push(() => toolChunks('orbit', { action: 'resume', from: secondState?.state?.id, instruction: 'Continue the second task.' }))
+  scripts.push(() => textChunks('resumed'))
+  handle.agent.followup(msg('Resume the stopped task.'))
+  await handle.agent.whenIdle()
+  task = readTask(WORK)
+  log({
+    step: 'resume',
+    taskId: task?.state?.id,
+    versions: task?.state?.input?.versions?.map((version) => version.version),
+    continuation: task?.state?.continuation,
+  })
+  await cli(['stop', '--json', '--project', WORK])
+  await waitFor(async () => (readTask(WORK)?.state?.status !== 'running' ? true : undefined), 12000, 'resume stop').catch(() => undefined)
+
+  // Take over work that already exists, recording scope and a snapshot.
+  scripts.length = 0
+  scripts.push(() => toolChunks('orbit', { action: 'takeover', instruction: 'Take over the existing work.', reason: 'probe takeover', priorScope: 'partial' }))
+  scripts.push(() => textChunks('took over'))
+  handle.agent.followup(msg('Take over the existing work.'))
+  await handle.agent.whenIdle()
+  task = readTask(WORK)
+  log({
+    step: 'takeover',
+    taskId: task?.state?.id,
+    reason: task?.state?.takeover?.reason,
+    priorScope: task?.state?.takeover?.priorScope,
+    snapshot: task?.state?.takeover?.snapshot,
+  })
+  await cli(['stop', '--json', '--project', WORK])
+  await waitFor(async () => (readTask(WORK)?.state?.status !== 'running' ? true : undefined), 12000, 'takeover stop').catch(() => undefined)
+
   await handle.dispose()
   if (jevServer !== undefined) await new Promise((resolve) => jevServer.close(() => resolve()))
   log({

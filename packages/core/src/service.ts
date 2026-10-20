@@ -51,6 +51,10 @@ export interface StartTaskOptions {
   source?: RequirementSource
   workspace?: Partial<WorkspaceBinding>
   allowedModels?: string[]
+  /** Versions copied from a confirmed-stopped predecessor (resume only). */
+  priorVersions?: RequirementVersion[]
+  continuation?: TaskState['continuation']
+  takeover?: TaskState['takeover']
   taskId?: string
   clock?: () => Date
 }
@@ -128,13 +132,15 @@ export class TaskService {
     const now = clock().toISOString()
     const id = options.taskId ?? newId('task')
     const text = instruction
+    const versions: RequirementVersion[] = (options.priorVersions ?? []).map((prior) => structuredClone(prior))
     const version: RequirementVersion = {
-      version: 1,
+      version: versions.length + 1,
       text,
       sha256: sha256Hex(text),
       source: options.source ?? { kind: 'explicit-text', verbatim: true, at: now },
       recordedAt: now,
     }
+    versions.push(version)
     const workspace: WorkspaceBinding = {
       projectRoot,
       artifactRoot: options.workspace?.artifactRoot ?? options.artifactRoot ?? projectRoot,
@@ -156,11 +162,13 @@ export class TaskService {
         ...(options.rootAgentId === undefined ? {} : { agentId: options.rootAgentId }),
         ...(options.rootModel === undefined ? {} : { model: options.rootModel }),
       },
-      input: { versions: [version] },
+      input: { versions },
       checks: { nextNumber: 1, inFlight: null },
       ...(options.allowedModels === undefined || options.allowedModels.length === 0
         ? {}
         : { authorization: { allowedModels: [...options.allowedModels] } }),
+      ...(options.continuation === undefined ? {} : { continuation: options.continuation }),
+      ...(options.takeover === undefined ? {} : { takeover: options.takeover }),
       eventSeq: 0,
     }
     const store = await TaskStore.create(
@@ -182,6 +190,49 @@ export class TaskService {
 
   static async open(taskDir: string, clock?: () => Date): Promise<TaskService> {
     return new TaskService(await TaskStore.open(taskDir, clock))
+  }
+
+  /**
+   * Start a new task from a confirmed-stopped paused/needs_user predecessor.
+   * Copies the original requirements and effective amendments, appends the
+   * continuation message as the new effective version, and leaves the old task
+   * terminal and unchanged.
+   */
+  static async resumeFrom(
+    previousTaskDir: string,
+    options: StartTaskOptions & { instruction: string },
+  ): Promise<{ service: TaskService; state: TaskState }> {
+    const previous = await TaskService.open(previousTaskDir)
+    const previousState = await previous.state()
+    if (previousState.status !== 'paused' && previousState.status !== 'needs_user') {
+      throw new OrbitError('invalid_state', `cannot resume a ${previousState.status} task`)
+    }
+    if (previousState.stop?.confirmation?.confirmed !== true) {
+      throw new OrbitError('invalid_state', 'the predecessor has no confirmed stop')
+    }
+    if (previousState.projectRoot !== options.projectRoot) {
+      throw new OrbitError('invalid_state', 'resume requires the same project root')
+    }
+    if (previousState.root.sessionId !== options.rootSessionId) {
+      throw new OrbitError('invalid_state', 'resume requires the same Root session')
+    }
+    const continuation: TaskState['continuation'] = {
+      previousTaskId: previousState.id,
+      previousTaskDir: previous.store.dir,
+      previousStatus: previousState.status,
+      ...(options.source?.messageId === undefined ? {} : { sourceMessageId: options.source.messageId }),
+      at: new Date().toISOString(),
+    }
+    const started = await TaskService.start({
+      ...options,
+      priorVersions: previousState.input.versions,
+      continuation,
+    })
+    await started.service.store.appendEvent('continuation/started', {
+      previousTaskId: previousState.id,
+      previousStatus: previousState.status,
+    })
+    return started
   }
 
   async state(): Promise<TaskState> {

@@ -144,6 +144,21 @@ export interface TaskState {
   authorization?: {
     allowedModels: string[]
   }
+  /** Set when this task continues a confirmed-stopped predecessor. */
+  continuation?: {
+    previousTaskId: string
+    previousTaskDir: string
+    previousStatus: TaskStatus
+    sourceMessageId?: string
+    at: string
+  }
+  /** Set when supervision starts on work the Root already executed. */
+  takeover?: {
+    reason: string
+    priorScope?: string
+    messageId?: string
+    snapshot: { digest: string; files: number; bytes: number; at: string }
+  }
   finalization?: FinalizationNotice
   completion?: CompletionRecord
   completionInvalidation?: CompletionInvalidation

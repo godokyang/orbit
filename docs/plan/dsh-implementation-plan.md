@@ -193,3 +193,11 @@ B 阶段开工前只需补一份短设计：JEV 观察输入在 DSH 事件下的
 - 严格任务必须显式配置 `checkerProvider/checkerModel` 且位于冻结名单内，手动与 JEV 自动过程检查都在启动检查者前核对；理由 effort 不参与路由身份比较。
 - 验证：授权决策 6 个单测、Core 冻结名单 1 个单测；DSH 探针在 `allowedModels=['probe/probe-1']` + 显式 checker 配置下完整链路通过。
 - 仍未做：CLI 的 `--allowed-model` 入口、检查者子进程内部的名单复核、选型缓存、真实模型。
+
+## 实施进展（2026-10-20，续接与接管）
+
+- `resume`：只接受同项目、同 Root、已确认停止的 `paused`/`needs_user` 前序任务；新任务复制原要求与有效修订（保留来源），把续接消息作为新的有效版本，记录 `continuation.previousTaskId/previousTaskDir/previousStatus/sourceMessageId`，旧任务保持终态不变。
+- `takeover`：`start` 可带 `reason`、可选 `priorScope`、原生消息 id 与产物快照（digest/files/bytes/at）；记录 `state.takeover`，不把此前执行追认为受控。快照当前是摘要清单，不是完整字节副本。
+- 宿主把 start/resume/takeover 的后续接线收口到 `adopt`：授权绑定、清围栏、要求上下文、JEV 调度、控制 socket。
+- 验证：Core 续接/接管 3 个单测；DSH 探针完成 paused 任务 resume（版本 [1,2] + continuation）→ stop → takeover（reason/priorScope/snapshot 落盘）→ stop；全套链路仍通过。
+- 仍未做：完整快照副本、prior_scope 追加声明命令、续接的 review-model 继承、真实模型、Loom。
