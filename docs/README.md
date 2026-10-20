@@ -17,6 +17,7 @@
 | 本次迁移统一 TypeScript Core 与 DSH | [ADR-015](adr/015-typescript-core-and-dsh-migration.md)；2026-10-20 修订确认 Core 同进程、受控 profile、不钉版、单包分发、凭据机制、采纳 ADR-014 义务清单、工具链七项；重写未开始 |
 | TypeScript Core 与 DSH 实施计划 | [实施计划](plan/dsh-implementation-plan.md)；结构、受控 profile、义务到接缝、停止与日志设计、Loom 能力、阶段顺序 |
 | JEV 观察输入在 DSH 上的投影 | [观察投影设计](plan/jev-observation-projection.md)；操作记录字段、窗口与游标、去重键、校准影响 |
+| 切片 B 执行指令 | [Goal 提示](plan/slice-b-goal.md)；交给实施 Agent 的完整指令：先读什么、工作区规则、范围、顺序、验收、纪律 |
 | DSH 宿主接缝探针结果 | [探针记录](plan/dsh-host-probes.md)；九项探针与组合断言在桌面版 0.2.1-rc.2 上的结果与实现约束；复跑方法见 `tests/host_conformance/dsh-probe/` |
 | OMP 适配细节 | [OMP 适配说明](../contracts/host-omp.md)；入口、注入位置与宿主观察窗口，不改变产品规则 |
 | 宿主接口与事件通路实施方案 | [实施方案](plan/host-port-and-events.md)；P0/P1/P2 原阶段依据，P3 仅为宿主接缝试验，不覆盖完整重写 |
