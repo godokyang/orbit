@@ -1,0 +1,25 @@
+{
+  "name": "@orbit/core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Orbit task supervision core: durable records, requirements, members, checks, completion and stop gates.",
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "zod": "4.6.5"
+  }
+}

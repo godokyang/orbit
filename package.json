@@ -6,7 +6,7 @@
     "orbit": "scripts/orbit"
   },
   "engines": {
-    "node": ">=18"
+    "node": "^22.19.0 || >=24.0.0"
   },
   "files": [
     "README.md",
@@ -32,12 +32,21 @@
   ],
   "scripts": {
     "test": "npm run check:version && sh -n install.sh && sh -n uninstall.sh && ruby --disable-gems tests/workspace_snapshot_test.rb && ruby --disable-gems tests/workspace_binding_test.rb && ruby --disable-gems tests/jev_advisor_test.rb && ruby --disable-gems tests/jev_input_compactor_test.rb && ruby --disable-gems tests/judgment_usage_test.rb && ruby --disable-gems tests/resource_call_ledger_test.rb && ruby --disable-gems tests/route_resource_facts_test.rb && ruby --disable-gems tests/route_resource_store_test.rb && ruby --disable-gems tests/route_cost_inputs_test.rb && ruby --disable-gems tests/model_quality_policy_test.rb && ruby --disable-gems tests/member_model_selector_test.rb && ruby --disable-gems tests/model_capability_facts_test.rb && ruby --disable-gems tests/work_unit_test.rb && ruby --disable-gems tests/requirement_coverage_test.rb && ruby --disable-gems tests/judgment_test.rb && ruby --disable-gems tests/prestart_test.rb && ruby --disable-gems tests/model_evidence_cache_test.rb && ruby --disable-gems tests/model_candidate_pool_test.rb && ruby --disable-gems tests/openrouter_model_overview_test.rb && ruby --disable-gems tests/checker_model_selection_test.rb && ruby --disable-gems tests/checker_model_selector_test.rb && ruby --disable-gems tests/plugin_connection_test.rb && ruby --disable-gems tests/observation_key_test.rb && ruby --disable-gems tests/check_runner_context_test.rb && ruby --disable-gems tests/task_runtime_test.rb && node tests/model_authorization_test.mjs && node tests/root_verifications_test.mjs && node tests/root_verifications_file_tools_test.mjs && node tests/model_call_receipts_test.mjs && node tests/work_unit_scope_test.mjs && node tests/omp_native_gate_test.mjs && node tests/omp_entry_recovery_test.mjs && node tests/omp_collab_evidence_test.mjs && node tests/omp_session_agents_test.mjs && node tests/omp_model_picker_test.mjs && bun test runners/omp-reviewer/usage-receipt.test.ts runners/omp-reviewer/provider-error.test.ts runners/omp-reviewer/check-result.test.ts runners/omp-reviewer/json-recovery.test.ts runners/omp-reviewer/model-probe.test.ts runners/omp-reviewer/confined-tools.test.ts && ruby --disable-gems tests/omp_entry_test.rb && ruby --disable-gems tests/member_registration_test.rb && ruby --disable-gems tests/inbox_command_test.rb && ruby --disable-gems tests/omp_native_member_test.rb && ruby --disable-gems tests/omp_check_runner_test.rb && ruby --disable-gems tests/omp_cli_checker_test.rb && ruby --disable-gems tests/task_evidence_export_test.rb && ruby --disable-gems tests/cli_test.rb && ruby --disable-gems tests/conversation_test.rb && ruby --disable-gems tests/task_events_test.rb && ruby --disable-gems tests/host_conformance_test.rb && ruby --disable-gems tests/integration_contract_test.rb && ruby --disable-gems tests/install_test.rb",
-    "check:version": "ruby --disable-gems scripts/check-version.rb"
+    "check:version": "ruby --disable-gems scripts/check-version.rb",
+    "build:ts": "pnpm -r --filter './packages/**' build",
+    "test:ts": "vitest run",
+    "typecheck:ts": "pnpm -r --filter './packages/**' typecheck"
   },
   "publishConfig": {
     "access": "public"
   },
   "dependencies": {
     "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.2",
+    "tsdown": "^0.22.14",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.12"
   }
 }

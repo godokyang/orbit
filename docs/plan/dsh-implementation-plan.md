@@ -96,3 +96,13 @@ JEV 的 key 走 `ctx.credentials` 引用（默认 `TYPESAFE_API_KEY`），每次
 | D | 历史读取、安装升级、干净切换、Ruby 退场 | 未开始 |
 
 B 阶段开工前只需补一份短设计：JEV 观察输入在 DSH 事件下的投影形状与去重键，因为它决定重校准，已写在[观察投影设计](jev-observation-projection.md)。其余在实施中决定：Root 的 `orbit` 工具参数定义（做完给用户过目）、工作单元范围 guard 规则、工具链与包命名（开工时问一次 npm scope）、任务记录格式（全新设计，不兼容旧记录）。C 阶段的界面由 AI 先做第一版，合同 2.0 字段在 C 阶段设计时定。
+
+## 实施决定（2026-10-20，切片一开工）
+
+- 仓库布局：pnpm workspace，`packages/core`、`packages/dsh-host`、`packages/cli`、`packages/dsh-ui`；内部包暂用 `@orbit/*` 私有名，发布 scope 仍待用户确认（检查点 1）。
+- 工具链与 DSH 对齐：Node `^22.19.0 || >=24.0.0`、TypeScript 6.0、tsdown 0.22、vitest 4；tsdown 产物为 ESM（`.mjs`/`.d.mts`）。
+- 任务记录 v1（全新，不兼容 OMP）：`state.json`、`members.json`、`work-units.json`、`findings.json`、`requirement-coverage.json`、`checks/<n>.json`、`events.jsonl`。`TaskStore` 是唯一写入口；每个文件原子写（临时文件 + fsync + rename + 目录 fsync），进程内串行，事件序号单调。
+- 完成门：只认当前输入与产物版本的手动 reviewer 检查（`verdict=complete`、`delivery.ready`、`coverage.complete` 且所有 delivery 项 verified），并要求无 open finding、成员全部结算、无在途检查、停止证据齐全；否则停止后记 `paused` 并写 `completion_invalidation`。
+- 检查结果在边界用 zod 校验，并落实合同语义：非空文本、覆盖 requirement 去重、verified 必须有 evidence、`gap_kind` 仅用于 unverified、`ref` 长度与控制字符规则。
+- finding 去重按六项绑定（输入摘要、产物根、产物摘要、requirement、evidence、action）；绑定不变时只累计 repeats，绑定变化时重开。
+- 当前验证：`@orbit/core` 的 14 个 vitest 用例通过，覆盖记录持久化、修订版本、停止围栏、成员与工作单元、完成门、finding 去重与重开、检查结果校验；尚未接 DSH 宿主，未跑 T0/T1、真实模型或 Loom。
