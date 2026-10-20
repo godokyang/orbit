@@ -61,6 +61,45 @@ export function extractCheckerJson(text: string): unknown {
   return JSON.parse(candidate.slice(start, end + 1)) as unknown
 }
 
+export interface ProcessCheckerPromptInput {
+  state: TaskState
+  taskDir: string
+  signal: Array<{ id: string; probability: number }>
+  operations: Array<{ name: string; status: string; target: string; declaredIntent: string }>
+}
+
+/** Prompt for a JEV-signalled process check: correction advice, never completion. */
+export function buildProcessCheckerPrompt(input: ProcessCheckerPromptInput): string {
+  const requirements = input.state.input.versions
+    .map((version) => `${version.version === 1 ? 'Original requirement' : `Amendment v${version.version}`}:\n${version.text}`)
+    .join('\n\n')
+  const recent = input.operations
+    .slice(-10)
+    .map((operation) => `- ${operation.name} [${operation.status}] target=${operation.target} intent=${operation.declaredIntent}`)
+    .join('\n')
+  const signal = input.signal.map((entry) => `${entry.id}=${entry.probability.toFixed(2)}`).join(', ')
+  return `You are Orbit's independent process checker. Judge whether the Root currently needs a specific correction; do not judge final delivery readiness or approve completion.
+
+Task: ${input.state.id}
+Task record: ${input.taskDir}
+JEV signal: ${signal}
+
+Requirements:
+${requirements}
+
+Recent operations (bounded, no tool payloads):
+${recent || '(none observed)'}
+
+Rules:
+- Read only. Inspect the task record and workspace if needed.
+- Report only concrete, actionable problems with stable finding ids; otherwise return no findings.
+- coverage is optional for a process check; do not claim delivery coverage.
+- verdict=complete is not a completion decision here.
+
+Return ONLY one JSON object (snake_case, no prose, no code fence):
+{"verdict":"continue"|"correct"|"pause"|"needs_user","reason":"...","findings":[{"id":"...","requirement":"...","evidence":"...","action":"..."}],"resolved_ids":[],"next_check_seconds":300,"delivery":{"ready":false,"reason":"process check does not decide delivery"}}`
+}
+
 export interface CheckerRunInput {
   subagents: SubagentRuntime
   parent: Agent

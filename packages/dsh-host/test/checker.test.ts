@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { SubagentRuntime } from '@deepseek-ai/dsh-subagent'
 import type { TaskState } from '@orbit/core'
-import { buildCheckerPrompt, extractCheckerJson, runChecker } from '../src/checker.js'
+import { buildCheckerPrompt, buildProcessCheckerPrompt, extractCheckerJson, runChecker } from '../src/checker.js'
 
 function state(): TaskState {
   return {
@@ -50,6 +50,21 @@ describe('checker prompt', () => {
     expect(prompt).toContain('digest-1')
     expect(prompt).toContain('/repo/.orbit/tasks/task-1')
     expect(prompt).toContain('coverage')
+  })
+})
+
+describe('process checker prompt', () => {
+  it('carries the signal and recent operations without judging delivery', () => {
+    const prompt = buildProcessCheckerPrompt({
+      state: state(),
+      taskDir: '/repo/.orbit/tasks/task-1',
+      signal: [{ id: 'stuck', probability: 0.9 }],
+      operations: [{ name: 'read', status: 'ok', target: 'src/a.ts', declaredIntent: 'inspect' }],
+    })
+    expect(prompt).toContain('stuck=0.90')
+    expect(prompt).toContain('read [ok] target=src/a.ts')
+    expect(prompt).toContain('coverage is optional')
+    expect(prompt).toContain('do not judge final delivery readiness')
   })
 })
 

@@ -179,3 +179,10 @@ B 阶段开工前只需补一份短设计：JEV 观察输入在 DSH 事件下的
 - 宿主调度：任务启动后 5 秒首次观察，之后 5 分钟一次；任务非 running、已有 stop 围栏、检查在途、或 `TYPESAFE_API_KEY` 不可解析时跳过且不补发。每次调用写 `jev/observation` 事件（key、status、callId、answers/model/usage 或 unavailable 原因）；任一概率达到阈值（暂定 0.5，未重新校准）写 `jev/signal`。停止时清理定时器。
 - 验证：JEV 输入/键/问题集 3 个单测；DSH 探针用本地 TypeSafe 端点验证 `jev/observation` 与 `jev/signal`，answers 为 `{stuck:0.9, off_track:0.1}`，signal 记录 stuck。
 - 仍未做：信号触发的自动过程检查、输入按需压缩、选型/检查者质量判断、真实 TypeSafe key 与校准、真实模型、Loom。
+
+## 实施进展（2026-10-20，信号触发的过程检查）
+
+- JEV 任一概率过阈值后，除写 `jev/signal` 外，还会在任务仍 running、未停止、无在途检查时启动一次 `kind=process, trigger=auto` 的检查者子进程；同一 observation key 只触发一次，同一任务同一时刻只允许一个自动检查，检查失败记 `check/failed` 与 `jev/process-check-failed`。
+- 过程检查提示词只要求指出当前需要纠正的具体问题，明确不判断交付就绪、不授予完成；覆盖可省略，`delivery.ready` 固定为 false。
+- 验证：DSH 探针中本地 TypeSafe 端点返回 stuck=0.9，宿主写 `jev/observation`、`jev/signal`，自动启动 check #1（process/auto, completed），随后手动 process #2、artifact #3 产生 finalization 并完成；完整链路不受自动检查干扰。
+- 仍未做：按需压缩、成员/检查者选型、真实 key 与校准、真实模型、Loom。

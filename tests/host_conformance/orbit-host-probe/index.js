@@ -94,6 +94,15 @@ function taskDirs(project) {
   if (!existsSync(root)) return []
   return readdirSync(root).filter((entry) => !entry.startsWith('.')).sort().map((entry) => join(root, entry))
 }
+function readChecks(task) {
+  const dir = join(task.dir, 'checks')
+  if (!existsSync(dir)) return []
+  return readdirSync(dir)
+    .filter((entry) => entry.endsWith('.json'))
+    .map((entry) => JSON.parse(readFileSync(join(dir, entry), 'utf8')))
+    .sort((a, b) => a.number - b.number)
+}
+
 function readTask(project) {
   for (const dir of taskDirs(project).reverse()) {
     const stateFile = join(dir, 'state.json')
@@ -188,6 +197,18 @@ async function run(ctx) {
     signal: jevEvents.find((event) => event.type === 'jev/signal')?.data,
   })
 
+  await waitFor(async () => (readTask(WORK)?.state?.checks?.inFlight === null ? true : undefined), 15000, 'auto check settle').catch(() => undefined)
+  task = readTask(WORK)
+  const autoCheck = readChecks(task).find((check) => check.kind === 'process' && check.trigger === 'auto')
+  log({
+    step: 'jev-auto-check',
+    number: autoCheck?.number,
+    kind: autoCheck?.kind,
+    trigger: autoCheck?.trigger,
+    status: autoCheck?.status,
+    verdict: autoCheck?.result?.verdict,
+  })
+
   const observation = ctx.sessionProjections.stateOf(handle.agent.session, 'orbitObservation')
   log({
     step: 'observation',
@@ -205,8 +226,7 @@ async function run(ctx) {
   handle.agent.followup(msg('Run a process check.'))
   await handle.agent.whenIdle()
   task = readTask(WORK)
-  const processCheckFile = join(task.dir, 'checks', '1.json')
-  const processCheck = existsSync(processCheckFile) ? JSON.parse(readFileSync(processCheckFile, 'utf8')) : undefined
+  const processCheck = readChecks(task).filter((check) => check.kind === 'process' && check.trigger === 'manual').at(-1)
   log({
     step: 'process-check',
     checkStatus: processCheck?.status,
@@ -222,8 +242,7 @@ async function run(ctx) {
   handle.agent.followup(msg('Run the independent artifact check.'))
   await handle.agent.whenIdle()
   task = readTask(WORK)
-  const checkFile = join(task.dir, 'checks', '2.json')
-  const check = existsSync(checkFile) ? JSON.parse(readFileSync(checkFile, 'utf8')) : undefined
+  const check = readChecks(task).filter((candidate) => candidate.kind === 'artifact').at(-1)
   const checkResults = await toolResults(ctx, handle.agent.id)
   log({
     step: 'check',

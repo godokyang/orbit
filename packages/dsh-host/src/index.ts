@@ -24,7 +24,7 @@ import {
   type TaskState,
 } from '@orbit/core'
 import { ControlServer } from './control.js'
-import { buildCheckerPrompt, runChecker } from './checker.js'
+import { buildCheckerPrompt, buildProcessCheckerPrompt, runChecker } from './checker.js'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import { observationWindow, orbitObservationDefinition } from './observation.js'
 
@@ -262,6 +262,8 @@ export default class OrbitHost extends Service {
   private readonly jevIntervalMs: number
   private readonly jevFirstDelayMs: number
   private readonly jevTimers = new Map<string, NodeJS.Timeout>()
+  private readonly lastSignalKey = new Map<string, string>()
+  private readonly autoChecks = new Set<string>()
   private readonly pending = new Map<string, PendingDispatch[]>()
   private readonly fencedSessions = loadFenceRegistry()
   private readonly requirementDisposers = new Map<string, () => void>()
@@ -719,14 +721,75 @@ export default class OrbitHost extends Service {
       if (result.status === 'answered') {
         const triggered = Object.entries(result.answers).filter(([, probability]) => probability >= this.jevThreshold)
         if (triggered.length > 0) {
-          await service.store.appendEvent('jev/signal', {
-            key,
-            questions: triggered.map(([id, probability]) => ({ id, probability })),
-          })
+          const questions = triggered.map(([id, probability]) => ({ id, probability }))
+          await service.store.appendEvent('jev/signal', { key, questions })
+          if (this.lastSignalKey.get(taskDir) !== key) {
+            this.lastSignalKey.set(taskDir, key)
+            void this.runSignalCheck(taskDir, service, agent, input, questions)
+          }
         }
       }
     } catch (error) {
       await service.store.appendEvent('jev/error', { message: (error as Error).message }).catch(() => undefined)
+    }
+  }
+
+  /** Run one signalled process check; deduped by observation key and overlap. */
+  private async runSignalCheck(
+    taskDir: string,
+    service: TaskService,
+    agent: NonNullable<import('@deepseek-ai/dsh-tools').ToolRunContext['agent']>,
+    input: Parameters<typeof buildJevObservationState>[0],
+    signal: Array<{ id: string; probability: number }>,
+  ): Promise<void> {
+    if (this.autoChecks.has(taskDir)) return
+    this.autoChecks.add(taskDir)
+    let number: number | undefined
+    try {
+      const state = await service.state()
+      if (state.status !== 'running' || state.stop !== undefined) return
+      if (state.checks.inFlight !== null) return
+      const artifactDigest = input.artifactDigest
+      const check = await service.requestCheck({
+        role: 'reviewer',
+        kind: 'process',
+        trigger: 'auto',
+        artifactDigest,
+        ...(this.checkerModel === undefined ? {} : { model: this.checkerModel }),
+      })
+      number = check.number
+      const prompt = buildProcessCheckerPrompt({
+        state,
+        taskDir,
+        signal,
+        operations: input.window.operations.map((operation) => ({
+          name: operation.name,
+          status: operation.status,
+          target: operation.target,
+          declaredIntent: operation.declaredIntent,
+        })),
+      })
+      const raw = await runChecker({
+        subagents: this.ctx.subagents,
+        parent: agent,
+        prompt,
+        cwd: state.workspace.artifactRoot,
+        signal: AbortSignal.timeout(10 * 60_000),
+        ...(this.checkerModel === undefined ? {} : { model: this.checkerModel }),
+      })
+      const recorded = await service.recordCheckResult(check.number, raw)
+      await service.store.appendEvent('jev/process-check', {
+        number: check.number,
+        verdict: recorded.check.result?.verdict,
+        findings: recorded.check.result?.findings.length ?? 0,
+      })
+    } catch (error) {
+      if (number !== undefined) {
+        await service.failCheck(number, { kind: 'jev_process_check_error', message: (error as Error).message }).catch(() => undefined)
+      }
+      await service.store.appendEvent('jev/process-check-failed', { number, message: (error as Error).message }).catch(() => undefined)
+    } finally {
+      this.autoChecks.delete(taskDir)
     }
   }
 
