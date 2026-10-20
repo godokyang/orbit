@@ -106,3 +106,12 @@ B 阶段开工前只需补一份短设计：JEV 观察输入在 DSH 事件下的
 - 检查结果在边界用 zod 校验，并落实合同语义：非空文本、覆盖 requirement 去重、verified 必须有 evidence、`gap_kind` 仅用于 unverified、`ref` 长度与控制字符规则。
 - finding 去重按六项绑定（输入摘要、产物根、产物摘要、requirement、evidence、action）；绑定不变时只累计 repeats，绑定变化时重开。
 - 当前验证：`@orbit/core` 的 14 个 vitest 用例通过，覆盖记录持久化、修订版本、停止围栏、成员与工作单元、完成门、finding 去重与重开、检查结果校验；尚未接 DSH 宿主，未跑 T0/T1、真实模型或 Loom。
+
+## 实施进展（2026-10-20，切片一宿主接线）
+
+- `@orbit/dsh-host` 以 Cordis service `orbit` 装载；`orbit` 工具提供 `start`/`status`/`stop`/`declare`/`finish`/`accept`/`reject`，全部调用 Core 的单一写入口。
+- H4 接线：`tools/pre-execute` 校验受控 `subagent` 调用的 prompt 含 `orbit-unit: wu-...`、单元已声明且输入/产物根匹配，然后把派发暂存；`agent/created` 在子会话首次模型调用前完成 `members.json` 登记，登记失败抛错阻断创建。
+- H3/H5 第一层：停止后把 Root 与已登记成员加入进程内围栏集合，guard 拒绝其工具调用，`agent/created` 拒绝已停会话的 resume，`tools/pre-execute` 拒绝已停任务的新派发。围栏的持久来源仍是 `state.json` 的 stop 记录。
+- 验证：`tests/host_conformance/orbit-host-probe` 在隔离 `DSH_HOME` 用假模型跑通 start → declare → 受控 subagent 派发与成员登记 → stop 围栏 → 第二次派发被拒；日志在 `$DSH_HOME/results/orbit-host.out`。零真实模型、零网络。
+- 尚未实现：停止的实际资源收束与 `confirmStop` 证据、成员结算后的自动状态、要求注入与每轮状态、观察投影、检查者子进程、CLI/socket、T0 组合断言、受控 profile bundle。
+- 已知限制：围栏集合是进程内缓存，插件重启后需从任务记录重建；当前 probe 的 `stop` 只落围栏，任务仍为 `running`，不宣称停止已确认。
