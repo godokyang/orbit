@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { CONTROL_SOCKET_FILE, type ControlRequest, type ControlResponse, type TaskEvent } from '@orbit/core'
 import { requestControl } from './client.js'
 import { localEvents, localQuestions, localStatus, localStatusByRef, localStatusBySession, type StatusView } from './tasks.js'
@@ -229,6 +231,15 @@ function printEvents(result: { taskId: string; events: Array<{ seq: number; at: 
   out(lines.length === 0 ? `task ${result.taskId} has no events` : lines.join('\n'))
 }
 
+function softwareVersion(): string {
+  try {
+    const manifest = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'package.json'), 'utf8')) as { version?: unknown }
+    return typeof manifest.version === 'string' && manifest.version.length > 0 ? manifest.version : '0.0.0'
+  } catch {
+    return '0.0.0'
+  }
+}
+
 function encodeCursor(seq: number | undefined): string | null {
   return seq === undefined ? null : Buffer.from(JSON.stringify({ seq }), 'utf8').toString('base64url')
 }
@@ -262,12 +273,12 @@ export async function runCli(argv: string[], io: Partial<CliIo> = {}): Promise<n
 
   try {
     if (parsed.command === 'version') {
-      out(parsed.json ? JSON.stringify({ version: '0.0.0' }) : '0.0.0')
+      out(parsed.json ? JSON.stringify({ version: softwareVersion() }) : softwareVersion())
       return 0
     }
 
     if (parsed.command === 'capabilities') {
-      const payload = { integration_contract: INTEGRATION_CONTRACT, orbit: { version: '0.0.0' }, capabilities: CAPABILITIES }
+      const payload = { integration_contract: INTEGRATION_CONTRACT, orbit: { version: softwareVersion() }, capabilities: CAPABILITIES }
       out(JSON.stringify(payload, null, 2))
       return 0
     }
