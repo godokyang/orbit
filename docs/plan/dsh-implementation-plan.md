@@ -399,3 +399,10 @@ B 阶段开工前只需补一份短设计：JEV 观察输入在 DSH 事件下的
 - 真实隔离验证：先 headless start → `orbit stop` 得到 paused/confirmed → 新进程 headless resume：result ok，同一 sessionId，新任务 running，`continuation.previousTaskId` 指向前序，Root 会话被恢复（无需新会话）。
 - 合同增 `resume_from` 能力（same_root_session，本版无 resume_wake）。
 - 全套 124 个测试通过。
+
+## 实施进展（2026-10-20，Loom discovery 三轮真实问答）
+
+- 无头 Root 在 headless 模式下可调用 `orbit_ask`（source=root），问题落盘并由 Loom/CLI 答复；成员仍走同一工具。
+- Loom discovery 的冻结提示改为使用 `orbit_ask` 与 `write`（不再依赖 OMP 的 `loom_result`/原生 ask）。
+- 真实验证：discovery 启动 → 两轮追问 → 共 4 个 Root 问题全部 answered、result.json 写成、Root 会话产生 2 个 `turn_completed`；暂停/续接此前已验证同一 Root session。
+- 仍未做：执行 run 迁移、节点重启游标、DSH guard、C1 界面；`user-questions/request` 对 Root 的拦截仍未生效，headless 改用自有工具。
