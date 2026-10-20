@@ -55,6 +55,10 @@ cat > "$DSH_HOME/probe.patch.yml" <<EOF
 - insert:
     - id: orbit-host
       name: '$HOST_RUN/index.mjs'
+      config:
+        jevEndpoint: 'http://127.0.0.1:3987/v1/systemone'
+        jevFirstDelayMs: 1000
+        jevIntervalMs: 60000
     - id: orbit-host-probe
       name: '$PROBE_RUN/index.js'
     - id: subagent-dsh-sdk
@@ -75,6 +79,7 @@ OUT="$DSH_HOME/results/orbit-host.out"
 rm -f "$OUT" "$DSH_HOME/results/orbit-host.stdout" "$DSH_HOME/results/orbit-host.log"
 export ORBIT_PROBE_OUT="$OUT"
 export ORBIT_CLI="$CLI_DIST"
+export TYPESAFE_API_KEY="${TYPESAFE_API_KEY:-orbit-probe-key}"
 
 ( cd "$DSH_HOME" && sleep 120 | "$DSH_BIN" --profile "$PROFILE" --patch "$DSH_HOME/probe.patch.yml" \
     > "$DSH_HOME/results/orbit-host.stdout" 2> "$DSH_HOME/results/orbit-host.log" ) &

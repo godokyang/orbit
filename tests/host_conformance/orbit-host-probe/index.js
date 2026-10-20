@@ -3,6 +3,7 @@
 // denied second dispatch. No real model, no network.
 import { appendFileSync, mkdirSync, readdirSync, readFileSync, existsSync } from 'node:fs'
 import { execFile } from 'node:child_process'
+import { createServer } from 'node:http'
 import { promisify } from 'node:util'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
@@ -51,6 +52,27 @@ function toolChunks(toolName, args) {
 
 const scripts = []
 const calls = []
+let jevServer
+
+function startJevServer() {
+  return new Promise((resolve, reject) => {
+    jevServer = createServer((request, response) => {
+      let body = ''
+      request.setEncoding('utf8')
+      request.on('data', (chunk) => { body += chunk })
+      request.on('end', () => {
+        response.writeHead(200, { 'content-type': 'application/json' })
+        response.end(JSON.stringify({
+          model: 'jev-probe',
+          answers: { stuck: { noul: 0.9 }, off_track: { noul: 0.1 } },
+          usage: { input_tokens: 20, output_tokens: 2 },
+        }))
+      })
+    })
+    jevServer.once('error', reject)
+    jevServer.listen(3987, '127.0.0.1', () => resolve())
+  })
+}
 class ProbeAdapter extends LlmAdapter {
   providerInfo(provider) { return { id: provider, provider, name: 'Orbit probe', displayName: 'Orbit probe' } }
   async listModels(provider) { return [{ id: 'probe-1', provider, model: 'probe-1', name: 'probe-1', displayName: 'probe-1' }] }
@@ -154,6 +176,17 @@ async function run(ctx) {
   task = readTask(WORK)
   const unit = task?.units?.units?.[0]
   log({ step: 'declare', unitId: unit?.id, unitStatus: unit?.status, inputVersion: unit?.inputVersion })
+
+  await new Promise((resolve) => setTimeout(resolve, 2200))
+  task = readTask(WORK)
+  const events = readFileSync(join(task.dir, 'events.jsonl'), 'utf8').trim().split('\n').map((line) => JSON.parse(line))
+  const jevEvents = events.filter((event) => String(event.type).startsWith('jev/'))
+  log({
+    step: 'jev',
+    events: jevEvents.map((event) => event.type),
+    answers: jevEvents.find((event) => event.type === 'jev/observation')?.data?.answers,
+    signal: jevEvents.find((event) => event.type === 'jev/signal')?.data,
+  })
 
   const observation = ctx.sessionProjections.stateOf(handle.agent.session, 'orbitObservation')
   log({
@@ -296,6 +329,7 @@ async function run(ctx) {
   log({ step: 'second-stop', status: secondState?.state?.status, confirmed: secondState?.state?.stop?.confirmation?.confirmed })
 
   await handle.dispose()
+  if (jevServer !== undefined) await new Promise((resolve) => jevServer.close(() => resolve()))
   log({
     phase: 'done',
     ok: true,
@@ -310,6 +344,12 @@ async function run(ctx) {
 
 export async function apply(ctx) {
   log({ phase: 'start', pid: process.pid, node: process.version })
+  try {
+    await startJevServer()
+    log({ phase: 'jev-server', port: 3987 })
+  } catch (error) {
+    log({ phase: 'jev-server-error', message: short(error) })
+  }
   try {
     await run(ctx)
   } catch (error) {

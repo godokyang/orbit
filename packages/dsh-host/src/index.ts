@@ -8,10 +8,25 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent-loop'
 import type {} from '@deepseek-ai/dsh-session'
-import { CONTROL_SOCKET_FILE, TaskService, TaskStore, digestWorkspace, type ControlRequest, type ModelIdentity, type TaskState } from '@orbit/core'
+import type {} from '@deepseek-ai/dsh-jobs'
+import {
+  CONTROL_SOCKET_FILE,
+  JEV_OBSERVATION_QUESTIONS,
+  JEV_OBSERVATION_THRESHOLD,
+  TypeSafeJudgmentClient,
+  TaskService,
+  TaskStore,
+  buildJevObservationState,
+  digestWorkspace,
+  jevObservationKey,
+  type ControlRequest,
+  type ModelIdentity,
+  type TaskState,
+} from '@orbit/core'
 import { ControlServer } from './control.js'
 import { buildCheckerPrompt, runChecker } from './checker.js'
-import { orbitObservationDefinition } from './observation.js'
+import { credentialRef } from '@deepseek-ai/dsh-credentials'
+import { observationWindow, orbitObservationDefinition } from './observation.js'
 
 export { ControlServer } from './control.js'
 
@@ -31,6 +46,14 @@ export interface Config {
   /** Optional explicit checker route; the dsh-sdk provider defaults apply when absent. */
   checkerProvider?: string
   checkerModel?: string
+  /** Optional TypeSafe endpoint override (tests/local proxies). */
+  jevEndpoint?: string
+  /** Optional judgment model alias; defaults to the provider's jev-latest. */
+  jevModel?: string
+  /** Observation signal threshold; provisional until real calibration. */
+  jevThreshold?: number
+  jevIntervalMs?: number
+  jevFirstDelayMs?: number
 }
 
 interface PendingDispatch {
@@ -216,18 +239,29 @@ async function bounded(promise: Promise<unknown>, ms: number): Promise<boolean> 
  * agents are fenced, and stop teardown records the evidence it actually saw.
  */
 export default class OrbitHost extends Service {
-  static inject = ['tools', 'sessions', 'agents', 'systemPrompt', 'subagents', 'sessionProjections']
+  static inject = ['tools', 'sessions', 'agents', 'systemPrompt', 'subagents', 'sessionProjections', 'credentials', 'jobs']
 
   static Config: z<Config> = z.object({
     maxTasks: z.number().step(1).min(1).default(64),
     subagentTool: z.string().default('subagent'),
     checkerProvider: z.string().default(''),
     checkerModel: z.string().default(''),
+    jevEndpoint: z.string().default(''),
+    jevModel: z.string().default(''),
+    jevThreshold: z.number().min(0).max(1).default(JEV_OBSERVATION_THRESHOLD),
+    jevIntervalMs: z.number().step(1).min(1).default(300_000),
+    jevFirstDelayMs: z.number().step(1).min(1).default(5_000),
   })
 
   private readonly maxTasks: number
   private readonly subagentTool: string
   private readonly checkerModel: ModelIdentity | undefined
+  private readonly jevEndpoint: string | undefined
+  private readonly jevModel: string | undefined
+  private readonly jevThreshold: number
+  private readonly jevIntervalMs: number
+  private readonly jevFirstDelayMs: number
+  private readonly jevTimers = new Map<string, NodeJS.Timeout>()
   private readonly pending = new Map<string, PendingDispatch[]>()
   private readonly fencedSessions = loadFenceRegistry()
   private readonly requirementDisposers = new Map<string, () => void>()
@@ -242,6 +276,11 @@ export default class OrbitHost extends Service {
       config.checkerProvider !== undefined && config.checkerProvider.length > 0 && config.checkerModel !== undefined && config.checkerModel.length > 0
         ? { provider: config.checkerProvider, model: config.checkerModel }
         : undefined
+    this.jevEndpoint = config.jevEndpoint === undefined || config.jevEndpoint.length === 0 ? undefined : config.jevEndpoint
+    this.jevModel = config.jevModel === undefined || config.jevModel.length === 0 ? undefined : config.jevModel
+    this.jevThreshold = config.jevThreshold ?? JEV_OBSERVATION_THRESHOLD
+    this.jevIntervalMs = config.jevIntervalMs ?? 300_000
+    this.jevFirstDelayMs = config.jevFirstDelayMs ?? 5_000
     const host = this
 
     ctx.tools.register(
@@ -323,6 +362,7 @@ export default class OrbitHost extends Service {
             host.fencedSessions.delete(agent.id)
             saveFenceRegistry(host.fencedSessions)
             host.attachRequirements(agent, service)
+            host.startJev(service, agent)
             await host.ensureControl(projectRoot).catch((error: Error) => {
               console.error(`orbit: control socket unavailable: ${error.message}`)
             })
@@ -557,6 +597,8 @@ export default class OrbitHost extends Service {
     ctx.effect(() => ctx.root.sessionProjections.register(orbitObservationDefinition), 'orbit.observation()')
 
     ctx.effect(() => () => {
+      for (const timer of host.jevTimers.values()) clearTimeout(timer)
+      host.jevTimers.clear()
       for (const server of host.controls.values()) void server.close()
       host.controls.clear()
     })
@@ -600,6 +642,94 @@ export default class OrbitHost extends Service {
     return state
   }
 
+  /** First observation after the start grace period; then a fixed cadence. */
+  private startJev(service: TaskService, agent: NonNullable<import('@deepseek-ai/dsh-tools').ToolRunContext['agent']>): void {
+    const taskDir = service.store.dir
+    this.scheduleJev(taskDir, service, agent, this.jevFirstDelayMs)
+  }
+
+  private scheduleJev(
+    taskDir: string,
+    service: TaskService,
+    agent: NonNullable<import('@deepseek-ai/dsh-tools').ToolRunContext['agent']>,
+    delayMs: number,
+  ): void {
+    const existing = this.jevTimers.get(taskDir)
+    if (existing !== undefined) clearTimeout(existing)
+    const timer = setTimeout(() => {
+      this.jevTimers.delete(taskDir)
+      void this.observeJev(taskDir, service, agent).finally(() => {
+        this.scheduleJev(taskDir, service, agent, this.jevIntervalMs)
+      })
+    }, delayMs)
+    timer.unref?.()
+    this.jevTimers.set(taskDir, timer)
+  }
+
+  private stopJev(taskDir: string): void {
+    const timer = this.jevTimers.get(taskDir)
+    if (timer !== undefined) clearTimeout(timer)
+    this.jevTimers.delete(taskDir)
+  }
+
+  private async observeJev(
+    taskDir: string,
+    service: TaskService,
+    agent: NonNullable<import('@deepseek-ai/dsh-tools').ToolRunContext['agent']>,
+  ): Promise<void> {
+    try {
+      const state = await service.state()
+      if (state.status !== 'running' || state.stop !== undefined) return
+      if (state.checks.inFlight !== null) return
+      const credential = await this.ctx.credentials.resolve(credentialRef('TYPESAFE_API_KEY'))
+      const apiKey = credential?.value
+      if (apiKey === undefined || apiKey.trim().length === 0) return
+
+      const projection = this.ctx.sessionProjections.stateOf(agent.session, 'orbitObservation')
+      if (projection === undefined) return
+      const window = observationWindow(projection, 0)
+      const status = await service.status()
+      const jobs = await this.ctx.jobs.list(agent.id)
+      const running = jobs.filter((job) => job.status === 'running' || job.status === 'stopping').length
+      const artifactDigest =
+        status.checks.at(-1)?.artifactDigest ?? (await digestWorkspace(state.workspace.artifactRoot)).digest
+      const input = {
+        state,
+        members: status.members,
+        units: status.workUnits,
+        checks: status.checks,
+        findings: status.findings,
+        window,
+        asyncJobs: running,
+        artifactDigest,
+      }
+      const key = jevObservationKey(input)
+      const client = new TypeSafeJudgmentClient({
+        apiKey,
+        ...(this.jevEndpoint === undefined ? {} : { endpoint: this.jevEndpoint }),
+        ...(this.jevModel === undefined ? {} : { model: this.jevModel }),
+      })
+      const result = await client.judge({ state: buildJevObservationState(input), questions: JEV_OBSERVATION_QUESTIONS })
+      await service.store.appendEvent('jev/observation', {
+        key,
+        status: result.status,
+        callId: result.callId,
+        ...(result.status === 'answered' ? { answers: result.answers, model: result.model, usage: result.usage } : { reason: result.reason }),
+      })
+      if (result.status === 'answered') {
+        const triggered = Object.entries(result.answers).filter(([, probability]) => probability >= this.jevThreshold)
+        if (triggered.length > 0) {
+          await service.store.appendEvent('jev/signal', {
+            key,
+            questions: triggered.map(([id, probability]) => ({ id, probability })),
+          })
+        }
+      }
+    } catch (error) {
+      await service.store.appendEvent('jev/error', { message: (error as Error).message }).catch(() => undefined)
+    }
+  }
+
   /** H2: per-Root dynamic context; each admission rereads the durable record. */
   private attachRequirements(agent: NonNullable<import('@deepseek-ai/dsh-tools').ToolRunContext['agent']>, service: TaskService): void {
     const taskDir = service.store.dir
@@ -619,6 +749,7 @@ export default class OrbitHost extends Service {
    * confirm stop with the observed evidence. Missing evidence stays unconfirmed.
    */
   private async performStop(service: TaskService, artifactDigest = ''): Promise<void> {
+    this.stopJev(service.store.dir)
     const state = await service.state()
     if (state.stop === undefined) return
     const evidence: Record<string, boolean> = {

@@ -171,3 +171,11 @@ B 阶段开工前只需补一份短设计：JEV 观察输入在 DSH 事件下的
 - 新增 TypeSafe System One 客户端：`POST /v1/systemone`，`questions[].true_criterion/false_criterion` 线格式；任何 HTTP/网络/缺答案/越界概率都返回 `unavailable`，保留可得实际模型与 usage，不产生部分答案。
 - 验证：观察投影 6 个、观察键 5 个、TypeSafe 4 个单测；全套测试继续通过。
 - 仍未做：JEV 观察输入组装与 5s/5min 调度、成员/检查者选型问题集、真实 key 与真实模型、Loom。
+
+## 实施进展（2026-10-20，JEV 观察输入与调度）
+
+- 新增 `jev-observation-input-4`：把任务状态、原始要求与修订、成员/工作单元、投影窗口（最近 20 条操作、省略数、history/crash gap）、最近检查、open findings、产物摘要和 async job 数组装为 `jev-observation-4` 输入；不发送工具输入输出、长回复或日志。
+- 观察键复用 `observation-key`，host 稳定字段来自投影（最近 10 条操作哈希），触发原因标为 observation。
+- 宿主调度：任务启动后 5 秒首次观察，之后 5 分钟一次；任务非 running、已有 stop 围栏、检查在途、或 `TYPESAFE_API_KEY` 不可解析时跳过且不补发。每次调用写 `jev/observation` 事件（key、status、callId、answers/model/usage 或 unavailable 原因）；任一概率达到阈值（暂定 0.5，未重新校准）写 `jev/signal`。停止时清理定时器。
+- 验证：JEV 输入/键/问题集 3 个单测；DSH 探针用本地 TypeSafe 端点验证 `jev/observation` 与 `jev/signal`，answers 为 `{stuck:0.9, off_track:0.1}`，signal 记录 stuck。
+- 仍未做：信号触发的自动过程检查、输入按需压缩、选型/检查者质量判断、真实 TypeSafe key 与校准、真实模型、Loom。
