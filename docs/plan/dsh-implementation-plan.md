@@ -91,9 +91,9 @@ JEV 的 key 走 `ctx.credentials` 引用（默认 `TYPESAFE_API_KEY`），每次
 | 阶段 | 内容 | 状态 |
 | --- | --- | --- |
 | A | 宿主探针 | 已完成，见探针记录 |
-| B | 切片一：Root、显式 start、要求注入、一个本地 spawn 成员、停止、检查者子进程、`status/stop/events` CLI | 未开始 |
-| C | 应用 UI、合同 1.9、Loom 节点改造 | 未开始 |
-| D | 历史读取、安装升级、干净切换、Ruby 退场 | 未开始 |
+| B | 切片一：Root、显式 start、要求注入、一个本地 spawn 成员、停止、检查者子进程、`status/stop/events` CLI | 已完成：Core/host/CLI、真实模型验收、合同 2.0 |
+| C | 应用 UI、合同 1.9、Loom 节点改造 | C1/C2 完成（React 面板、独立事件行、仓库内构建）；C3 代码与测试完成，**Loom 整链真实 run 未跑**（需后台/Temporal） |
+| D | 历史读取、安装升级、干净切换、Ruby 退场 | 已执行清理与 0.1.0 打包、干净安装 + T0 192 行通过；npm 发布按用户决定暂缓 |
 
 B 阶段开工前只需补一份短设计：JEV 观察输入在 DSH 事件下的投影形状与去重键，因为它决定重校准，已写在[观察投影设计](jev-observation-projection.md)。其余在实施中决定：Root 的 `orbit` 工具参数定义（做完给用户过目）、工作单元范围 guard 规则、工具链与包命名（开工时问一次 npm scope）、任务记录格式（全新设计，不兼容旧记录）。C 阶段的界面由 AI 先做第一版，合同 2.0 字段在 C 阶段设计时定。
 
