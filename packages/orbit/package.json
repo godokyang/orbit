@@ -46,7 +46,7 @@
     "profiles"
   ],
   "scripts": {
-    "build": "tsdown",
+    "build": "tsdown && node scripts/build-ui.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

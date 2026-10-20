@@ -1,8 +1,6 @@
-import type { Context } from '@deepseek-ai/cordis'
-import { createElement, useEffect, useState } from 'react'
-import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
-import type {} from '@deepseek-ai/dsh-client-ui-session/client'
-import type {} from '@deepseek-ai/dsh-client-ui-slots'
+/* Orbit browser panel. Compiled to a loader-factory bundle by scripts/build-ui.mjs. */
+declare const require: (id: string) => any
+const { createElement, useEffect, useState } = require('react')
 
 export const inject = ['slots', 'uiConversation']
 
@@ -17,7 +15,7 @@ interface OrbitStatus {
   recentEvents?: Array<{ seq: number; type: string }>
 }
 
-async function request(sessionId: string, init?: RequestInit): Promise<OrbitStatus | undefined> {
+async function request(sessionId: string, init?: any): Promise<OrbitStatus | undefined> {
   try {
     const response = await fetch(`/orbit/api?session=${encodeURIComponent(sessionId)}`, init)
     if (!response.ok) return undefined
@@ -36,19 +34,12 @@ function action(sessionId: string, body: Record<string, unknown>): Promise<Orbit
 }
 
 function OrbitPanel({ sessionId }: { sessionId: string }): unknown {
-  const [data, setData] = useState<OrbitStatus | undefined>(undefined)
+  const [data, setData] = useState(undefined as OrbitStatus | undefined)
   const [instruction, setInstruction] = useState('')
   const [showSettings, setShowSettings] = useState(false)
   const [allowedInput, setAllowedInput] = useState('')
   const [checkerInput, setCheckerInput] = useState('')
   const [jevInput, setJevInput] = useState('')
-  useEffect(() => {
-    const config = data?.config
-    if (config === undefined) return
-    setAllowedInput(config.allowedModels.join(', '))
-    setCheckerInput(config.checkerProvider.length > 0 ? `${config.checkerProvider}/${config.checkerModel}` : '')
-    setJevInput(config.jevEndpoint ?? '')
-  }, [data?.config])
   useEffect(() => {
     let alive = true
     const load = (): void => { void request(sessionId).then((next) => { if (alive && next !== undefined) setData(next) }) }
@@ -56,32 +47,39 @@ function OrbitPanel({ sessionId }: { sessionId: string }): unknown {
     const timer = setInterval(load, 2000)
     return () => { alive = false; clearInterval(timer) }
   }, [sessionId])
+  useEffect(() => {
+    const config = data?.config
+    if (config === undefined) return
+    setAllowedInput(config.allowedModels.join(', '))
+    setCheckerInput(config.checkerProvider.length > 0 ? `${config.checkerProvider}/${config.checkerModel}` : '')
+    setJevInput(config.jevEndpoint ?? '')
+  }, [data?.config])
   if (data === undefined) return createElement('div', { style: { padding: '4px 12px', fontSize: 12, opacity: 0.65 } }, 'Orbit')
   const pending = data.pendingQuestions ?? []
   const config = data.config
-  const events = (data.recentEvents ?? []).map((event) => event.type).join(', ') || 'none'
+  const events = (data.recentEvents ?? []).map((event: { type: string }) => event.type).join(', ') || 'none'
   return createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: 2, padding: '4px 12px', fontSize: 12 } },
     createElement('div', { style: { display: 'flex', gap: 8, alignItems: 'center' } },
-    createElement('strong', null, 'Orbit'),
-    createElement('span', null, `${data.taskId ?? ''} · ${data.status ?? 'unknown'}${data.stopConfirmation?.confirmed ? ' stopped' : ''} · checks ${data.checksInFlight ?? 'none'} · findings ${data.openFindings?.length ?? 0} · questions ${pending.length}`),
-    createElement('input', { value: instruction, placeholder: 'task instruction', onChange: (event: { target: { value: string } }) => setInstruction(event.target.value), style: { width: 140 } }),
-    createElement('button', { onClick: () => { if (instruction.trim().length > 0) void action(sessionId, { action: 'prompt', message: `Call the orbit tool with action=start and instruction=${JSON.stringify(instruction.trim())}. Then reply OK.` }) } }, 'Start'),
-    createElement('button', { onClick: () => { void action(sessionId, { action: 'prompt', message: 'Call the orbit tool with action=check now. Do not use other tools.' }) } }, 'Check'),
-    createElement('button', { onClick: () => { void action(sessionId, { action: 'prompt', message: 'If the latest independent check says complete, call the orbit tool with action=complete now.' }) } }, 'Complete'),
-    createElement('button', { onClick: () => setShowSettings((value) => !value) }, 'Settings'),
-    createElement('button', { onClick: () => { void action(sessionId, { action: 'stop' }) } }, 'Stop'),
-    pending[0] !== undefined ? createElement('button', {
-      onClick: () => { void action(sessionId, { action: 'answer', question: pending[0]!.id, selected: [], custom: 'Continue.' }) },
-    }, 'Answer') : null,
+      createElement('strong', null, 'Orbit'),
+      createElement('span', null, `${data.taskId ?? ''} · ${data.status ?? 'unknown'}${data.stopConfirmation?.confirmed ? ' stopped' : ''} · checks ${data.checksInFlight ?? 'none'} · findings ${data.openFindings?.length ?? 0} · questions ${pending.length}`),
+      createElement('input', { value: instruction, placeholder: 'task instruction', onChange: (event: { target: { value: string } }) => setInstruction(event.target.value), style: { width: 140 } }),
+      createElement('button', { onClick: () => { if (instruction.trim().length > 0) void action(sessionId, { action: 'prompt', message: `Call the orbit tool with action=start and instruction=${JSON.stringify(instruction.trim())}. Then reply OK.` }) } }, 'Start'),
+      createElement('button', { onClick: () => { void action(sessionId, { action: 'prompt', message: 'Call the orbit tool with action=check now. Do not use other tools.' }) } }, 'Check'),
+      createElement('button', { onClick: () => { void action(sessionId, { action: 'prompt', message: 'If the latest independent check says complete, call the orbit tool with action=complete now.' }) } }, 'Complete'),
+      createElement('button', { onClick: () => setShowSettings((value: boolean) => !value) }, 'Settings'),
+      createElement('button', { onClick: () => { void action(sessionId, { action: 'stop' }) } }, 'Stop'),
+      pending[0] !== undefined ? createElement('button', {
+        onClick: () => { void action(sessionId, { action: 'answer', question: pending[0]!.id, selected: [], custom: 'Continue.' }) },
+      }, 'Answer') : null,
     ),
     createElement('div', { style: { opacity: 0.65 } },
       config === undefined ? 'config: unavailable' : `models ${config.allowedModels.join(', ') || '(pool)'} · checker ${config.checkerProvider || '(default)'}/${config.checkerModel || '(default)'} · JEV ${config.jev ? 'on' : 'off'}`),
     createElement('div', { style: { opacity: 0.65 } }, `events: ${events}`),
     showSettings && config !== undefined
-      ? createElement('div', { style: { opacity: 0.8, whiteSpace: 'pre-wrap' } },
+      ? createElement('div', { style: { opacity: 0.8 } },
           createElement('div', null,
             createElement('label', null, 'allowed models '),
-            createElement('input', { 'aria-label': 'Orbit allowed models', value: allowedInput, onChange: (event: { target: { value: string } }) => setAllowedInput(event.target.value), style: { width: 220 } }),
+            createElement('input', { 'aria-label': 'Orbit allowed models', value: allowedInput, onChange: (event: { target: { value: string } }) => setAllowedInput((event as { target: { value: string } }).target.value), style: { width: 220 } }),
           ),
           createElement('div', null,
             createElement('label', null, 'checker provider/model '),
@@ -93,7 +91,7 @@ function OrbitPanel({ sessionId }: { sessionId: string }): unknown {
           ),
           createElement('button', {
             onClick: () => {
-              const allowedModels = allowedInput.split(',').map((item) => item.trim()).filter((item) => item.length > 0)
+              const allowedModels = allowedInput.split(',').map((item: string) => item.trim()).filter((item: string) => item.length > 0)
               const [checkerProvider = '', checkerModel = ''] = checkerInput.trim().split('/')
               void action(sessionId, { action: 'settings', allowedModels, checkerProvider, checkerModel, jevEndpoint: jevInput.trim() })
             },
@@ -103,6 +101,6 @@ function OrbitPanel({ sessionId }: { sessionId: string }): unknown {
   )
 }
 
-export function apply(ctx: Context): void {
-  ctx.slots.register({ name: 'conversation.input.dock', id: 'orbit-panel' }, OrbitPanel as never)
+export function apply(ctx: any): void {
+  ctx.slots.register({ name: 'conversation.input.dock', id: 'orbit-panel' }, OrbitPanel)
 }
