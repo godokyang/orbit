@@ -59,6 +59,9 @@ cat > "$DSH_HOME/probe.patch.yml" <<EOF
         jevEndpoint: 'http://127.0.0.1:3987/v1/systemone'
         jevFirstDelayMs: 1000
         jevIntervalMs: 60000
+        allowedModels: ['probe/probe-1']
+        checkerProvider: probe
+        checkerModel: probe-1
     - id: orbit-host-probe
       name: '$PROBE_RUN/index.js'
     - id: subagent-dsh-sdk

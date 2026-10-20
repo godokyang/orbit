@@ -50,6 +50,7 @@ export interface StartTaskOptions {
   instruction: string
   source?: RequirementSource
   workspace?: Partial<WorkspaceBinding>
+  allowedModels?: string[]
   taskId?: string
   clock?: () => Date
 }
@@ -157,6 +158,9 @@ export class TaskService {
       },
       input: { versions: [version] },
       checks: { nextNumber: 1, inFlight: null },
+      ...(options.allowedModels === undefined || options.allowedModels.length === 0
+        ? {}
+        : { authorization: { allowedModels: [...options.allowedModels] } }),
       eventSeq: 0,
     }
     const store = await TaskStore.create(

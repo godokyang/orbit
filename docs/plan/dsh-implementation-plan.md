@@ -186,3 +186,10 @@ B 阶段开工前只需补一份短设计：JEV 观察输入在 DSH 事件下的
 - 过程检查提示词只要求指出当前需要纠正的具体问题，明确不判断交付就绪、不授予完成；覆盖可省略，`delivery.ready` 固定为 false。
 - 验证：DSH 探针中本地 TypeSafe 端点返回 stuck=0.9，宿主写 `jev/observation`、`jev/signal`，自动启动 check #1（process/auto, completed），随后手动 process #2、artifact #3 产生 finalization 并完成；完整链路不受自动检查干扰。
 - 仍未做：按需压缩、成员/检查者选型、真实 key 与校准、真实模型、Loom。
+
+## 实施进展（2026-10-20，严格模型授权）
+
+- 插件 `allowedModels`（精确 `provider/model`）在 `start` 时冻结进任务记录 `authorization`；`llm/stream` 同步监听每个映射到任务的会话：Root 与成员的每次模型流都按冻结名单校验，成员首次流后绑定路由，后续 provider/model 漂移被拒绝并写 `model/violation` 事件；Root 在名单内的原生模型切换不被当成 drift。
+- 严格任务必须显式配置 `checkerProvider/checkerModel` 且位于冻结名单内，手动与 JEV 自动过程检查都在启动检查者前核对；理由 effort 不参与路由身份比较。
+- 验证：授权决策 6 个单测、Core 冻结名单 1 个单测；DSH 探针在 `allowedModels=['probe/probe-1']` + 显式 checker 配置下完整链路通过。
+- 仍未做：CLI 的 `--allowed-model` 入口、检查者子进程内部的名单复核、选型缓存、真实模型。

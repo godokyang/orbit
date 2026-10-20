@@ -140,6 +140,10 @@ export interface TaskState {
     inFlight: number | null
   }
   stop?: StopRecord
+  /** Frozen strict model authorization for this task, when the user supplied one. */
+  authorization?: {
+    allowedModels: string[]
+  }
   finalization?: FinalizationNotice
   completion?: CompletionRecord
   completionInvalidation?: CompletionInvalidation

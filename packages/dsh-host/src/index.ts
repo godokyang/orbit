@@ -27,6 +27,7 @@ import { ControlServer } from './control.js'
 import { buildCheckerPrompt, buildProcessCheckerPrompt, runChecker } from './checker.js'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import { observationWindow, orbitObservationDefinition } from './observation.js'
+import { allowedSet, authorizeRoute, routeKey, type ModelRoute } from './authorization.js'
 
 export { ControlServer } from './control.js'
 
@@ -54,6 +55,8 @@ export interface Config {
   jevThreshold?: number
   jevIntervalMs?: number
   jevFirstDelayMs?: number
+  /** Frozen strict model list (exact `provider/model`). Empty means no freeze. */
+  allowedModels?: string[]
 }
 
 interface PendingDispatch {
@@ -251,6 +254,7 @@ export default class OrbitHost extends Service {
     jevThreshold: z.number().min(0).max(1).default(JEV_OBSERVATION_THRESHOLD),
     jevIntervalMs: z.number().step(1).min(1).default(300_000),
     jevFirstDelayMs: z.number().step(1).min(1).default(5_000),
+    allowedModels: z.array(z.string()).default([]),
   })
 
   private readonly maxTasks: number
@@ -263,6 +267,11 @@ export default class OrbitHost extends Service {
   private readonly jevFirstDelayMs: number
   private readonly jevTimers = new Map<string, NodeJS.Timeout>()
   private readonly lastSignalKey = new Map<string, string>()
+  private readonly allowedModels: Set<string>
+  private readonly modelBindings = new Map<
+    string,
+    { taskDir: string; role: 'root' | 'member'; allowed: Set<string>; bound?: ModelRoute }
+  >()
   private readonly autoChecks = new Set<string>()
   private readonly pending = new Map<string, PendingDispatch[]>()
   private readonly fencedSessions = loadFenceRegistry()
@@ -273,6 +282,7 @@ export default class OrbitHost extends Service {
     super(ctx, 'orbit')
     const maxTasks = config.maxTasks ?? 64
     this.maxTasks = maxTasks
+    this.allowedModels = allowedSet(config.allowedModels)
     this.subagentTool = config.subagentTool ?? 'subagent'
     this.checkerModel =
       config.checkerProvider !== undefined && config.checkerProvider.length > 0 && config.checkerModel !== undefined && config.checkerModel.length > 0
@@ -360,6 +370,12 @@ export default class OrbitHost extends Service {
               instruction,
               source: { kind: 'explicit-text', verbatim: true, at: new Date().toISOString() },
               workspace: workspaceInfo(projectRoot),
+              ...(host.allowedModels.size === 0 ? {} : { allowedModels: [...host.allowedModels] }),
+            })
+            host.modelBindings.set(agent.id, {
+              taskDir: service.store.dir,
+              role: 'root',
+              allowed: new Set(host.allowedModels),
             })
             host.fencedSessions.delete(agent.id)
             saveFenceRegistry(host.fencedSessions)
@@ -389,13 +405,14 @@ export default class OrbitHost extends Service {
             const rootAgent = ctx.agents.get(state.root.sessionId as never)
             if (rootAgent === undefined) throw new Error('orbit: the Root agent is not live; cannot run an independent check')
             const kind = (args as { kind?: 'artifact' | 'process' }).kind ?? 'artifact'
+            const checkerModel = host.strictCheckerModel()
             const snapshot = await digestWorkspace(state.workspace.artifactRoot)
             const check = await service.requestCheck({
               role: 'reviewer',
               kind,
               trigger: 'manual',
               artifactDigest: snapshot.digest,
-              ...(host.checkerModel === undefined ? {} : { model: host.checkerModel }),
+              ...(checkerModel === undefined ? {} : { model: checkerModel }),
             })
             const prompt = buildCheckerPrompt({ state, taskDir: service.store.dir, artifactDigest: snapshot.digest })
             try {
@@ -405,7 +422,7 @@ export default class OrbitHost extends Service {
                 prompt,
                 cwd: state.workspace.artifactRoot,
                 signal: exec.signal,
-                ...(host.checkerModel === undefined ? {} : { model: host.checkerModel }),
+                ...(checkerModel === undefined ? {} : { model: checkerModel }),
               })
               const recorded = await service.recordCheckResult(check.number, raw)
               return JSON.stringify({
@@ -582,6 +599,11 @@ export default class OrbitHost extends Service {
           workUnitId: dispatch.unitId,
           toolCallId: dispatch.toolCallId,
         })
+        host.modelBindings.set(agent.id, {
+          taskDir: task.store.dir,
+          role: 'member',
+          allowed: new Set(host.allowedModels),
+        })
       } catch (error) {
         throw new Error(`orbit: member registration refused: ${(error as Error).message}`)
       }
@@ -589,6 +611,37 @@ export default class OrbitHost extends Service {
 
     // H3/H5: a stopped task's agents cannot use tools. The fence cache is
     // rebuilt from DSH_HOME at load; the durable task record remains the authority.
+    // Strict model authorization: the listener must stay synchronous and
+    // return next() so the stream remains iterable.
+    ctx.on('llm/stream', (options, next) => {
+      const sessionId = options.sessionId === undefined ? undefined : String(options.sessionId)
+      const binding = sessionId === undefined ? undefined : this.modelBindings.get(sessionId)
+      if (binding === undefined) return next()
+      const route: ModelRoute = {
+        provider: options.provider,
+        model: options.model,
+        ...(options.reasoningEffort === undefined ? {} : { reasoning: options.reasoningEffort }),
+      }
+      const decision = authorizeRoute({
+        route,
+        allowed: binding.allowed,
+        ...(binding.role === 'member' && binding.bound !== undefined ? { bound: binding.bound } : {}),
+      })
+      if (!decision.ok) {
+        void (async () => {
+          try {
+            const store = await TaskStore.open(binding.taskDir)
+            await store.appendEvent('model/violation', { code: decision.code, route, message: decision.message })
+          } catch {
+            // The rejection still fails closed even if the audit write fails.
+          }
+        })()
+        throw new Error(`orbit: ${decision.message}`)
+      }
+      binding.bound = decision.bound
+      return next()
+    })
+
     ctx.tools.guard((exec) => {
       if (exec.agent !== undefined && host.fencedSessions.has(exec.agent.id) && exec.name !== 'orbit') {
         return 'orbit: this task is stopped; tool use is fenced (the orbit tool may start a new task)'
@@ -734,6 +787,18 @@ export default class OrbitHost extends Service {
     }
   }
 
+  /** Strict tasks must name a checker inside the frozen list; others stay optional. */
+  private strictCheckerModel(): ModelIdentity | undefined {
+    if (this.allowedModels.size === 0) return this.checkerModel
+    if (this.checkerModel === undefined) {
+      throw new Error('orbit: a strict task requires checkerProvider/checkerModel explicitly')
+    }
+    if (!this.allowedModels.has(routeKey(this.checkerModel))) {
+      throw new Error(`orbit: checker model ${routeKey(this.checkerModel)} is outside the frozen authorization list`)
+    }
+    return this.checkerModel
+  }
+
   /** Run one signalled process check; deduped by observation key and overlap. */
   private async runSignalCheck(
     taskDir: string,
@@ -750,12 +815,13 @@ export default class OrbitHost extends Service {
       if (state.status !== 'running' || state.stop !== undefined) return
       if (state.checks.inFlight !== null) return
       const artifactDigest = input.artifactDigest
+      const checkerModel = this.strictCheckerModel()
       const check = await service.requestCheck({
         role: 'reviewer',
         kind: 'process',
         trigger: 'auto',
         artifactDigest,
-        ...(this.checkerModel === undefined ? {} : { model: this.checkerModel }),
+        ...(checkerModel === undefined ? {} : { model: checkerModel }),
       })
       number = check.number
       const prompt = buildProcessCheckerPrompt({
@@ -775,7 +841,7 @@ export default class OrbitHost extends Service {
         prompt,
         cwd: state.workspace.artifactRoot,
         signal: AbortSignal.timeout(10 * 60_000),
-        ...(this.checkerModel === undefined ? {} : { model: this.checkerModel }),
+        ...(checkerModel === undefined ? {} : { model: checkerModel }),
       })
       const recorded = await service.recordCheckResult(check.number, raw)
       await service.store.appendEvent('jev/process-check', {

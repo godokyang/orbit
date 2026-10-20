@@ -82,6 +82,12 @@ describe('task record', () => {
     expect(new Set(events.map((event) => event.seq)).size).toBe(events.length)
   })
 
+  it('freezes the strict model list on the task record', async () => {
+    const service = await startService({ allowedModels: ['p/m', 'p/n'] })
+    const state = await service.state()
+    expect(state.authorization).toEqual({ allowedModels: ['p/m', 'p/n'] })
+  })
+
   it('increments the input version on amend and records the source', async () => {
     const service = await startService()
     const before = await service.currentInputDigest()
