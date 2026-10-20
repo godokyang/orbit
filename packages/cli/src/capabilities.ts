@@ -69,6 +69,9 @@ export function buildLaunchSpec(input: {
     spec.bootstrap = { path, result, sha256 }
     spec.env.ORBIT_BOOTSTRAP = path
     spec.env.ORBIT_BOOTSTRAP_RESULT = result
+    // A Loom node is unattended: run Electron's Node mode so no desktop
+    // window or browser tab is opened by the headless harness.
+    spec.env.ELECTRON_RUN_AS_NODE = '1'
   }
   return spec
 }

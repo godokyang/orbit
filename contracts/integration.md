@@ -87,7 +87,7 @@
 
 - 进程所有权属于调用方（Loom）；Orbit 不启动、不托管进程。
 - `env` 只列必须覆盖的变量；调用方合并自己的环境。
-- `--bootstrap FILE` 时 spec 额外带 `bootstrap {path,result,sha256}`，env 带 `ORBIT_BOOTSTRAP`/`ORBIT_BOOTSTRAP_RESULT`；宿主读取冻结 spec 后自行创建 Root、start 任务并发送首条指令，成功后写 result `{ok:true,taskId,sessionId,project}`，失败写 `{ok:false,error}`。
+- `--bootstrap FILE` 时 spec 额外带 `bootstrap {path,result,sha256}`，env 带 `ORBIT_BOOTSTRAP`/`ORBIT_BOOTSTRAP_RESULT`，并设置 `ELECTRON_RUN_AS_NODE=1`（无人值守，不打开窗口/标签页）；宿主读取冻结 spec 后自行创建 Root、start 任务并发送首条指令，成功后写 result `{ok:true,taskId,sessionId,project}`，失败写 `{ok:false,error}`。
 - 非 headless 调用方拉起进程后调用 `orbit start`，再轮询 `control_socket` 出现；socket 由任务接纳后创建。
 - headless spec v1：`{version:1,action:'start'|'resume',previousTask?,instruction,project,externalRefs?,allowedModels?,model:{provider,model}}`。`resume` 从 `previousTask` 载入同一 Root 会话，要求前序任务已确认停止；本版不提供 `resume_wake`。
 

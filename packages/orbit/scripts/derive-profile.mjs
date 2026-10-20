@@ -66,7 +66,7 @@ const dump = execFileSync(dsh, ['--profile', profile, '--dump-config'], {
 })
 const dumpPath = join(home, `${profile}-dump.yml`)
 writeFileSync(dumpPath, dump)
-execFileSync(process.execPath, [t0, '--dump', dumpPath, '--sandbox', checker ? 'read-only' : 'workspace-write', '--role', checker ? 'checker' : 'app'], {
+execFileSync(process.execPath, [t0, '--dump', dumpPath, '--sandbox', checker ? 'read-only' : 'workspace-write', '--role', role], {
   stdio: 'inherit',
 })
 console.log(`orbit-profile: ${profileDir} ready (bundle @zeen/orbit)`)

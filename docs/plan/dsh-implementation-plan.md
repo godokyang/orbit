@@ -406,3 +406,10 @@ B 阶段开工前只需补一份短设计：JEV 观察输入在 DSH 事件下的
 - Loom discovery 的冻结提示改为使用 `orbit_ask` 与 `write`（不再依赖 OMP 的 `loom_result`/原生 ask）。
 - 真实验证：discovery 启动 → 两轮追问 → 共 4 个 Root 问题全部 answered、result.json 写成、Root 会话产生 2 个 `turn_completed`；暂停/续接此前已验证同一 Root session。
 - 仍未做：执行 run 迁移、节点重启游标、DSH guard、C1 界面；`user-questions/request` 对 Root 的拦截仍未生效，headless 改用自有工具。
+
+## 实施进展（2026-10-20，无人值守测试不再开窗口）
+
+- 用户指出测试不应每次新开标签/窗口。原因：headless 测试用 web 模板启动 DSH，Electron 会开窗口。
+- 修复：带 `--bootstrap` 的 headless launch 规格设置 `ELECTRON_RUN_AS_NODE=1`，DSH 以 Node 模式运行，不创建桌面窗口/浏览器标签；Loom discovery 三轮在该模式下真实验证通过。
+- 浏览器操作改用 ego-browser（已安装 v2.1.0），复用同一 TaskSpace/Page，不再为每次检查新开标签。
+- 全套 126 个测试通过。
