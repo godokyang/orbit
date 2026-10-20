@@ -488,7 +488,7 @@ export default class OrbitHost extends Service {
               source: { kind: 'explicit-text', verbatim: true, at: new Date().toISOString() },
               workspace: workspaceInfo(projectRoot),
               runtime: host.runtimeInfo(),
-              ...(host.allowedModels.size === 0 ? {} : { allowedModels: [...host.allowedModels] }),
+              ...((host as any).allowedModels.size === 0 ? {} : { allowedModels: [...(host as any).allowedModels] }),
               ...(externalRefs === undefined ? {} : { externalRefs }),
             })
             host.modelBindings.set(agent.id, {
@@ -647,7 +647,7 @@ export default class OrbitHost extends Service {
               },
               workspace: workspaceInfo(projectRoot),
               runtime: host.runtimeInfo(),
-              ...(host.allowedModels.size === 0 ? {} : { allowedModels: [...host.allowedModels] }),
+              ...((host as any).allowedModels.size === 0 ? {} : { allowedModels: [...(host as any).allowedModels] }),
             })
             await host.adopt(service, agent, projectRoot)
             return JSON.stringify({ ok: true, ...summarize(state), taskDir: service.store.dir })
@@ -685,7 +685,7 @@ export default class OrbitHost extends Service {
                 ...(messageId === undefined ? {} : { messageId }),
                 snapshot: { ...snapshot, at: new Date().toISOString() },
               },
-              ...(host.allowedModels.size === 0 ? {} : { allowedModels: [...host.allowedModels] }),
+              ...((host as any).allowedModels.size === 0 ? {} : { allowedModels: [...(host as any).allowedModels] }),
             })
             await host.adopt(service, agent, projectRoot)
             return JSON.stringify({ ok: true, ...summarize(state), taskDir: service.store.dir })
@@ -730,14 +730,14 @@ export default class OrbitHost extends Service {
               catalog_priors: [],
               exact_evidence: [],
             })
-            const checkerRoute = host.checkerModel
+            const checkerRoute = (host as any).checkerModel
             const questions =
               assessKind === 'members'
                 ? [...delegationQuestions(), ...candidateQuestions(candidates)]
                 : checkerQuestions(checkerRoute === undefined ? [] : [{ model: `${checkerRoute.provider}/${checkerRoute.model}` }])
             const client = new TypeSafeJudgmentClient({
               apiKey,
-              ...(host.jevEndpoint === undefined ? {} : { endpoint: host.jevEndpoint }),
+              ...((host as any).jevEndpoint === undefined ? {} : { endpoint: (host as any).jevEndpoint }),
               ...(host.jevModel === undefined ? {} : { model: host.jevModel }),
             })
             const judgment = await client.judge({ state: projected as unknown as Record<string, unknown>, questions })
@@ -1080,6 +1080,20 @@ export default class OrbitHost extends Service {
             text: `${status.state.id} · ${status.state.status} (${stop}) · check in flight: ${status.state.checks.inFlight ?? 'none'} · open findings: ${status.openFindings.length} · pending questions: ${pending}`,
           }
         },
+      })
+      commandCtx.commands.register({
+        definitionId: '@zeen/orbit/settings' as never,
+        name: 'orbit-settings',
+        description: 'Show Orbit model, checker and JEV settings',
+        handler: async () => ({
+          kind: 'success',
+          text: [
+            `allowed models: ${(host as any).allowedModels.size === 0 ? '(config pool)' : [...(host as any).allowedModels].join(', ')}`,
+            `checker: ${(host as any).checkerProvider || '(config default)'}/${(host as any).checkerModel || '(config default)'}`,
+            `JEV: ${(host as any).jevEndpoint || '(disabled)'}${(host as any).jevEndpoint === '' ? '' : ` (threshold ${(host as any).jevThreshold})`}`,
+            `member candidates: ${(host as any).memberCandidates.length}`,
+          ].join(' · '),
+        }),
       })
       commandCtx.commands.register({
         definitionId: '@zeen/orbit/stop' as never,
