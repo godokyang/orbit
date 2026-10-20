@@ -139,7 +139,7 @@ async function findLatest(projectRoot: string, limit: number): Promise<TaskServi
 
 async function openTask(projectRoot: string, limit: number, id?: string): Promise<TaskService> {
   if (id !== undefined) {
-    const service = await TaskService.open(join(TaskStore.tasksRoot(projectRoot), id)).catch(() => undefined)
+    const service = await TaskService.open(id.startsWith('/') ? id : join(TaskStore.tasksRoot(projectRoot), id)).catch(() => undefined)
     if (service === undefined) throw new Error(`orbit: unknown task ${id}`)
     return service
   }
@@ -1224,13 +1224,21 @@ export default class OrbitHost extends Service {
             source: { kind: 'explicit-text', verbatim: true, at: new Date().toISOString() },
           })
       await this.adopt(service, agent as never, spec.project)
+      const instructionId = randomUUID()
       agent.followup({
-        id: randomUUID() as never,
+        id: instructionId as never,
         role: 'user',
         content: [{ type: 'text', text: spec.instruction }],
         source: { kind: 'user' },
       } as never)
-      report({ ok: true, action: spec.action, taskId: state.id, sessionId: agent.id, project: spec.project })
+      report({
+        ok: true,
+        action: spec.action,
+        taskId: state.id,
+        sessionId: agent.id,
+        messageId: instructionId,
+        project: spec.project,
+      })
     } catch (error) {
       const message = (error as Error).message
       console.error(`orbit: headless bootstrap failed: ${message}`)

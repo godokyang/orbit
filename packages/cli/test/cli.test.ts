@@ -419,3 +419,13 @@ describe('orbit-ts status by session', () => {
     expect(JSON.parse(empty.out())).toEqual({ tasks: [] })
   })
 })
+
+describe('orbit-ts absolute task directory', () => {
+  it('opens a task directory passed by an external node', async () => {
+    const dir = await project()
+    const taskId = await startTask(dir)
+    const sink = capture()
+    expect(await runCli(['status', join(dir, '.orbit', 'tasks', taskId), '--json', '--project', dir], sink.io)).toBe(0)
+    expect(JSON.parse(sink.out())).toMatchObject({ taskId })
+  })
+})

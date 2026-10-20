@@ -1,5 +1,5 @@
 import { readdir } from 'node:fs/promises'
-import { join } from 'node:path'
+import { isAbsolute, join } from 'node:path'
 import { TaskService, TaskStore, type CheckRecord, type TaskEvent, type TaskState } from '@orbit/core'
 
 export interface StatusView {
@@ -51,7 +51,7 @@ export async function findLatest(projectRoot: string, limit = 64): Promise<TaskS
 
 export async function openTask(projectRoot: string, id?: string): Promise<TaskService> {
   if (id !== undefined) {
-    return TaskService.open(join(TaskStore.tasksRoot(projectRoot), id))
+    return TaskService.open(isAbsolute(id) ? id : join(TaskStore.tasksRoot(projectRoot), id))
   }
   const latest = await findLatest(projectRoot)
   if (latest === undefined) throw new Error(`no Orbit task in ${projectRoot}`)
