@@ -18,3 +18,11 @@
 - 可编辑设置（JEV key/候选池/允许模型）。
 - 独立的对话流 Orbit 事件行（当前是工具卡片 + 面板内最近事件）。
 - 客户端构建的仓库内可复现集成。
+
+## 追加：可编辑设置（2026-10-21）
+
+- 设置卡输入框加 aria-label 后，用 ego-browser 修改 allowed models 并 Save：
+  - 面板立即显示 `models test-provider/test-model`；
+  - `$DSH_HOME/orbit-settings.json` 持久化为同一值；
+  - 宿主重启时加载该文件。
+- 可编辑项：allowed models、checker provider/model、JEV endpoint。

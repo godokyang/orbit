@@ -108,14 +108,17 @@ window.__ModuleLoader__.load({
 				opacity: .8,
 				whiteSpace: "pre-wrap"
 			} }, (0, react.createElement)("div", null, (0, react.createElement)("label", null, "allowed models "), (0, react.createElement)("input", {
+				"aria-label": "Orbit allowed models",
 				value: allowedInput,
 				onChange: (event) => setAllowedInput(event.target.value),
 				style: { width: 220 }
 			})), (0, react.createElement)("div", null, (0, react.createElement)("label", null, "checker provider/model "), (0, react.createElement)("input", {
+				"aria-label": "Orbit checker route",
 				value: checkerInput,
 				onChange: (event) => setCheckerInput(event.target.value),
 				style: { width: 200 }
 			})), (0, react.createElement)("div", null, (0, react.createElement)("label", null, "JEV endpoint "), (0, react.createElement)("input", {
+				"aria-label": "Orbit JEV endpoint",
 				value: jevInput,
 				onChange: (event) => setJevInput(event.target.value),
 				style: { width: 240 }

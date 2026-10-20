@@ -81,15 +81,15 @@ function OrbitPanel({ sessionId }: { sessionId: string }): unknown {
       ? createElement('div', { style: { opacity: 0.8, whiteSpace: 'pre-wrap' } },
           createElement('div', null,
             createElement('label', null, 'allowed models '),
-            createElement('input', { value: allowedInput, onChange: (event: { target: { value: string } }) => setAllowedInput(event.target.value), style: { width: 220 } }),
+            createElement('input', { 'aria-label': 'Orbit allowed models', value: allowedInput, onChange: (event: { target: { value: string } }) => setAllowedInput(event.target.value), style: { width: 220 } }),
           ),
           createElement('div', null,
             createElement('label', null, 'checker provider/model '),
-            createElement('input', { value: checkerInput, onChange: (event: { target: { value: string } }) => setCheckerInput(event.target.value), style: { width: 200 } }),
+            createElement('input', { 'aria-label': 'Orbit checker route', value: checkerInput, onChange: (event: { target: { value: string } }) => setCheckerInput(event.target.value), style: { width: 200 } }),
           ),
           createElement('div', null,
             createElement('label', null, 'JEV endpoint '),
-            createElement('input', { value: jevInput, onChange: (event: { target: { value: string } }) => setJevInput(event.target.value), style: { width: 240 } }),
+            createElement('input', { 'aria-label': 'Orbit JEV endpoint', value: jevInput, onChange: (event: { target: { value: string } }) => setJevInput(event.target.value), style: { width: 240 } }),
           ),
           createElement('button', {
             onClick: () => {
