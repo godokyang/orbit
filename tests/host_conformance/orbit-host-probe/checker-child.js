@@ -30,6 +30,8 @@ class CheckerAdapter extends LlmAdapter {
   async listModels(provider) { return [{ id: 'probe-1', provider, model: 'probe-1', name: 'probe-1', displayName: 'probe-1' }] }
   async resolveModel(provider, model) { return { provider, id: model, name: model, model, context: { contextWindow: 100000 } } }
   async *stream() {
+    const delay = Number(process.env.ORBIT_CHECKER_DELAY_MS ?? 0)
+    if (Number.isFinite(delay) && delay > 0) await new Promise((resolve) => setTimeout(resolve, delay))
     yield { type: 'block-start', index: 0, blockType: 'text' }
     yield { type: 'text-delta', index: 0, text: RESULT }
     yield { type: 'block-end', index: 0, block: { type: 'text', text: RESULT } }

@@ -305,3 +305,16 @@ describe('check result validation', () => {
     ).rejects.toSatisfy((error) => isOrbitError(error) && error.code === 'check_result_invalid')
   })
 })
+
+describe('stop fence and check results', () => {
+  it('refuses a check result that arrives after the stop fence', async () => {
+    const service = await startService()
+    await service.requestCheck({ role: 'reviewer', kind: 'artifact', trigger: 'manual', artifactDigest: 'A' })
+    await service.requestStop('user')
+    await expect(service.recordCheckResult(1, readyResult())).rejects.toSatisfy(
+      (error) => isOrbitError(error) && error.code === 'stop_fenced',
+    )
+    const failed = await service.failCheck(1, { kind: 'stopped', message: 'checker disposed by stop' })
+    expect(failed.status).toBe('failed')
+  })
+})

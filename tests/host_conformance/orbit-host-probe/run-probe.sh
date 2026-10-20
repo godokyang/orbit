@@ -81,6 +81,7 @@ cat > "$DSH_HOME/probe.patch.yml" <<EOF
         model: probe-1
         env:
           ELECTRON_RUN_AS_NODE: '1'
+          ORBIT_CHECKER_DELAY_MS: '4000'
 EOF
 
 OUT="$DSH_HOME/results/orbit-host.out"

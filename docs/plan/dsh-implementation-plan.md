@@ -321,3 +321,10 @@ B 阶段开工前只需补一份短设计：JEV 观察输入在 DSH 事件下的
 - 真实模型场景：在 `check/requested` 后 1.5s / 6s 停止，均得到 `stop_unconfirmed`、`missing=["root_idle","checks_settled"]`、检查仍 `in_flight`；宿主未伪称确认，也未把检查记成通过。
 - 结论：检查者 activation 尚未发布时停止，按失败关闭处理；已发布 activation 的 dispose 路径仍只有单测，缺真实端到端证据。
 - 仍未做：慢检查者/更长时序的真实 dispose 证据、`stop_unconfirmed` 的显式重试验收、Loom。
+
+## 实施进展（2026-10-20，停止围栏拒绝迟到检查结果）
+
+- Core 在 stop 围栏已落盘后拒绝 `recordCheckResult`（`stop_fenced`）；检查动作把它记成 `check/failed {kind: stopped}`，不再生成 `finalization_notice`，避免检查者晚到的结果把已停止任务“洗成”通过。
+- 探针用 4 秒延迟的假检查者在 activation 已发布后停止：任务 `paused`、`confirmed=true`、`missing=[]`，check #1 `failed/stopped`，无 finalization；验证 dispose + 围栏拒绝的组合路径。
+- 真实检查者启动窗口内停止仍按失败关闭为 `stop_unconfirmed`（见真实验收记录），与本次“已发布 activation”场景互补。
+- 全套测试 108 个通过。

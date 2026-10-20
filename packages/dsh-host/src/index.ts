@@ -25,6 +25,7 @@ import {
   decideDelegation,
   delegationQuestions,
   digestWorkspace,
+  isOrbitError,
   loadSelectionRelease,
   planArchiveSegment,
   projectSelectionState,
@@ -496,7 +497,8 @@ export default class OrbitHost extends Service {
                 findings: recorded.check.result?.findings.length ?? 0,
               })
             } catch (error) {
-              await service.failCheck(check.number, { kind: 'checker_error', message: (error as Error).message }).catch(() => undefined)
+              const kind = isOrbitError(error) && error.code === 'stop_fenced' ? 'stopped' : 'checker_error'
+              await service.failCheck(check.number, { kind, message: (error as Error).message }).catch(() => undefined)
               throw new Error(`orbit: independent check failed: ${(error as Error).message}`)
             }
           }

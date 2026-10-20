@@ -717,6 +717,9 @@ export class TaskService {
     const result = parseCheckResult(rawResult)
     return this.mutex.run(async () => {
       const state = await this.store.readState()
+      if (state.stop !== undefined) {
+        throw new OrbitError('stop_fenced', `check ${number} result arrived after the stop fence was armed`)
+      }
       const check = await this.store.readCheck(number)
       if (check.status !== 'in_flight') {
         throw new OrbitError('invalid_state', `check ${number} is ${check.status}`)

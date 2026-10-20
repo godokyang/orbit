@@ -432,6 +432,42 @@ async function run(ctx) {
   await cli(['stop', '--json', '--project', WORK])
   await waitFor(async () => (readTask(WORK)?.state?.status !== 'running' ? true : undefined), 12000, 'takeover stop').catch(() => undefined)
 
+  // Stop while a published checker activation is still running.
+  scripts.length = 0
+  scripts.push(() => toolChunks('orbit', { action: 'start', instruction: 'Checker stop probe.' }))
+  scripts.push(() => textChunks('started'))
+  handle.agent.followup(msg('Start a checker stop probe task.'))
+  await handle.agent.whenIdle()
+  scripts.length = 0
+  scripts.push(() => toolChunks('orbit', { action: 'declare', goal: 'slow check', acceptance: 'check runs' }))
+  scripts.push(() => textChunks('declared'))
+  handle.agent.followup(msg('Declare the slow check unit.'))
+  await handle.agent.whenIdle()
+  scripts.length = 0
+  scripts.push(() => toolChunks('orbit', { action: 'check' }))
+  handle.agent.followup(msg('Run the slow check.'))
+  await waitFor(async () => {
+    const current = readTask(WORK)
+    if (current === undefined) return undefined
+    const events = readFileSync(join(current.dir, 'events.jsonl'), 'utf8').trim().split('\n').map((line) => JSON.parse(line))
+    return events.some((event) => event.type === 'check/requested') ? true : undefined
+  }, 15000, 'slow check requested')
+  await new Promise((resolve) => setTimeout(resolve, 1500))
+  const stopSlow = JSON.parse(await cli(['stop', '--json', '--project', WORK]))
+  const slowState = await waitFor(async () => {
+    const current = readTask(WORK)
+    return current?.state?.status !== 'running' ? current : undefined
+  }, 20000, 'slow check stop').catch(() => readTask(WORK))
+  const slowChecks = slowState ? readChecks(slowState) : []
+  log({
+    step: 'checker-stop',
+    stop: stopSlow.status,
+    state: slowState?.state?.status,
+    confirmed: slowState?.state?.stop?.confirmation?.confirmed,
+    missing: slowState?.state?.stop?.confirmation?.missing,
+    checks: slowChecks.map((check) => ({ number: check.number, status: check.status, failure: check.failure })),
+  })
+
   await handle.dispose()
   if (jevServer !== undefined) await new Promise((resolve) => jevServer.close(() => resolve()))
   log({
