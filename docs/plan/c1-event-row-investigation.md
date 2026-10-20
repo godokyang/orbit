@@ -1,5 +1,7 @@
 # C1 对话事件行调查
 
+> 更新：DSH **支持**自定义 conversation 行。官方文档 `docs/subsystems/conversation.md` 与 `docs/cookbook/extension-cookbook.md` 给出了 `ConversationNodeDefinition` + `conversation.chat.node` 的完整示例与 `exclusive` 语义；问题在本项目集成，不是 DSH 缺能力。
+
 目标：在对话流里显示独立的 Orbit 任务事件行（started/checked/stopped），而不只是工具卡片。
 
 ## 已尝试
@@ -11,7 +13,7 @@
 2. **宿主 append `plugin:zeen/orbit/task` session record + 客户端匹配**
    - 宿主在 start/check/stop 后写 plugin record；
    - 客户端定义匹配 `plugin:` 事件；插件加载无报错，但行仍不出现；
-   - 结论：当前 client 会话历史不把 ignorable plugin record 暴露给 conversation node 匹配。
+   - 需要按官方示例核对 anchorSeq/location 与 exclusive，不能据此断言 DSH 不支持。
 
 ## 可用替代
 
@@ -19,6 +21,11 @@
 - **Session projection**：可注册 Orbit 投影，但投影只能由 panel/组件读取，不能直接生成 conversation 行。
 - **工具卡片**：当前 `orbit`/`orbit_ask` 的 presenters 已在对话流显示卡片，是 DSH 公开支持的事件行形态。
 - **上游扩展**：需要 DSH 暴露 plugin record 到 client history，或提供 conversation 自定义事件注册接缝。
+
+## 官方依据
+
+- `docs/subsystems/conversation.md`：ConversationNodeDefinition 示例、`context.start?.event.seq` 的 anchorSeq、`exclusive: true` 抢占通用 target fallback。
+- `docs/cookbook/extension-cookbook.md`：业务行注册 `ConversationNodeDefinition` + keyed chat renderer。
 
 ## 待决策
 
