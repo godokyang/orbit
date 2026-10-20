@@ -123,3 +123,10 @@ B 阶段开工前只需补一份短设计：JEV 观察输入在 DSH 事件下的
 - H2 第一版：任务启动后在 Root 的 agent 作用域注册 `systemPrompt.context`，每次 admission 从 `state.json` 重读原始要求与全部修订；读取失败显式声明记录不可读。
 - 探针新增断言：停止后状态为 `paused`、`stop.confirmation.confirmed=true`、`missing=[]`；成员结算为 `stopped`；第二次派发被拒；模型侧观察到 Orbit 要求上下文的调用 10/12。
 - 仍未做：检查者子进程、CLI/socket、T0 组合断言与受控 profile bundle、冻结验收 #1/#2、真实模型与 Loom。
+
+## 实施进展（2026-10-20，CLI 与私有 socket）
+
+- `@orbit/dsh-host` 在任务启动时为项目创建私有 Unix socket `<project>/.orbit/orbit.sock`（0600，陈旧文件可回收，活 socket 拒绝覆盖；插件卸载时关闭并删除）。协议是逐行 JSON：`{id, method: status|events|stop, task?}` → `{id, ok, result|error}`，单行上限 1 MiB。
+- `@orbit/cli`（bin `orbit-ts`，D 阶段再并入 `orbit`）实现 `status` / `events` / `stop`：有活宿主时走 socket，status/events 无宿主时回退只读本地记录；stop 无活宿主时失败关闭。
+- 验证：新增 8 个 vitest（control server 3、CLI 5），全套 22 个通过；DSH T1 探针改为通过真实 CLI 子进程执行 status/events/stop，外部 stop 后任务 `paused`、`confirmed=true`、围栏仍拒绝第二次派发。
+- 仍未做：检查者子进程（H7）、T0 组合断言与受控 profile bundle、真实模型、冻结验收 #1/#2、Loom。

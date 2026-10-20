@@ -7,7 +7,10 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent-loop'
 import type {} from '@deepseek-ai/dsh-session'
-import { TaskService, TaskStore, type TaskState } from '@orbit/core'
+import { CONTROL_SOCKET_FILE, TaskService, TaskStore, type ControlRequest, type TaskState } from '@orbit/core'
+import { ControlServer } from './control.js'
+
+export { ControlServer } from './control.js'
 
 export const name = 'orbit'
 
@@ -92,6 +95,17 @@ async function findTaskForSession(projectRoot: string, limit: number, sessionId:
     if (members?.members.some((member) => member.id === sessionId) === true) return service
   }
   return undefined
+}
+
+async function projectStatus(service: TaskService): Promise<Record<string, unknown>> {
+  const status = await service.status()
+  return {
+    ...summarize(status.state),
+    members: status.members.members,
+    workUnits: status.workUnits.units.map((unit) => ({ id: unit.id, status: unit.status, goal: unit.goal })),
+    checks: status.checks.map((check) => ({ number: check.number, status: check.status, verdict: check.result?.verdict })),
+    openFindings: status.openFindings.map((finding) => finding.id),
+  }
 }
 
 function summarize(state: TaskState): Record<string, unknown> {
@@ -193,6 +207,7 @@ export default class OrbitHost extends Service {
   private readonly pending = new Map<string, PendingDispatch[]>()
   private readonly fencedSessions = loadFenceRegistry()
   private readonly requirementDisposers = new Map<string, () => void>()
+  private readonly controls = new Map<string, ControlServer>()
 
   constructor(ctx: Context, config: Config = {}) {
     super(ctx, 'orbit')
@@ -262,30 +277,20 @@ export default class OrbitHost extends Service {
               source: { kind: 'explicit-text', verbatim: true, at: new Date().toISOString() },
             })
             host.attachRequirements(agent, service)
+            await host.ensureControl(projectRoot).catch((error: Error) => {
+              console.error(`orbit: control socket unavailable: ${error.message}`)
+            })
             return JSON.stringify({ ok: true, ...summarize(state), taskDir: service.store.dir })
           }
 
           if (action === 'status') {
             const service = await openTask(projectRoot, maxTasks, (args as { task?: string }).task)
-            const status = await service.status()
-            return JSON.stringify({
-              ok: true,
-              ...summarize(status.state),
-              members: status.members.members,
-              workUnits: status.workUnits.units.map((unit) => ({ id: unit.id, status: unit.status, goal: unit.goal })),
-              checks: status.checks.map((check) => ({ number: check.number, status: check.status, verdict: check.result?.verdict })),
-              openFindings: status.openFindings.map((finding) => finding.id),
-            })
+            return JSON.stringify({ ok: true, ...(await projectStatus(service)) })
           }
 
           if (action === 'stop') {
             const service = await openTask(projectRoot, maxTasks, (args as { task?: string }).task)
-            const state = await service.requestStop('user')
-            const members = await service.store.members()
-            host.fencedSessions.add(state.root.sessionId)
-            for (const member of members.members) host.fencedSessions.add(member.id)
-            saveFenceRegistry(host.fencedSessions)
-            setTimeout(() => { void host.performStop(service) }, 50)
+            const state = await host.beginStop(service, 50)
             return JSON.stringify({ ok: true, ...summarize(state), fence: state.stop?.fence ?? 'none', teardown: 'scheduled' })
           }
 
@@ -411,6 +416,49 @@ export default class OrbitHost extends Service {
       }
       return undefined
     })
+
+    ctx.effect(() => () => {
+      for (const server of host.controls.values()) void server.close()
+      host.controls.clear()
+    })
+  }
+
+  /** Start the private control socket for this project on first use. */
+  private async ensureControl(projectRoot: string): Promise<void> {
+    if (this.controls.has(projectRoot)) return
+    const server = new ControlServer(join(projectRoot, '.orbit', CONTROL_SOCKET_FILE), (request) =>
+      this.handleControl(projectRoot, request),
+    )
+    await server.start()
+    this.controls.set(projectRoot, server)
+  }
+
+  private async handleControl(projectRoot: string, request: ControlRequest): Promise<unknown> {
+    if (request.method === 'status') {
+      const service = await openTask(projectRoot, this.maxTasks, request.task)
+      return { ok: true, ...(await projectStatus(service)) }
+    }
+    if (request.method === 'events') {
+      const service = await openTask(projectRoot, this.maxTasks, request.task)
+      return { ok: true, taskId: (await service.state()).id, events: await service.store.events() }
+    }
+    if (request.method === 'stop') {
+      const service = await openTask(projectRoot, this.maxTasks, request.task)
+      const state = await this.beginStop(service, 0)
+      return { ok: true, ...summarize(state), fence: state.stop?.fence ?? 'none' }
+    }
+    throw new Error(`orbit: unknown control method ${String(request.method)}`)
+  }
+
+  /** Arm the durable fence, persist the host cache and schedule teardown. */
+  private async beginStop(service: TaskService, delayMs: number): Promise<TaskState> {
+    const state = await service.requestStop('user')
+    const members = await service.store.members()
+    this.fencedSessions.add(state.root.sessionId)
+    for (const member of members.members) this.fencedSessions.add(member.id)
+    saveFenceRegistry(this.fencedSessions)
+    setTimeout(() => { void this.performStop(service) }, delayMs)
+    return state
   }
 
   /** H2: per-Root dynamic context; each admission rereads the durable record. */

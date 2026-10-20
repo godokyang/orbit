@@ -1,0 +1,28 @@
+{
+  "name": "@orbit/cli",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Orbit thin client: local task status/events and control-socket stop.",
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
+    }
+  },
+  "bin": {
+    "orbit-ts": "./dist/cli.mjs"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@orbit/core": "workspace:*"
+  }
+}

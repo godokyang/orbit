@@ -2,6 +2,8 @@
 // declare, a controlled subagent dispatch (H4 registration), stop fence and a
 // denied second dispatch. No real model, no network.
 import { appendFileSync, mkdirSync, readdirSync, readFileSync, existsSync } from 'node:fs'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { LlmAdapter } from '@deepseek-ai/dsh-llm'
@@ -14,6 +16,15 @@ const WORK = join(HOME, 'project')
 const OUT = process.env.ORBIT_PROBE_OUT || '/dev/stderr'
 
 const log = (record) => appendFileSync(OUT, JSON.stringify({ t: new Date().toISOString(), ...record }) + '\n')
+const execFileAsync = promisify(execFile)
+async function cli(args) {
+  const { stdout } = await execFileAsync(process.execPath, [process.env.ORBIT_CLI, ...args], {
+    cwd: WORK,
+    encoding: 'utf8',
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+  })
+  return stdout
+}
 const short = (error) => String(error && (error.stack || error.message || error)).split('\n').slice(0, 3).join(' | ').slice(0, 500)
 const msg = (text) => ({ id: randomUUID(), role: 'user', content: [{ type: 'text', text }], source: { kind: 'user' } })
 
@@ -119,6 +130,11 @@ async function run(ctx) {
   let task = readTask(WORK)
   log({ step: 'start', taskId: task?.state?.id, status: task?.state?.status, instruction: task?.state?.input?.versions?.[0]?.text })
 
+  const cliStatus = JSON.parse(await cli(['status', '--json', '--project', WORK]))
+  log({ step: 'cli-status', source: 'socket', taskId: cliStatus.taskId, status: cliStatus.status })
+  const cliEvents = JSON.parse(await cli(['events', '--json', '--project', WORK]))
+  log({ step: 'cli-events', count: cliEvents.events?.length })
+
   scripts.push(() => toolChunks('orbit', { action: 'declare', goal: 'Implement slice', acceptance: 'Tests pass', dependencies: [] }))
   scripts.push(() => textChunks('declared'))
   handle.agent.followup(msg('Declare the work unit.'))
@@ -148,20 +164,16 @@ async function run(ctx) {
   const results = await toolResults(ctx, handle.agent.id)
   log({ step: 'dispatch-result', last: results.at(-1) })
 
-  // Let the child settle and drop any unscripted leftovers before the stop turn.
+  // Let the child settle, then stop through the external CLI/socket path.
   await new Promise((resolve) => setTimeout(resolve, 1200))
   log({ step: 'child-status', status: ctx.agents.get(registered.member.id)?.status })
   scripts.length = 0
-  const beforeStop = (await toolResults(ctx, handle.agent.id)).length
-  scripts.push(() => toolChunks('orbit', { action: 'stop' }))
-  scripts.push(() => textChunks('stopped'))
-  handle.agent.followup(msg('Stop the task.'))
-  await handle.agent.whenIdle()
+  const stopCli = JSON.parse(await cli(['stop', '--json', '--project', WORK]))
+  log({ step: 'cli-stop', taskId: stopCli.taskId, status: stopCli.status, fence: stopCli.fence })
   task = await waitFor(async () => {
     const current = readTask(WORK)
     return current?.state?.status !== 'running' ? current : undefined
   }, 12000, 'stop confirmation').catch(() => readTask(WORK))
-  const stopResults = await toolResults(ctx, handle.agent.id)
   log({
     step: 'stop',
     status: task?.state?.status,
@@ -169,12 +181,10 @@ async function run(ctx) {
     fence: task?.state?.stop?.fence,
     confirmed: task?.state?.stop?.confirmation?.confirmed,
     missing: task?.state?.stop?.confirmation?.missing,
-    newResults: stopResults.length - beforeStop,
-    last: stopResults.at(-1),
   })
 
   scripts.length = 0
-  const beforeFence = stopResults.length
+  const beforeFence = (await toolResults(ctx, handle.agent.id)).length
   scripts.push(() => toolChunks('subagent', { description: 'late', prompt: `Late work.\norbit-unit: ${unit?.id}`, cwd: WORK }))
   scripts.push(() => textChunks('after denial'))
   handle.agent.followup(msg('Try one more dispatch.'))

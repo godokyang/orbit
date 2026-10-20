@@ -10,8 +10,10 @@ export DSH_HOME
 PROFILE=${PROFILE:-orbit-t1}
 DSH_BIN=${DSH_BIN:-/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh}
 HOST_DIST="$REPO/packages/dsh-host/dist/index.mjs"
+CLI_DIST="$REPO/packages/cli/dist/cli.mjs"
 
 [ -f "$HOST_DIST" ] || { echo "missing $HOST_DIST; run pnpm --filter @orbit/dsh-host build" >&2; exit 1; }
+[ -f "$CLI_DIST" ] || { echo "missing $CLI_DIST; run pnpm --filter @orbit/cli build" >&2; exit 1; }
 mkdir -p "$DSH_HOME/results"
 rm -rf "$DSH_HOME/project"
 
@@ -38,6 +40,7 @@ EOF
 OUT="$DSH_HOME/results/orbit-host.out"
 rm -f "$OUT" "$DSH_HOME/results/orbit-host.stdout" "$DSH_HOME/results/orbit-host.log"
 export ORBIT_PROBE_OUT="$OUT"
+export ORBIT_CLI="$CLI_DIST"
 
 ( cd "$DSH_HOME" && sleep 120 | "$DSH_BIN" --profile "$PROFILE" --patch "$DSH_HOME/probe.patch.yml" \
     > "$DSH_HOME/results/orbit-host.stdout" 2> "$DSH_HOME/results/orbit-host.log" ) &

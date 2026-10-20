@@ -17,3 +17,8 @@ the host probe notes require. Nothing touches the user's `~/.dsh`.
 
 Not part of `npm test`: it needs the desktop DSH installation and real child
 processes.
+
+The probe also spawns the built `@orbit/cli` (`ORBIT_CLI`) as a real child
+process to run `status`, `events` and `stop` against the project socket, then
+asserts the task reached `paused` with `confirmed=true` and a later dispatch is
+still fenced.
