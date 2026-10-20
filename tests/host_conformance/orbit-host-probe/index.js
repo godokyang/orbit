@@ -248,6 +248,8 @@ async function run(ctx) {
     step: 'check',
     checkNumber: check?.number,
     checkStatus: check?.status,
+    snapshotDir: check?.snapshotDir,
+    snapshotExists: check?.snapshotDir ? existsSync(check.snapshotDir) : false,
     verdict: check?.result?.verdict,
     ready: check?.result?.delivery?.ready,
     coverageComplete: check?.result?.coverage?.complete,

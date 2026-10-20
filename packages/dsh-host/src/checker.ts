@@ -7,6 +7,8 @@ export interface CheckerPromptInput {
   state: TaskState
   taskDir: string
   artifactDigest: string
+  /** Fixed read-only copy captured for this check. */
+  snapshotDir?: string
 }
 
 /** Build the independent checker's instruction from durable requirements. */
@@ -22,6 +24,7 @@ export function buildCheckerPrompt(input: CheckerPromptInput): string {
 
 Task: ${input.state.id}
 Artifact root: ${input.state.workspace.artifactRoot}
+Fixed snapshot: ${input.snapshotDir ?? '(none; read the live workspace)'}
 Task record: ${input.taskDir}
 Input version: ${input.state.input.versions.length}
 Artifact digest: ${input.artifactDigest}
@@ -30,7 +33,7 @@ Requirements:
 ${requirements}
 
 Rules:
-- Read only. Do not modify files, run state-changing commands, or accept a Root claim as evidence.
+- Read only. When a fixed snapshot is given, inspect that copy; it is the checked version and the live workspace may have changed since. Do not modify files, run state-changing commands, or accept a Root claim as evidence.
 - Enumerate EVERY requirement from the original instruction and every effective amendment in coverage.items.
 - A verified item needs concrete evidence you actually inspected. Never mark unverified material as verified.
 - scope=delivery covers artifacts, integration, required tests and the delivered answer; scope=lifecycle covers future completion/stop obligations that the runtime verifies later.

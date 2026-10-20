@@ -388,6 +388,8 @@ export interface CheckRecord {
   inputDigest: string
   artifactDigest: string
   artifactRoot: string
+  /** Fixed checker copy captured for this check, when one was taken. */
+  snapshotDir?: string
   requestedAt: string
   startedAt?: string
   finishedAt?: string

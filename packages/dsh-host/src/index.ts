@@ -18,6 +18,7 @@ import {
   TaskStore,
   buildJevObservationState,
   digestWorkspace,
+  snapshotWorkspace,
   jevObservationKey,
   type ControlRequest,
   type ModelIdentity,
@@ -402,21 +403,37 @@ export default class OrbitHost extends Service {
             if (rootAgent === undefined) throw new Error('orbit: the Root agent is not live; cannot run an independent check')
             const kind = (args as { kind?: 'artifact' | 'process' }).kind ?? 'artifact'
             const checkerModel = host.strictCheckerModel()
-            const snapshot = await digestWorkspace(state.workspace.artifactRoot)
+            let artifactDigest: string
+            let snapshotDir: string | undefined
+            let checkerCwd = state.workspace.artifactRoot
+            if (kind === 'artifact') {
+              snapshotDir = join(service.store.dir, 'snapshots', `check-${state.checks.nextNumber}`)
+              const snapshot = await snapshotWorkspace(state.workspace.artifactRoot, snapshotDir)
+              artifactDigest = snapshot.digest
+              checkerCwd = snapshot.dir
+            } else {
+              artifactDigest = (await digestWorkspace(state.workspace.artifactRoot)).digest
+            }
             const check = await service.requestCheck({
               role: 'reviewer',
               kind,
               trigger: 'manual',
-              artifactDigest: snapshot.digest,
+              artifactDigest,
+              ...(snapshotDir === undefined ? {} : { snapshotDir }),
               ...(checkerModel === undefined ? {} : { model: checkerModel }),
             })
-            const prompt = buildCheckerPrompt({ state, taskDir: service.store.dir, artifactDigest: snapshot.digest })
+            const prompt = buildCheckerPrompt({
+              state,
+              taskDir: service.store.dir,
+              artifactDigest,
+              ...(snapshotDir === undefined ? {} : { snapshotDir }),
+            })
             try {
               const raw = await runChecker({
                 subagents: ctx.subagents,
                 parent: rootAgent,
                 prompt,
-                cwd: state.workspace.artifactRoot,
+                cwd: checkerCwd,
                 signal: exec.signal,
                 ...(checkerModel === undefined ? {} : { model: checkerModel }),
               })

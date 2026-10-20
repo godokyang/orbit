@@ -201,3 +201,10 @@ B 阶段开工前只需补一份短设计：JEV 观察输入在 DSH 事件下的
 - 宿主把 start/resume/takeover 的后续接线收口到 `adopt`：授权绑定、清围栏、要求上下文、JEV 调度、控制 socket。
 - 验证：Core 续接/接管 3 个单测；DSH 探针完成 paused 任务 resume（版本 [1,2] + continuation）→ stop → takeover（reason/priorScope/snapshot 落盘）→ stop；全套链路仍通过。
 - 仍未做：完整快照副本、prior_scope 追加声明命令、续接的 review-model 继承、真实模型、Loom。
+
+## 实施进展（2026-10-20，固定快照）
+
+- 新增 `snapshotWorkspace`：把产物根复制到任务目录 `snapshots/check-<n>/`，保留内容、权限位与符号链接，跳过 `.git`/`.orbit`/`node_modules`，有文件数与字节上限；使用与 `digestWorkspace` 相同的清单算法，快照摘要与实时摘要可直接比对。
+- `check kind=artifact` 现在先落固定快照，再以快照摘要发起检查；`CheckRecord.snapshotDir` 记录路径，检查者子进程的 cwd 指向快照，提示词声明“快照是受检版本、实时工作区可能已变化”。过程检查仍读实时工作区。
+- 验证：快照单测 2 个（摘要一致、权限/链接、排除目录、上限）；DSH 探针 artifact check #3 的 `snapshotDir` 存在且检查完成，完成门仍以实时摘要复核通过。
+- 仍未做：快照保留/回收策略、并发检查的快照目录唯一性、完整 B 层归档（会话日志增量）、Loom。

@@ -91,6 +91,7 @@ export interface RequestCheckOptions {
   trigger: CheckTrigger
   artifactDigest: string
   model?: ModelIdentity
+  snapshotDir?: string
 }
 
 export interface ConfirmStopOptions {
@@ -627,6 +628,7 @@ export class TaskService {
         inputDigest: inputDigest(state.input.versions),
         artifactDigest: options.artifactDigest,
         artifactRoot: state.workspace.artifactRoot,
+        ...(options.snapshotDir === undefined ? {} : { snapshotDir: options.snapshotDir }),
         requestedAt: now,
         startedAt: now,
         ...(options.model === undefined ? {} : { model: options.model }),
