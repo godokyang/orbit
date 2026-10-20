@@ -1060,6 +1060,74 @@ export default class OrbitHost extends Service {
     ;(ctx.root.on as any)('user-questions/request', questionRelay)
     ;(ctx.on as any)('user-questions/request', questionRelay)
 
+    ;(ctx as any).inject(['commands'], (commandCtx: any) => {
+      const locate = async (agentId: string): Promise<TaskService | undefined> => {
+        const root = agentCwd(ctx, agentId)
+        return findTaskForSession(root, maxTasks, agentId).catch(() => undefined)
+      }
+      commandCtx.commands.register({
+        definitionId: '@zeen/orbit/status' as never,
+        name: 'orbit-status',
+        description: 'Show the current Orbit task status',
+        handler: async ({ agent }: { agent: { id: string } }) => {
+          const service = await locate(agent.id)
+          if (service === undefined) return { kind: 'error', text: 'No Orbit task in this workspace.' }
+          const status = await service.status()
+          const stop = status.state.stop?.confirmation?.confirmed === true ? 'stopped' : 'active'
+          const pending = status.questions.filter((question) => question.status === 'pending').length
+          return {
+            kind: 'success',
+            text: `${status.state.id} · ${status.state.status} (${stop}) · check in flight: ${status.state.checks.inFlight ?? 'none'} · open findings: ${status.openFindings.length} · pending questions: ${pending}`,
+          }
+        },
+      })
+      commandCtx.commands.register({
+        definitionId: '@zeen/orbit/stop' as never,
+        name: 'orbit-stop',
+        description: 'Request a confirmed stop for the current Orbit task',
+        handler: async ({ agent }: { agent: { id: string } }) => {
+          const service = await locate(agent.id)
+          if (service === undefined) return { kind: 'error', text: 'No Orbit task in this workspace.' }
+          const state = await service.requestStop('user')
+          void host.performStopLater(service)
+          return { kind: 'success', text: `Stop armed for ${state.id}; confirmation follows status/stopConfirmation.` }
+        },
+      })
+      commandCtx.commands.register({
+        definitionId: '@zeen/orbit/questions' as never,
+        name: 'orbit-questions',
+        description: 'List pending Orbit questions',
+        handler: async ({ agent }: { agent: { id: string } }) => {
+          const service = await locate(agent.id)
+          if (service === undefined) return { kind: 'error', text: 'No Orbit task in this workspace.' }
+          const file = await service.store.questions()
+          const pending = file.questions.filter((question) => question.status === 'pending')
+          if (pending.length === 0) return { kind: 'success', text: 'No pending Orbit questions.' }
+          return { kind: 'success', text: pending.map((question) => `${question.id}: ${question.question}`).join('\n') }
+        },
+      })
+      commandCtx.commands.register({
+        definitionId: '@zeen/orbit/answer' as never,
+        name: 'orbit-answer',
+        description: 'Answer a pending Orbit question by id',
+        input: { hint: '<question-id> <answer>' },
+        handler: async ({ agent, rawInput }: { agent: { id: string }; rawInput: string }) => {
+          const service = await locate(agent.id)
+          if (service === undefined) return { kind: 'error', text: 'No Orbit task in this workspace.' }
+          const [questionId, ...rest] = rawInput.trim().split(/\s+/)
+          if (questionId === undefined || questionId.length === 0) return { kind: 'error', text: 'Usage: /orbit-answer <question-id> <answer>' }
+          const custom = rest.join(' ').trim()
+          const answered = await service.answerQuestion(questionId, { selected: [], ...(custom.length === 0 ? {} : { custom }) })
+          const pending = host.pendingQuestions.get(answered.id)
+          if (pending !== undefined) {
+            host.pendingQuestions.delete(answered.id)
+            pending.resolve({ selected: [], ...(custom.length === 0 ? {} : { custom }) })
+          }
+          return { kind: 'success', text: `Answered ${answered.id}.` }
+        },
+      })
+    })
+
     // Source-preparation policy: a headless task may only read under the
     // granted roots, write the declared result path, and never run bash.
     ctx.on('tools/pre-execute', async (exec, next) => {
@@ -1200,6 +1268,12 @@ export default class OrbitHost extends Service {
       return { ok: true, ...summarize(state), fence: state.stop?.fence ?? 'none' }
     }
     throw new Error(`orbit: unknown control method ${String(request.method)}`)
+  }
+
+  /** Command-bar stop: reuse the same teardown and confirmation path. */
+  async performStopLater(service: TaskService): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    await this.performStop(service)
   }
 
   /** Arm the durable fence, persist the host cache and schedule teardown. */
