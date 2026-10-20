@@ -426,3 +426,10 @@ B 阶段开工前只需补一份短设计：JEV 观察输入在 DSH 事件下的
 - 真实安装到 `/tmp/orbit-install`（node overlay，web 模板）返回 `t0: controlled profile OK (191 rows)`。
 - Loom 运行时不再 import `orbit/session.py` 或 `OrbitSession`；`SessionTimeout` 抽到 `orbit/errors.py`，`session.py`/`probe.py` 仅为未删除的旧文件。
 - 验证：Orbit 127、Loom 92 个测试通过。
+
+## 实施进展（2026-10-21，React 面板真实数据验证）
+
+- 用 ego-browser 复用同一 TaskSpace/Page 打开隔离 DSH Web，客户端 bundle 正常激活。
+- 从 UI 发起真实任务后，面板显示 `task-mvgvqp3i... · running · checks none · findings 0 · questions 0`，并出现 Stop。
+- 点击 Stop 后约 5 秒，面板显示 `paused stopped`，说明 `/orbit/api` 与停止确认链路真实生效。
+- 未完成：事件行、设置卡、发起任务/申请检查/确认完成按钮；客户端构建仍未仓库内可复现。
