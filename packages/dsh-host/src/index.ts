@@ -1166,6 +1166,72 @@ export default class OrbitHost extends Service {
       })
     })
 
+    ;(ctx as any).inject(['webServer'], (webCtx: any) => {
+      webCtx.effect(() => webCtx.webServer.register({
+        kind: 'exact',
+        path: '/orbit/api',
+        handler: async (req: any, res: any) => {
+          const send = (status: number, body: unknown): void => {
+            res.statusCode = status
+            res.setHeader('content-type', 'application/json; charset=utf-8')
+            res.end(JSON.stringify(body))
+          }
+          try {
+            const url = new URL(String(req.url), 'http://localhost')
+            if (req.method === 'GET') {
+              const sessionId = url.searchParams.get('session') ?? ''
+              const session = ctx.sessions.get(sessionId as never)
+              const projectRoot = session?.header.cwd
+              if (projectRoot === undefined) return send(404, { error: 'session is not live' })
+              const service = await findTaskForSession(projectRoot, maxTasks, sessionId)
+              if (service === undefined) return send(404, { error: 'no Orbit task for this session' })
+              const status = await service.status()
+              return send(200, {
+                ...(await projectStatus(service)),
+                pendingQuestions: status.questions.filter((question) => question.status === 'pending')
+                  .map((question) => ({ id: question.id, question: question.question, options: question.options ?? [] })),
+              })
+            }
+            if (req.method === 'POST') {
+              if (req.headers['x-orbit-api'] !== '1') return send(403, { error: 'missing x-orbit-api' })
+              const chunks: Buffer[] = []
+              for await (const chunk of req) chunks.push(Buffer.from(chunk))
+              const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as {
+                session?: string; action?: string; question?: string; selected?: string[]; custom?: string
+              }
+              const sessionId = body.session ?? ''
+              const session = ctx.sessions.get(sessionId as never)
+              const projectRoot = session?.header.cwd
+              if (projectRoot === undefined) return send(404, { error: 'session is not live' })
+              const service = await findTaskForSession(projectRoot, maxTasks, sessionId)
+              if (service === undefined) return send(404, { error: 'no Orbit task for this session' })
+              if (body.action === 'stop') {
+                const state = await service.requestStop('user')
+                void host.performStopLater(service)
+                return send(200, { ok: true, taskId: state.id, status: state.status })
+              }
+              if (body.action === 'answer' && typeof body.question === 'string') {
+                const selected = Array.isArray(body.selected) ? body.selected.filter((item) => typeof item === 'string') : []
+                const answered = await service.answerQuestion(body.question, {
+                  selected, ...(typeof body.custom === 'string' ? { custom: body.custom } : {}),
+                })
+                const pending = host.pendingQuestions.get(answered.id)
+                if (pending !== undefined) {
+                  host.pendingQuestions.delete(answered.id)
+                  pending.resolve({ selected, ...(typeof body.custom === 'string' ? { custom: body.custom } : {}) })
+                }
+                return send(200, { ok: true, question: answered })
+              }
+              return send(400, { error: 'unsupported action' })
+            }
+            return send(405, { error: 'method not allowed' })
+          } catch (error) {
+            return send(500, { error: (error as Error).message })
+          }
+        },
+      }), 'orbit api')
+    })
+
     // Source-preparation policy: a headless task may only read under the
     // granted roots, write the declared result path, and never run bash.
     ctx.on('tools/pre-execute', async (exec, next) => {
