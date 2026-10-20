@@ -440,3 +440,10 @@ B 阶段开工前只需补一份短设计：JEV 观察输入在 DSH 事件下的
 - 面板事件行出现 `check/requested, check/completed`，任务保持 running，open findings 变为 1，说明检查者真实运行且结果未被客户端伪造。
 - 此前 Start 验证：面板新任务从 paused 切换到 running；Stop 验证：变为 paused stopped。
 - 待办：Complete（需检查 ready）、对话流事件行、可复现客户端构建。
+
+## 实施进展（2026-10-21，React 面板 Complete 真实通过）
+
+- 在隔离 Web profile 中：从面板发起任务、Root 真实写文件并经检查者校验 ready，点击 Complete。
+- 面板显示 `complete stopped`，事件出现 `completion/requested, stop/confirmed, task/completed`。
+- 面板四个操作已全部真实通过：Start、Stop、Check、Complete；设置与最近事件行可见。
+- 仍未做：对话流独立 Orbit 事件行、可编辑设置卡、客户端构建仓库内可复现。
