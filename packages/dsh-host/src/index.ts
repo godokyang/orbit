@@ -1,6 +1,7 @@
-import { readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs'
 import { readdir } from 'node:fs/promises'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { Service, type Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { defineTool } from '@deepseek-ai/dsh-tools'
@@ -44,6 +45,20 @@ const TEXT_OUTPUT = {
 }
 
 const STOP_TIMEOUT_MS = 5_000
+
+function workspaceInfo(path: string): { artifactRoot: string; realPath: string; gitCommonDir?: string; worktree?: string; head?: string } {
+  const realPath = realpathSync(path)
+  const base = { artifactRoot: path, realPath }
+  try {
+    const git = (args: string[]): string => execFileSync('git', ['-C', realPath, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
+    const common = git(['rev-parse', '--git-common-dir'])
+    const worktree = git(['rev-parse', '--show-toplevel'])
+    const head = git(['rev-parse', 'HEAD'])
+    return { ...base, gitCommonDir: resolve(realPath, common), worktree: realpathSync(worktree), head }
+  } catch {
+    return base
+  }
+}
 
 function agentCwd(ctx: Context, agentId: string): string {
   const session = ctx.sessions.get(agentId as never)
@@ -109,6 +124,7 @@ async function projectStatus(service: TaskService): Promise<Record<string, unkno
     workUnits: status.workUnits.units.map((unit) => ({ id: unit.id, status: unit.status, goal: unit.goal })),
     checks: status.checks.map((check) => ({ number: check.number, status: check.status, verdict: check.result?.verdict })),
     openFindings: status.openFindings.map((finding) => finding.id),
+    openDisputes: status.openDisputes.map((dispute) => dispute.id),
   }
 }
 
@@ -238,12 +254,25 @@ export default class OrbitHost extends Service {
           action: {
             type: 'string',
             required: true,
-            enum: ['start', 'status', 'stop', 'declare', 'finish', 'accept', 'reject', 'check', 'complete', 'amend'],
-            description: 'start | status | stop | declare | finish | accept | reject | check | complete | amend',
+            enum: ['start', 'status', 'stop', 'declare', 'finish', 'accept', 'reject', 'check', 'complete', 'amend', 'dispute', 'ruling', 'rebind'],
+            description: 'start | status | stop | declare | finish | accept | reject | check | complete | amend | dispute | ruling | rebind',
           },
           instruction: { type: 'string', description: 'The user instruction, verbatim. Required for action=start.' },
           amendment: { type: 'string', description: 'The user amendment text, verbatim. Required for action=amend.' },
           messageId: { type: 'string', description: 'Native user message id that carries the amendment. Optional for action=amend.' },
+          kind: {
+            type: 'string',
+            enum: ['artifact', 'process'],
+            description: 'Check kind. Default artifact; process checks can never grant completion.',
+          },
+          finding: { type: 'string', description: 'Finding id. Required for action=dispute.' },
+          dispute: { type: 'string', description: 'Dispute id. Required for action=ruling.' },
+          decision: {
+            type: 'string',
+            enum: ['adopt', 'uphold'],
+            description: 'Ruling decision. Required for action=ruling.',
+          },
+          artifactRoot: { type: 'string', description: 'New artifact root. Required for action=rebind.' },
           task: { type: 'string', description: 'Optional task id; defaults to the latest task.' },
           goal: { type: 'string', description: 'Work-unit goal. Required for action=declare.' },
           acceptance: { type: 'string', description: 'Work-unit acceptance criteria. Required for action=declare.' },
@@ -288,6 +317,7 @@ export default class OrbitHost extends Service {
               rootSessionId: agent.id,
               instruction,
               source: { kind: 'explicit-text', verbatim: true, at: new Date().toISOString() },
+              workspace: workspaceInfo(projectRoot),
             })
             host.fencedSessions.delete(agent.id)
             saveFenceRegistry(host.fencedSessions)
@@ -315,10 +345,11 @@ export default class OrbitHost extends Service {
             if (state.status !== 'running') throw new Error(`orbit: cannot check a ${state.status} task`)
             const rootAgent = ctx.agents.get(state.root.sessionId as never)
             if (rootAgent === undefined) throw new Error('orbit: the Root agent is not live; cannot run an independent check')
+            const kind = (args as { kind?: 'artifact' | 'process' }).kind ?? 'artifact'
             const snapshot = await digestWorkspace(state.workspace.artifactRoot)
             const check = await service.requestCheck({
               role: 'reviewer',
-              kind: 'artifact',
+              kind,
               trigger: 'manual',
               artifactDigest: snapshot.digest,
               ...(host.checkerModel === undefined ? {} : { model: host.checkerModel }),
@@ -373,6 +404,30 @@ export default class OrbitHost extends Service {
             if (!gate.ok) return JSON.stringify({ ...gate })
             setTimeout(() => { void host.performStop(service, snapshot.digest) }, 50)
             return JSON.stringify({ ok: true, completion: 'scheduled', artifactDigest: snapshot.digest })
+          }
+
+          if (action === 'dispute') {
+            const { finding, reason } = args as { finding?: string; reason?: string }
+            if (finding === undefined || reason === undefined) throw new Error('orbit: action=dispute requires finding and reason')
+            const service = await openTask(projectRoot, maxTasks, (args as { task?: string }).task)
+            return JSON.stringify({ ok: true, dispute: await service.openDispute(finding, reason) })
+          }
+
+          if (action === 'ruling') {
+            const { dispute, decision, reason } = args as { dispute?: string; decision?: 'adopt' | 'uphold'; reason?: string }
+            if (dispute === undefined || decision === undefined || reason === undefined) {
+              throw new Error('orbit: action=ruling requires dispute, decision and reason')
+            }
+            const service = await openTask(projectRoot, maxTasks, (args as { task?: string }).task)
+            return JSON.stringify({ ok: true, dispute: await service.ruleDispute(dispute, decision, reason) })
+          }
+
+          if (action === 'rebind') {
+            const { artifactRoot, reason } = args as { artifactRoot?: string; reason?: string }
+            if (artifactRoot === undefined || reason === undefined) throw new Error('orbit: action=rebind requires artifactRoot and reason')
+            const service = await openTask(projectRoot, maxTasks, (args as { task?: string }).task)
+            const state = await service.rebindWorkspace({ ...workspaceInfo(artifactRoot), reason })
+            return JSON.stringify({ ok: true, workspace: state.workspace })
           }
 
           if (action === 'declare') {

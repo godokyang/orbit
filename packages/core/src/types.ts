@@ -278,12 +278,35 @@ export interface FindingRecord {
   binding: FindingBinding
   resolvedByCheck?: number
   resolvedAt?: string
+  /** How a resolved finding was closed; absent on historical check-resolved rows. */
+  resolution?: 'check' | 'ruling'
 }
 
 export interface FindingsFile {
   schemaVersion: typeof TASK_SCHEMA_VERSION
   taskId: string
   findings: FindingRecord[]
+}
+
+export type DisputeStatus = 'pending' | 'adopted' | 'upheld'
+
+export interface DisputeRecord {
+  id: string
+  findingId: string
+  reason: string
+  status: DisputeStatus
+  openedAt: string
+  ruling?: {
+    decision: 'adopt' | 'uphold'
+    reason: string
+    at: string
+  }
+}
+
+export interface DisputesFile {
+  schemaVersion: typeof TASK_SCHEMA_VERSION
+  taskId: string
+  disputes: DisputeRecord[]
 }
 
 export interface CoverageItem {

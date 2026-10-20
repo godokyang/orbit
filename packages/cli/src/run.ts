@@ -100,7 +100,7 @@ function printStatus(view: StatusView, json: boolean, out: CliIo['out']): void {
   const lines = [
     `task ${view.taskId}  ${view.status}`,
     `input v${view.inputVersion}  artifact ${view.artifactRoot}`,
-    `members ${view.members.length}  units ${view.workUnits.length}  checks ${view.checks.length}  open findings ${view.openFindings.length}`,
+    `members ${view.members.length}  units ${view.workUnits.length}  checks ${view.checks.length}  open findings ${view.openFindings.length}  open disputes ${view.openDisputes?.length ?? 0}`,
   ]
   if (view.stop !== undefined) lines.push(`stop: ${view.stop}${view.checksInFlight === null ? '' : ` (check ${view.checksInFlight} in flight)`}`)
   if (view.completionInvalidation !== undefined) {

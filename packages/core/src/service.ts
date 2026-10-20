@@ -12,6 +12,8 @@ import type {
   CompletionAcceptance,
   CompletionRejection,
   CoverageFile,
+  DisputeRecord,
+  DisputesFile,
   CoverageRecord,
   DispatchAttempt,
   FindingRecord,
@@ -165,6 +167,7 @@ export class TaskService {
         members: { schemaVersion: 1, taskId: id, members: [] },
         workUnits: { schemaVersion: 1, taskId: id, units: [] },
         findings: { schemaVersion: 1, taskId: id, findings: [] },
+        disputes: { schemaVersion: 1, taskId: id, disputes: [] },
         coverage: { schemaVersion: 1, taskId: id, records: [] },
       },
       clock,
@@ -437,6 +440,113 @@ export class TaskService {
       })
       await this.store.appendEvent('work-unit/rejected', { id, reason })
       return { ...unit, status: 'rejected', rejectedAt: now, rejectionReason: reason, updatedAt: now }
+    })
+  }
+
+  /** Open a Root dispute against one open finding. */
+  async openDispute(findingId: string, reason: string): Promise<DisputeRecord> {
+    nonEmpty(reason, 'dispute reason')
+    return this.mutex.run(async () => {
+      const state = await this.store.readState()
+      this.assertRunning(state, 'openDispute')
+      const findings = await this.store.findings()
+      const finding = findings.findings.find((candidate) => candidate.id === findingId)
+      if (finding === undefined) throw new OrbitError('not_found', `unknown finding: ${findingId}`)
+      if (finding.status !== 'open') throw new OrbitError('invalid_state', `finding ${findingId} is already resolved`)
+      const disputes = await this.store.disputes()
+      if (disputes.disputes.some((candidate) => candidate.findingId === findingId && candidate.status === 'pending')) {
+        throw new OrbitError('duplicate', `finding ${findingId} already has a pending dispute`)
+      }
+      const now = this.store.now()
+      const dispute: DisputeRecord = {
+        id: newId('dispute'),
+        findingId,
+        reason,
+        status: 'pending',
+        openedAt: now,
+      }
+      await this.store.updateDisputes((file) => {
+        file.disputes.push(dispute)
+      })
+      await this.store.appendEvent('dispute/opened', { disputeId: dispute.id, findingId, reason })
+      return dispute
+    })
+  }
+
+  /** Record the Root's ruling on a pending dispute. Adopting resolves the finding. */
+  async ruleDispute(id: string, decision: 'adopt' | 'uphold', reason: string): Promise<DisputeRecord> {
+    nonEmpty(reason, 'ruling reason')
+    return this.mutex.run(async () => {
+      const state = await this.store.readState()
+      this.assertRunning(state, 'ruleDispute')
+      const disputes = await this.store.disputes()
+      const dispute = disputes.disputes.find((candidate) => candidate.id === id)
+      if (dispute === undefined) throw new OrbitError('not_found', `unknown dispute: ${id}`)
+      if (dispute.status !== 'pending') throw new OrbitError('invalid_state', `dispute ${id} is ${dispute.status}`)
+      const now = this.store.now()
+      const updated: DisputeRecord = {
+        ...dispute,
+        status: decision === 'adopt' ? 'adopted' : 'upheld',
+        ruling: { decision, reason, at: now },
+      }
+      await this.store.updateDisputes((file) => {
+        const index = file.disputes.findIndex((candidate) => candidate.id === id)
+        file.disputes[index] = updated
+      })
+      if (decision === 'adopt') {
+        await this.store.updateFindings((file) => {
+          const finding = file.findings.find((candidate) => candidate.id === dispute.findingId)
+          if (finding === undefined) return
+          finding.status = 'resolved'
+          finding.resolvedAt = now
+          finding.resolution = 'ruling'
+        })
+      }
+      await this.store.appendEvent('dispute/ruled', { disputeId: id, findingId: dispute.findingId, decision, reason })
+      return updated
+    })
+  }
+
+  /**
+   * Rebind the artifact root. Only the same real path or another worktree of
+   * the same repository (matching git common dir) is accepted.
+   */
+  async rebindWorkspace(input: {
+    artifactRoot: string
+    reason: string
+    realPath?: string
+    gitCommonDir?: string
+    worktree?: string
+    head?: string
+  }): Promise<TaskState> {
+    nonEmpty(input.artifactRoot, 'artifactRoot')
+    nonEmpty(input.reason, 'rebind reason')
+    return this.mutex.run(async () => {
+      const state = await this.store.readState()
+      this.assertRunning(state, 'rebindWorkspace')
+      const current = state.workspace
+      const samePath = input.realPath !== undefined && current.realPath !== undefined && input.realPath === current.realPath
+      const sameRepo =
+        input.gitCommonDir !== undefined && current.gitCommonDir !== undefined && input.gitCommonDir === current.gitCommonDir
+      if (!samePath && !sameRepo) {
+        throw new OrbitError('invalid_state', 'rebind requires the same real path or another worktree of the same Git repository')
+      }
+      const now = this.store.now()
+      const next = await this.store.updateState((draft) => {
+        draft.workspace.history.push({
+          from: draft.workspace.artifactRoot,
+          to: input.artifactRoot,
+          at: now,
+          reason: input.reason,
+        })
+        draft.workspace.artifactRoot = input.artifactRoot
+        if (input.realPath !== undefined) draft.workspace.realPath = input.realPath
+        if (input.gitCommonDir !== undefined) draft.workspace.gitCommonDir = input.gitCommonDir
+        if (input.worktree !== undefined) draft.workspace.worktree = input.worktree
+        if (input.head !== undefined) draft.workspace.head = input.head
+      })
+      await this.store.appendEvent('workspace/rebound', { to: input.artifactRoot, reason: input.reason })
+      return next
     })
   }
 
@@ -849,15 +959,18 @@ export class TaskService {
     workUnits: WorkUnitsFile
     checks: CheckRecord[]
     findings: FindingsFile
+    disputes: DisputesFile
     coverage: CoverageFile
     openFindings: FindingRecord[]
+    openDisputes: DisputeRecord[]
   }> {
-    const [state, members, workUnits, checks, findings, coverage] = await Promise.all([
+    const [state, members, workUnits, checks, findings, disputes, coverage] = await Promise.all([
       this.store.readState(),
       this.store.members(),
       this.store.workUnits(),
       this.store.listChecks(),
       this.store.findings(),
+      this.store.disputes(),
       this.store.coverage(),
     ])
     return {
@@ -867,8 +980,10 @@ export class TaskService {
       workUnits,
       checks,
       findings,
+      disputes,
       coverage,
       openFindings: findings.findings.filter((finding) => finding.status === 'open'),
+      openDisputes: disputes.disputes.filter((dispute) => dispute.status === 'pending'),
     }
   }
 }

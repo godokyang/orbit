@@ -155,18 +155,36 @@ async function run(ctx) {
   const unit = task?.units?.units?.[0]
   log({ step: 'declare', unitId: unit?.id, unitStatus: unit?.status, inputVersion: unit?.inputVersion })
 
-  // Independent checker through the dsh-sdk child process.
+  // Process check first: it must never create a finalization notice.
   scripts.length = 0
-  scripts.push(() => toolChunks('orbit', { action: 'check' }))
-  scripts.push(() => textChunks('checked'))
-  handle.agent.followup(msg('Run the independent check.'))
+  scripts.push(() => toolChunks('orbit', { action: 'check', kind: 'process' }))
+  scripts.push(() => textChunks('process checked'))
+  handle.agent.followup(msg('Run a process check.'))
   await handle.agent.whenIdle()
   task = readTask(WORK)
-  const checkFile = join(task.dir, 'checks', '1.json')
+  const processCheckFile = join(task.dir, 'checks', '1.json')
+  const processCheck = existsSync(processCheckFile) ? JSON.parse(readFileSync(processCheckFile, 'utf8')) : undefined
+  log({
+    step: 'process-check',
+    checkStatus: processCheck?.status,
+    kind: processCheck?.kind,
+    verdict: processCheck?.result?.verdict,
+    finalization: Boolean(task?.state?.finalization),
+  })
+
+  // Artifact check through the dsh-sdk child process.
+  scripts.length = 0
+  scripts.push(() => toolChunks('orbit', { action: 'check', kind: 'artifact' }))
+  scripts.push(() => textChunks('checked'))
+  handle.agent.followup(msg('Run the independent artifact check.'))
+  await handle.agent.whenIdle()
+  task = readTask(WORK)
+  const checkFile = join(task.dir, 'checks', '2.json')
   const check = existsSync(checkFile) ? JSON.parse(readFileSync(checkFile, 'utf8')) : undefined
   const checkResults = await toolResults(ctx, handle.agent.id)
   log({
     step: 'check',
+    checkNumber: check?.number,
     checkStatus: check?.status,
     verdict: check?.result?.verdict,
     ready: check?.result?.delivery?.ready,

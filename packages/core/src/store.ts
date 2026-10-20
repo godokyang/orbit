@@ -7,6 +7,7 @@ import { Mutex } from './mutex.js'
 import type {
   CheckRecord,
   CoverageFile,
+  DisputesFile,
   FindingsFile,
   MembersFile,
   TaskEvent,
@@ -19,6 +20,7 @@ export interface TaskFiles {
   members: MembersFile
   workUnits: WorkUnitsFile
   findings: FindingsFile
+  disputes: DisputesFile
   coverage: CoverageFile
 }
 
@@ -56,6 +58,7 @@ export class TaskStore {
     await atomicWriteJson(join(tempDir, 'members.json'), files.members)
     await atomicWriteJson(join(tempDir, 'work-units.json'), files.workUnits)
     await atomicWriteJson(join(tempDir, 'findings.json'), files.findings)
+    await atomicWriteJson(join(tempDir, 'disputes.json'), files.disputes)
     await atomicWriteJson(join(tempDir, 'requirement-coverage.json'), files.coverage)
     await ensureDir(join(tempDir, 'checks'))
     const createdAt = files.state.createdAt
@@ -147,6 +150,19 @@ export class TaskStore {
       const file = await this.findings()
       mutator(file)
       await atomicWriteJson(this.path('findings.json'), file)
+      return file
+    })
+  }
+
+  async disputes(): Promise<DisputesFile> {
+    return readJsonFile<DisputesFile>(this.path('disputes.json'))
+  }
+
+  async updateDisputes(mutator: (file: DisputesFile) => void): Promise<DisputesFile> {
+    return this.mutex.run(async () => {
+      const file = await this.disputes()
+      mutator(file)
+      await atomicWriteJson(this.path('disputes.json'), file)
       return file
     })
   }

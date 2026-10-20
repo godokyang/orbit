@@ -154,3 +154,12 @@ B 阶段开工前只需补一份短设计：JEV 观察输入在 DSH 事件下的
 - bundle 的 web 专属禁用行移到 `profiles/orbit-app.patch.yml`，避免 sdk/checker profile 出现“entry not found”；共享 patch 只保留各模板都存在的核心行。
 - 探针新增 amend 与 CLI export 断言：输入版本变为 2、模型上下文在 18/22 次调用中看到修订、导出 7 个文件且包含两个输入版本。
 - 仍未做：单一 npm 包、真实模型、冻结验收 #1/#2、Loom、B2 其余义务。
+
+## 实施进展（2026-10-20，争议、重绑定与过程检查）
+
+- 争议/裁定：新增 `disputes.json`、`orbit` 的 `dispute`/`ruling` 动作。Root 对 open finding 可开争议；`adopt` 把 finding 记为 resolved（`resolution=ruling`），`uphold` 保持 open。同一 finding 只允许一个 pending 争议；结果与理由进事件。
+- 工作区重绑定：`rebind` 只接受同一真实路径，或同一 Git common dir 的另一 worktree；Core 记录 history，宿主在 start 时采集 realPath/gitCommonDir/worktree/HEAD。旧终检因产物根变化自然失效。
+- 检查通道：`check` 新增 `kind=artifact|process`。过程检查可以完成并由宿主记录，但永远不会产生 `finalization_notice`；探针中过程检查 `finalization=false`，随后 artifact 检查才产生 notice。
+- `status`/CLI 增加 open disputes 计数与字段。
+- 验证：新增 5 个争议/重绑定单测；DSH 探针跑通 process check → artifact check → 完成链路，24 次模型调用。
+- 仍未做：JEV、角色池/严格模型授权、drift 校验、takeover、真实模型、冻结验收 #1/#2、Loom。

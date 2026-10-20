@@ -15,6 +15,7 @@ export interface StatusView {
   workUnits: Array<{ id: string; status: string; goal: string }>
   checks: Array<{ number: number; status: string; verdict?: string }>
   openFindings: string[]
+  openDisputes?: string[]
 }
 
 export async function taskDirs(projectRoot: string, limit = 64): Promise<string[]> {
@@ -48,7 +49,14 @@ export async function openTask(projectRoot: string, id?: string): Promise<TaskSe
   return latest
 }
 
-function viewOf(state: TaskState, members: unknown[], units: StatusView['workUnits'], checks: CheckRecord[], openFindings: string[]): StatusView {
+function viewOf(
+  state: TaskState,
+  members: unknown[],
+  units: StatusView['workUnits'],
+  checks: CheckRecord[],
+  openFindings: string[],
+  openDisputes: string[],
+): StatusView {
   return {
     ok: true,
     taskId: state.id,
@@ -66,6 +74,7 @@ function viewOf(state: TaskState, members: unknown[], units: StatusView['workUni
       ...(check.result === undefined ? {} : { verdict: check.result.verdict }),
     })),
     openFindings,
+    openDisputes,
   }
 }
 
@@ -78,6 +87,7 @@ export async function localStatus(projectRoot: string, id?: string): Promise<Sta
     status.workUnits.units.map((unit) => ({ id: unit.id, status: unit.status, goal: unit.goal })),
     status.checks,
     status.openFindings.map((finding) => finding.id),
+    status.openDisputes.map((dispute) => dispute.id),
   )
 }
 
