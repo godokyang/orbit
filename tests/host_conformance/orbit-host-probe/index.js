@@ -468,6 +468,48 @@ async function run(ctx) {
     checks: slowChecks.map((check) => ({ number: check.number, status: check.status, failure: check.failure })),
   })
 
+  // Amendment delivery to an already registered member.
+  scripts.length = 0
+  scripts.push(() => toolChunks('orbit', { action: 'start', instruction: 'Amendment delivery probe.' }))
+  scripts.push(() => textChunks('started'))
+  handle.agent.followup(msg('Start the amendment probe task.'))
+  await handle.agent.whenIdle()
+  scripts.length = 0
+  scripts.push(() => toolChunks('orbit', { action: 'declare', goal: 'amendment target', acceptance: 'receives amendment' }))
+  scripts.push(() => textChunks('declared'))
+  handle.agent.followup(msg('Declare the amendment target.'))
+  await handle.agent.whenIdle()
+  let current = readTask(WORK)
+  const amendmentUnit = current?.units?.units?.at(-1)
+  scripts.length = 0
+  scripts.push(() => toolChunks('subagent', { description: 'amendment member', prompt: `Wait for instructions.\norbit-unit: ${amendmentUnit?.id}`, cwd: WORK }))
+  scripts.push(() => textChunks('member started'))
+  scripts.push(() => textChunks('root saw member'))
+  handle.agent.followup(msg('Dispatch a member for the amendment.'))
+  await handle.agent.whenIdle()
+  await waitFor(async () => {
+    const now = readTask(WORK)
+    return now?.members?.members?.some((member) => member.status === 'registered') ? true : undefined
+  }, 10000, 'amendment member').catch(() => undefined)
+  scripts.length = 0
+  scripts.push(() => toolChunks('orbit', { action: 'amend', amendment: 'The member must use tabs.' }))
+  scripts.push(() => textChunks('amended'))
+  handle.agent.followup(msg('Amend the requirement now.'))
+  await handle.agent.whenIdle()
+  current = readTask(WORK)
+  const amendmentEvents = readFileSync(join(current.dir, 'events.jsonl'), 'utf8')
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line))
+    .filter((event) => String(event.type).startsWith('amendment/'))
+  log({
+    step: 'amendment-delivery',
+    inputVersion: current?.state?.input?.versions?.length,
+    events: amendmentEvents.map((event) => ({ type: event.type, data: event.data })),
+  })
+  await cli(['stop', '--json', '--project', WORK]).catch(() => undefined)
+  await waitFor(async () => (readTask(WORK)?.state?.status !== 'running' ? true : undefined), 12000, 'amendment stop').catch(() => undefined)
+
   await handle.dispose()
   if (jevServer !== undefined) await new Promise((resolve) => jevServer.close(() => resolve()))
   log({

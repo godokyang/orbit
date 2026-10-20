@@ -148,7 +148,8 @@ async function openTask(projectRoot: string, limit: number, id?: string): Promis
 }
 
 async function findTaskForSession(projectRoot: string, limit: number, sessionId: string): Promise<TaskService | undefined> {
-  for (const dir of await taskDirs(projectRoot, limit)) {
+  let fallback: TaskService | undefined
+  for (const dir of (await taskDirs(projectRoot, limit)).reverse()) {
     let service: TaskService
     try {
       service = await TaskService.open(dir)
@@ -156,11 +157,13 @@ async function findTaskForSession(projectRoot: string, limit: number, sessionId:
       continue
     }
     const state = await service.state()
-    if (state.root.sessionId === sessionId) return service
     const members = await service.store.members().catch(() => undefined)
-    if (members?.members.some((member) => member.id === sessionId) === true) return service
+    const owns = state.root.sessionId === sessionId || members?.members.some((member) => member.id === sessionId) === true
+    if (!owns) continue
+    if (state.status === 'running') return service
+    fallback ??= service
   }
-  return undefined
+  return fallback
 }
 
 async function projectStatus(service: TaskService): Promise<Record<string, unknown>> {
@@ -516,7 +519,33 @@ export default class OrbitHost extends Service {
               verbatim: messageId !== undefined,
               at: new Date().toISOString(),
             })
-            return JSON.stringify({ ok: true, inputVersion: updated.input.versions.length })
+            const version = updated.input.versions.length
+            const members = await service.store.members()
+            const delivered: Array<{ memberId: string; messageId: string }> = []
+            for (const member of members.members) {
+              if (member.status !== 'registered') continue
+              try {
+                const messageIdSent = await ctx.subagents.sendMessage(
+                  agent,
+                  member.id as never,
+                  [{ type: 'text', text: `Orbit amendment v${version}: ${amendment}` }],
+                  { signal: exec.signal },
+                )
+                delivered.push({ memberId: member.id, messageId: String(messageIdSent) })
+                await service.store.appendEvent('amendment/delivered', {
+                  version,
+                  memberId: member.id,
+                  messageId: String(messageIdSent),
+                })
+              } catch (error) {
+                await service.store.appendEvent('amendment/undelivered', {
+                  version,
+                  memberId: member.id,
+                  reason: (error as Error).message,
+                })
+              }
+            }
+            return JSON.stringify({ ok: true, inputVersion: version, delivered })
           }
 
           if (action === 'complete') {

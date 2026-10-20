@@ -328,3 +328,10 @@ B 阶段开工前只需补一份短设计：JEV 观察输入在 DSH 事件下的
 - 探针用 4 秒延迟的假检查者在 activation 已发布后停止：任务 `paused`、`confirmed=true`、`missing=[]`，check #1 `failed/stopped`，无 finalization；验证 dispose + 围栏拒绝的组合路径。
 - 真实检查者启动窗口内停止仍按失败关闭为 `stop_unconfirmed`（见真实验收记录），与本次“已发布 activation”场景互补。
 - 全套测试 108 个通过。
+
+## 实施进展（2026-10-20，修订送达与任务查找修正）
+
+- `orbit amend` 在写入新输入版本后，向所有仍 `registered` 的成员经 `ctx.subagents.sendMessage` 发送带版本号的修订消息，记录真实 `messageId`（`amendment/delivered`）；失败写 `amendment/undelivered` 与原因，不重发、不伪造送达。
+- 修正按会话找任务的逻辑：同一 Root 在停止旧任务后新建任务时，优先返回 running 的新任务，而不是按目录顺序返回已停止的旧任务；否则新任务的派发会被旧任务围栏误拒（探针已复现并修复）。
+- 验证：DSH 探针中成员已登记后 amend，事件记录 `version=2`、`memberId`、`messageId`；完整链路其余部分无回归；全套 108 个测试通过。
+- 仍未做：修订送达后的成员确认/采用归因、undelivered 的显式重试界面、Loom。
