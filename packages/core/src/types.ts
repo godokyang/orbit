@@ -144,6 +144,12 @@ export interface TaskState {
   authorization?: {
     allowedModels: string[]
   }
+  /** Runtime ownership recorded at start; a different instance means the host died. */
+  runtime?: {
+    pid: number
+    instanceId: string
+    startedAt: string
+  }
   /** Set when this task continues a confirmed-stopped predecessor. */
   continuation?: {
     previousTaskId: string

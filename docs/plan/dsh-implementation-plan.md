@@ -295,3 +295,10 @@ B 阶段开工前只需补一份短设计：JEV 观察输入在 DSH 事件下的
 - 真实模型场景：Root 派发成员执行 `sleep 120`，外部 socket 在约 10 秒后停止；任务 `paused`、确认证据齐全，成员 `stopped`，Root/成员会话归档，无残留 sleep。
 - 边界：成员收束使用 `agent.cancel + whenIdle + settle`，未直接 dispose 子 Agent 的 activation；不宣称 activation 级收束已验证。
 - 仍未覆盖：真实检查者在途停止、宿主崩溃后的 unconfirmed 重试、Loom。
+
+## 实施进展（2026-10-20，宿主死亡后的孤儿任务恢复）
+
+- 任务记录新增 `runtime {pid, instanceId, startedAt}`；宿主启动/打开任务时对账：运行中任务的 owner 不是当前实例且进程已不存在（或同一 pid 的插件已重载）时，标记 `stop_unconfirmed`，写 `stop.confirmation {confirmed:false, missing:['runtime_gone']}` 与 `task/orphaned` 事件；不再把死亡宿主的任务继续显示为 running。
+- 若 owner 是另一个仍存活的进程（例如另一个窗口），不误判为孤儿，只记录警告并保留原状态，避免两个窗口互相抢占。
+- 验证：Core 孤儿恢复单测（同实例不变、异实例转 unconfirmed、事件）；DSH 探针完整链路无回归；全套 102 个测试通过。
+- 边界：没有心跳/租约，pid 复用或宿主窗口并发写同一任务仍未完全排除；CLI 本地只读 status 不做对账。

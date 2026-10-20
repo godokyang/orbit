@@ -290,6 +290,7 @@ export default class OrbitHost extends Service {
   private readonly jevTimers = new Map<string, NodeJS.Timeout>()
   private readonly lastSignalKey = new Map<string, string>()
   private readonly allowedModels: Set<string>
+  private readonly instanceId = randomUUID()
   private readonly activeCheckers = new Map<number, import('@deepseek-ai/dsh-subagent').SubagentActivation>()
   private readonly memberCandidates: Array<{ label?: string; provider: string; model: string }>
   private readonly selectionRelease: SelectionRelease | undefined
@@ -404,7 +405,7 @@ export default class OrbitHost extends Service {
             if (typeof instruction !== 'string' || instruction.trim().length === 0) {
               throw new Error('orbit: action=start requires a non-empty instruction')
             }
-            const active = await findLatest(projectRoot, maxTasks)
+            const active = await host.latest(projectRoot, maxTasks)
             if (active !== undefined && (await active.state()).status === 'running') {
               throw new Error('orbit: this workspace already has a running task')
             }
@@ -414,6 +415,7 @@ export default class OrbitHost extends Service {
               instruction,
               source: { kind: 'explicit-text', verbatim: true, at: new Date().toISOString() },
               workspace: workspaceInfo(projectRoot),
+              runtime: host.runtimeInfo(),
               ...(host.allowedModels.size === 0 ? {} : { allowedModels: [...host.allowedModels] }),
             })
             host.modelBindings.set(agent.id, {
@@ -426,18 +428,18 @@ export default class OrbitHost extends Service {
           }
 
           if (action === 'status') {
-            const service = await openTask(projectRoot, maxTasks, (args as { task?: string }).task)
+            const service = await host.open(projectRoot, maxTasks, (args as { task?: string }).task)
             return JSON.stringify({ ok: true, ...(await projectStatus(service)) })
           }
 
           if (action === 'stop') {
-            const service = await openTask(projectRoot, maxTasks, (args as { task?: string }).task)
+            const service = await host.open(projectRoot, maxTasks, (args as { task?: string }).task)
             const state = await host.beginStop(service, 50)
             return JSON.stringify({ ok: true, ...summarize(state), fence: state.stop?.fence ?? 'none', teardown: 'scheduled' })
           }
 
           if (action === 'check') {
-            const service = await openTask(projectRoot, maxTasks, (args as { task?: string }).task)
+            const service = await host.open(projectRoot, maxTasks, (args as { task?: string }).task)
             const state = await service.state()
             if (state.status !== 'running') throw new Error(`orbit: cannot check a ${state.status} task`)
             const rootAgent = ctx.agents.get(state.root.sessionId as never)
@@ -503,7 +505,7 @@ export default class OrbitHost extends Service {
             if (typeof amendment !== 'string' || amendment.trim().length === 0) {
               throw new Error('orbit: action=amend requires the verbatim amendment text')
             }
-            const service = await openTask(projectRoot, maxTasks, (args as { task?: string }).task)
+            const service = await host.open(projectRoot, maxTasks, (args as { task?: string }).task)
             const state = await service.state()
             const updated = await service.amend(amendment, {
               kind: messageId === undefined ? 'explicit-text' : 'user-message',
@@ -515,7 +517,7 @@ export default class OrbitHost extends Service {
           }
 
           if (action === 'complete') {
-            const service = await openTask(projectRoot, maxTasks, (args as { task?: string }).task)
+            const service = await host.open(projectRoot, maxTasks, (args as { task?: string }).task)
             const state = await service.state()
             if (state.status !== 'running') throw new Error(`orbit: cannot complete a ${state.status} task`)
             const snapshot = await digestWorkspace(state.workspace.artifactRoot)
@@ -528,7 +530,7 @@ export default class OrbitHost extends Service {
           if (action === 'resume') {
             const { from, instruction, messageId } = args as { from?: string; instruction?: string; messageId?: string }
             if (from === undefined || instruction === undefined) throw new Error('orbit: action=resume requires from and instruction')
-            const active = await findLatest(projectRoot, maxTasks)
+            const active = await host.latest(projectRoot, maxTasks)
             if (active !== undefined && (await active.state()).status === 'running') {
               throw new Error('orbit: this workspace already has a running task')
             }
@@ -543,6 +545,7 @@ export default class OrbitHost extends Service {
                 ...(messageId === undefined ? {} : { messageId }),
               },
               workspace: workspaceInfo(projectRoot),
+              runtime: host.runtimeInfo(),
               ...(host.allowedModels.size === 0 ? {} : { allowedModels: [...host.allowedModels] }),
             })
             await host.adopt(service, agent, projectRoot)
@@ -557,7 +560,7 @@ export default class OrbitHost extends Service {
               messageId?: string
             }
             if (instruction === undefined || reason === undefined) throw new Error('orbit: action=takeover requires instruction and reason')
-            const active = await findLatest(projectRoot, maxTasks)
+            const active = await host.latest(projectRoot, maxTasks)
             if (active !== undefined && (await active.state()).status === 'running') {
               throw new Error('orbit: this workspace already has a running task')
             }
@@ -573,6 +576,7 @@ export default class OrbitHost extends Service {
                 ...(messageId === undefined ? {} : { messageId, sessionId: agent.id }),
               },
               workspace: workspaceInfo(projectRoot),
+              runtime: host.runtimeInfo(),
               takeover: {
                 reason,
                 ...(priorScope === undefined ? {} : { priorScope }),
@@ -586,7 +590,7 @@ export default class OrbitHost extends Service {
           }
 
           if (action === 'assess') {
-            const service = await openTask(projectRoot, maxTasks, (args as { task?: string }).task)
+            const service = await host.open(projectRoot, maxTasks, (args as { task?: string }).task)
             const state = await service.state()
             if (state.status !== 'running') throw new Error(`orbit: cannot assess a ${state.status} task`)
             const credential = await ctx.credentials.resolve(credentialRef('TYPESAFE_API_KEY'))
@@ -658,7 +662,7 @@ export default class OrbitHost extends Service {
             if (priorScope === undefined || priorScope.trim().length === 0) {
               throw new Error('orbit: action=takeover-scope requires priorScope text')
             }
-            const service = await openTask(projectRoot, maxTasks, (args as { task?: string }).task)
+            const service = await host.open(projectRoot, maxTasks, (args as { task?: string }).task)
             const state = await service.appendPriorScope(priorScope, reason)
             return JSON.stringify({ ok: true, declarations: state.priorScopeDeclarations?.length ?? 0 })
           }
@@ -666,7 +670,7 @@ export default class OrbitHost extends Service {
           if (action === 'dispute') {
             const { finding, reason } = args as { finding?: string; reason?: string }
             if (finding === undefined || reason === undefined) throw new Error('orbit: action=dispute requires finding and reason')
-            const service = await openTask(projectRoot, maxTasks, (args as { task?: string }).task)
+            const service = await host.open(projectRoot, maxTasks, (args as { task?: string }).task)
             return JSON.stringify({ ok: true, dispute: await service.openDispute(finding, reason) })
           }
 
@@ -675,14 +679,14 @@ export default class OrbitHost extends Service {
             if (dispute === undefined || decision === undefined || reason === undefined) {
               throw new Error('orbit: action=ruling requires dispute, decision and reason')
             }
-            const service = await openTask(projectRoot, maxTasks, (args as { task?: string }).task)
+            const service = await host.open(projectRoot, maxTasks, (args as { task?: string }).task)
             return JSON.stringify({ ok: true, dispute: await service.ruleDispute(dispute, decision, reason) })
           }
 
           if (action === 'rebind') {
             const { artifactRoot, reason } = args as { artifactRoot?: string; reason?: string }
             if (artifactRoot === undefined || reason === undefined) throw new Error('orbit: action=rebind requires artifactRoot and reason')
-            const service = await openTask(projectRoot, maxTasks, (args as { task?: string }).task)
+            const service = await host.open(projectRoot, maxTasks, (args as { task?: string }).task)
             const state = await service.rebindWorkspace({ ...workspaceInfo(artifactRoot), reason })
             return JSON.stringify({ ok: true, workspace: state.workspace })
           }
@@ -697,7 +701,7 @@ export default class OrbitHost extends Service {
             if (goal === undefined || acceptance === undefined) {
               throw new Error('orbit: action=declare requires goal and acceptance')
             }
-            const service = await openTask(projectRoot, maxTasks)
+            const service = await host.open(projectRoot, maxTasks)
             const unit = await service.declareWorkUnit({
               goal,
               acceptance,
@@ -712,7 +716,7 @@ export default class OrbitHost extends Service {
             if (unit === undefined || outcome === undefined || summary === undefined) {
               throw new Error('orbit: action=finish requires unit, outcome and summary')
             }
-            const service = await openTask(projectRoot, maxTasks, (args as { task?: string }).task)
+            const service = await host.open(projectRoot, maxTasks, (args as { task?: string }).task)
             const units = await service.store.workUnits()
             const target = units.units.find((candidate) => candidate.id === unit)
             if (target === undefined) throw new Error(`orbit: unknown work unit ${unit}`)
@@ -727,7 +731,7 @@ export default class OrbitHost extends Service {
           if (action === 'accept' || action === 'reject') {
             const { unit, reason } = args as { unit?: string; reason?: string }
             if (unit === undefined) throw new Error(`orbit: action=${action} requires unit`)
-            const service = await openTask(projectRoot, maxTasks, (args as { task?: string }).task)
+            const service = await host.open(projectRoot, maxTasks, (args as { task?: string }).task)
             if (action === 'accept') {
               return JSON.stringify({ ok: true, unit: await service.acceptWorkUnit(unit) })
             }
@@ -868,15 +872,15 @@ export default class OrbitHost extends Service {
 
   private async handleControl(projectRoot: string, request: ControlRequest): Promise<unknown> {
     if (request.method === 'status') {
-      const service = await openTask(projectRoot, this.maxTasks, request.task)
+      const service = await this.open(projectRoot, this.maxTasks, request.task)
       return { ok: true, ...(await projectStatus(service)) }
     }
     if (request.method === 'events') {
-      const service = await openTask(projectRoot, this.maxTasks, request.task)
+      const service = await this.open(projectRoot, this.maxTasks, request.task)
       return { ok: true, taskId: (await service.state()).id, events: await service.store.events() }
     }
     if (request.method === 'stop') {
-      const service = await openTask(projectRoot, this.maxTasks, request.task)
+      const service = await this.open(projectRoot, this.maxTasks, request.task)
       const state = await this.beginStop(service, 0)
       return { ok: true, ...summarize(state), fence: state.stop?.fence ?? 'none' }
     }
@@ -892,6 +896,49 @@ export default class OrbitHost extends Service {
     saveFenceRegistry(this.fencedSessions)
     setTimeout(() => { void this.performStop(service) }, delayMs)
     return state
+  }
+
+  private runtimeInfo(): { pid: number; instanceId: string; startedAt: string } {
+    return { pid: process.pid, instanceId: this.instanceId, startedAt: new Date().toISOString() }
+  }
+
+  /** Open a task and reconcile a running record owned by a dead host instance. */
+  private async open(projectRoot: string, limit: number, id?: string): Promise<TaskService> {
+    const service = await openTask(projectRoot, limit, id)
+    await this.reconcile(service)
+    return service
+  }
+
+  private async latest(projectRoot: string, limit: number): Promise<TaskService | undefined> {
+    const service = await findLatest(projectRoot, limit)
+    if (service !== undefined) await this.reconcile(service)
+    return service
+  }
+
+  private async reconcile(service: TaskService): Promise<void> {
+    try {
+      const state = await service.state()
+      if (state.status !== 'running' || state.runtime?.instanceId === this.instanceId) return
+      const ownerPid = state.runtime?.pid
+      let ownerAlive = false
+      if (ownerPid !== undefined) {
+        try {
+          process.kill(ownerPid, 0)
+          ownerAlive = true
+        } catch {
+          ownerAlive = false
+        }
+      }
+      // A different live process may still own this task; never orphan it from
+      // another window. Same-pid means our plugin instance was reloaded.
+      if (ownerAlive && ownerPid !== process.pid) {
+        console.error(`orbit: task ${state.id} is owned by live host pid ${ownerPid}; leaving it running`)
+        return
+      }
+      await service.recoverOrphaned(this.instanceId)
+    } catch (error) {
+      console.error(`orbit: runtime reconciliation failed: ${(error as Error).message}`)
+    }
   }
 
   /** Shared post-start wiring for start/resume/takeover. */

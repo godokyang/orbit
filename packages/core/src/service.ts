@@ -55,6 +55,7 @@ export interface StartTaskOptions {
   priorVersions?: RequirementVersion[]
   continuation?: TaskState['continuation']
   takeover?: TaskState['takeover']
+  runtime?: TaskState['runtime']
   taskId?: string
   clock?: () => Date
 }
@@ -170,6 +171,7 @@ export class TaskService {
         : { authorization: { allowedModels: [...options.allowedModels] } }),
       ...(options.continuation === undefined ? {} : { continuation: options.continuation }),
       ...(options.takeover === undefined ? {} : { takeover: options.takeover }),
+      ...(options.runtime === undefined ? {} : { runtime: options.runtime }),
       eventSeq: 0,
     }
     const store = await TaskStore.create(
@@ -496,6 +498,41 @@ export class TaskService {
       })
       await this.store.appendEvent('work-unit/rejected', { id, reason })
       return { ...unit, status: 'rejected', rejectedAt: now, rejectionReason: reason, updatedAt: now }
+    })
+  }
+
+  /**
+   * A running task whose recorded runtime instance is not the current host was
+   * orphaned by that host's death. Mark it stop_unconfirmed with an explicit
+   * missing runtime_gone evidence item; never keep claiming it runs.
+   */
+  async recoverOrphaned(instanceId: string, reason = 'host instance changed'): Promise<TaskState> {
+    return this.mutex.run(async () => {
+      const state = await this.store.readState()
+      if (state.status !== 'running') return state
+      if (state.runtime?.instanceId === instanceId) return state
+      const now = this.store.now()
+      const next = await this.store.updateState((draft) => {
+        draft.status = 'stop_unconfirmed'
+        draft.stop = {
+          requestedAt: now,
+          reason: 'failure',
+          fence: 'armed',
+          confirmation: {
+            confirmed: false,
+            at: now,
+            evidence: {},
+            missing: ['runtime_gone'],
+            diagnostics: `${reason}: recorded ${draft.runtime?.instanceId ?? 'unknown'} (pid ${draft.runtime?.pid ?? 'unknown'}), current ${instanceId}`,
+          },
+        }
+      })
+      await this.store.appendEvent('task/orphaned', {
+        reason,
+        previousRuntime: state.runtime,
+        currentInstanceId: instanceId,
+      })
+      return next
     })
   }
 

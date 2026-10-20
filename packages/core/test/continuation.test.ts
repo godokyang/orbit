@@ -69,6 +69,26 @@ describe('resume_from', () => {
   })
 })
 
+describe('runtimes', () => {
+  it('marks a task orphaned by a different host instance as stop_unconfirmed', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'orbit-orphan-'))
+    dirs.push(projectRoot)
+    const { service } = await TaskService.start({
+      projectRoot,
+      rootSessionId: 'root-1',
+      instruction: 'work',
+      runtime: { pid: 1, instanceId: 'instance-a', startedAt: 't' },
+    })
+    expect((await service.recoverOrphaned('instance-a')).status).toBe('running')
+    const orphaned = await service.recoverOrphaned('instance-b')
+    expect(orphaned.status).toBe('stop_unconfirmed')
+    expect(orphaned.stop?.confirmation).toMatchObject({ confirmed: false, missing: ['runtime_gone'] })
+    expect(orphaned.stop?.fence).toBe('armed')
+    const events = await service.store.events()
+    expect(events.at(-1)?.type).toBe('task/orphaned')
+  })
+})
+
 describe('takeover', () => {
   it('records the reason, prior scope and snapshot without claiming prior execution', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'orbit-takeover-'))
