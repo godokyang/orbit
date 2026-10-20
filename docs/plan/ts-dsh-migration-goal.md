@@ -9,7 +9,7 @@
 3. `docs/plan/dsh-implementation-plan.md`：结构、受控 profile、义务到接缝、停止与日志设计、Loom、凭据、阶段顺序。
 4. `docs/plan/dsh-host-probes.md`：已在 DSH 0.2.1-rc.2 上验证的接缝事实与实现约束。探针代码在 `tests/host_conformance/dsh-probe/`，改造成一致性测试。
 5. `docs/plan/jev-observation-projection.md`：观察投影单元设计。
-6. `contracts/task-runtime.md`（产品语义权威）、`contracts/check-result.schema.json`、`contracts/integration.md` 与 `docs/adr/010-integration-contract.md`（现行 1.8 合同与兼容规则，2.0 要替代它）。
+6. `contracts/task-runtime.md`（产品语义权威）、`contracts/check-result.schema.json`、`contracts/integration.md` 与 `docs/adr/010-integration-contract.md`（2.0 已于 2026-10-20 冻结，见 ADR-010 与合同变更记录）。
 7. ADR-009、011、012、013：模型池、Agent 自主、JEV 用途、终检范围。这些产品语义不随语言改变。
 8. DSH 源码 [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness/tree/687f282e8625c6b8d11ff58211a90524be2e4317)（提交 `687f282e`）：`docs/architecture.md`、`docs/user/develop/`、`packages/preset/agent-preset/skills/cordis-plugin-development/references/`。DSH 是"一切皆插件"，按它的写法写。
 9. Loom 仓库 `/Users/yangke/Personal/workspace/ai-tools/loom`：`AGENTS.md`、`docs/execution.md`、`docs/integration-readiness.md`、`services/node/`。C 阶段才动它。

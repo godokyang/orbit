@@ -1,6 +1,6 @@
 # Orbit 集成合同 2.0 草案（DSH）
 
-状态：**草案，未生效**。需用户确认后才能替换 `contracts/integration.md`/`integration.json` 并修改 Loom。1.x 合同在 2.0 生效前仍然有效。
+状态：**已冻结为 2.0.0**（2026-10-20，用户确认）。权威文本见 [contracts/integration.md](../../contracts/integration.md) 与 [integration.json](../../contracts/integration.json)；本文件保留设计背景，不再单独生效。
 
 ## 1. 版本与兼容
 

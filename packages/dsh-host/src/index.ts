@@ -186,6 +186,7 @@ function summarize(state: TaskState): Record<string, unknown> {
     artifactRoot: state.workspace.artifactRoot,
     checksInFlight: state.checks.inFlight,
     stop: state.stop?.reason,
+    stopConfirmation: state.stop?.confirmation,
     completionInvalidation: state.completionInvalidation,
   }
 }

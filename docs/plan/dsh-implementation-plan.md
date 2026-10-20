@@ -364,3 +364,11 @@ B 阶段开工前只需补一份短设计：JEV 观察输入在 DSH 事件下的
 - 按用户选择新增成员专用 `orbit_ask` 工具：成员调用后，Core 落盘 pending 问题，宿主等待 Root/用户答复；`orbit answer`/CLI 可答复，停止时取消并拒绝等待。
 - 工具仅接受受控任务中已登记成员；Root 或非成员调用会明确报错。问题 schema 为单问题（id/question/header/detail/options/multiSelect），避免 DSH ask 对子代理的限制。
 - 验证：typecheck/build 通过；全套 115 个测试通过。真实端到端尚未拿到：一次运行中 Root 未进入 start（只执行了 bash），另一次成员使用了已过期的 profile bundle；需刷新 profile 后重跑。
+
+## 实施进展（2026-10-20，集成合同 2.0 冻结）
+
+- 用户确认按草案冻结；`contracts/integration.md` 与 `integration.json` 重写为 2.0.0，删除 1.x 的 OMP 字段/命令，冻结 launch、status、events（不透明游标）、sessions、questions、answer、stop、export。
+- `orbit capabilities --json` 改为 2.0.0（非 draft），只列已接线能力；`launch` 去掉 draft 标记；`events` 新增 `--after` 不透明 base64url 游标与 `next_cursor`，无活宿主时同样过滤；`status` 增加 `stopConfirmation`。
+- ADR-010 增 2.0 变更记录；目标文档的 1.8 描述更新。
+- 验证：CLI 游标 2 个单测、capabilities/launch 单测；全套测试通过。
+- 仍未做：Loom 实际消费、C1 UI、`models` 能力、导出/会话的合同一致性回归。

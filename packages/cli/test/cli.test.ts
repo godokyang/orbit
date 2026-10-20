@@ -221,15 +221,24 @@ describe('orbit-ts sessions (offline archive)', () => {
 })
 
 describe('orbit-ts capabilities and launch', () => {
-  it('reports the draft contract and capabilities', async () => {
+  it('reports the frozen 2.0 contract and capabilities', async () => {
     const sink = capture()
     expect(await runCli(['capabilities', '--json'], sink.io)).toBe(0)
     const payload = JSON.parse(sink.out()) as {
-      integration_contract: { version: string; draft: boolean }
+      integration_contract: { version: string; major: number }
       capabilities: Record<string, unknown>
     }
-    expect(payload.integration_contract).toMatchObject({ version: '2.0.0-draft', draft: true })
-    expect(Object.keys(payload.capabilities)).toEqual(expect.arrayContaining(['launch', 'status', 'sessions', 'stop']))
+    expect(payload.integration_contract).toMatchObject({ version: '2.0.0', major: 2 })
+    expect(Object.keys(payload.capabilities)).toEqual(
+      expect.arrayContaining(['launch', 'status', 'events', 'sessions', 'questions', 'answer', 'stop', 'export']),
+    )
+    const { readFileSync } = await import('node:fs')
+    const contract = JSON.parse(readFileSync(join(process.cwd(), 'contracts', 'integration.json'), 'utf8')) as {
+      version: string
+      capabilities: Record<string, unknown>
+    }
+    expect(payload.integration_contract.version).toBe(contract.version)
+    expect(Object.keys(payload.capabilities).sort()).toEqual(Object.keys(contract.capabilities).sort())
   })
 
   it('returns a launch spec without starting a process', async () => {
@@ -277,5 +286,29 @@ describe('orbit-ts questions and answer', () => {
       await runCli(['answer', '--project', dir, '--question', 'question-1', '--selected', 'a,b', '--custom', 'other'], sink.io),
     ).toBe(0)
     expect(sink.out()).toContain('answered question-1')
+  })
+})
+
+describe('orbit-ts events cursor', () => {
+  it('returns an opaque cursor and filters with it', async () => {
+    const dir = await project()
+    await startTask(dir)
+    const first = capture()
+    expect(await runCli(['events', '--json', '--project', dir], first.io)).toBe(0)
+    const page = JSON.parse(first.out()) as { events: Array<{ seq: number }>; next_cursor: string }
+    expect(page.next_cursor.length).toBeGreaterThan(0)
+    const lastSeq = page.events.at(-1)?.seq ?? 0
+
+    const second = capture()
+    expect(await runCli(['events', '--json', '--project', dir, '--after', page.next_cursor], second.io)).toBe(0)
+    const next = JSON.parse(second.out()) as { events: Array<{ seq: number }> }
+    expect(next.events.every((event) => event.seq > lastSeq)).toBe(true)
+  })
+
+  it('rejects an invalid cursor', async () => {
+    const dir = await project()
+    await startTask(dir)
+    const sink = capture()
+    expect(await runCli(['events', '--project', dir, '--after', 'not-a-cursor'], sink.io)).toBe(1)
   })
 })

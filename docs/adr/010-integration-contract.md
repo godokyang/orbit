@@ -62,3 +62,7 @@ attention 码表及优先级在集成合同冻结，以现有状态与检查/返
 真实 Loom 续接已恢复同一 Root 并建立新任务，但首条唤醒来自检查选型失败通知，而不是明确的续接信号。不能依赖这个副作用。新增默认关闭的 `resume_wake`：精确绑定后，经现有原生 custom message 通道发送程序通知；尝试先落盘，ACK 与未知分别记录，不自动重发，不改真实用户启动边界或停止、授权规则。具体字段见集成合同。
 
 同次运行还暴露 CLI 未保存显式检查模型的缺陷：输入签名变化后重新选型可能掉回配置池。修复只持久保存实际显式选择，不固定自动选择，也不增加旧任务选型继承或跨池回退策略。
+
+## 2026-10-20 合同 2.0：DSH 单包集成面
+
+用户确认按草案冻结 2.0。合同从 OMP 时代整体升主版本：删除 `provider=omp`、`session_file`、字节偏移、`conversation`/`messages` 与 1.x 字段名；保留“合同版本独立、同主版本只加不改、能力协商”的规则。2.0 冻结的能力只包含已接线的 `launch`、`status`、`events`（不透明游标）、`sessions`、`questions`、`answer`、`stop`、`export`；未实现的模型授权与启动 ready 事件不得出现在能力清单。`status` 采用 DSH 单包的 camelCase 投影，停止确认只看 `stopConfirmation.confirmed`。真实 Loom 消费仍由 C3 单独验证。

@@ -1,21 +1,22 @@
 import { join } from 'node:path'
 
-export const INTEGRATION_CONTRACT = { name: 'orbit-integration', version: '2.0.0-draft', major: 2, draft: true } as const
+export const INTEGRATION_CONTRACT = { name: 'orbit-integration', version: '2.0.0', major: 2 } as const
 
 export const CAPABILITIES = {
-  launch: { since: '2.0.0-draft', stdin: 'keep-open', process_owner: 'caller' },
-  status: { since: '2.0.0-draft' },
-  events: { since: '2.0.0-draft', cursor: 'opaque' },
-  sessions: { since: '2.0.0-draft', visible_text: true, user_messages: true, activities: true, questions: true, deliveries: true },
-  stop: { since: '2.0.0-draft', receipt: 'evidence' },
-  export: { since: '2.0.0-draft', self_contained: true },
-  models: { since: '2.0.0-draft', strict_authorization: true },
+  launch: { since: '2.0.0', stdin: 'keep-open', process_owner: 'caller' },
+  status: { since: '2.0.0' },
+  events: { since: '2.0.0', cursor: 'opaque' },
+  sessions: { since: '2.0.0', visible_text: true, user_messages: true, activities: true, questions: true, deliveries: true },
+  questions: { since: '2.0.0' },
+  answer: { since: '2.0.0' },
+  stop: { since: '2.0.0', receipt: 'evidence' },
+  export: { since: '2.0.0', self_contained: true },
+
 } as const
 
 export interface LaunchSpec {
   kind: 'dsh'
   contract: string
-  draft: true
   profile: string
   cwd: string
   argv: string[]
@@ -36,7 +37,6 @@ export function buildLaunchSpec(input: {
   return {
     kind: 'dsh',
     contract: INTEGRATION_CONTRACT.version,
-    draft: true,
     profile,
     cwd: input.projectRoot,
     argv: ['--profile', profile],

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { join, resolve } from 'node:path'
-import { CONTROL_SOCKET_FILE, type ControlRequest, type ControlResponse } from '@orbit/core'
+import { CONTROL_SOCKET_FILE, type ControlRequest, type ControlResponse, type TaskEvent } from '@orbit/core'
 import { requestControl } from './client.js'
 import { localEvents, localQuestions, localStatus, type StatusView } from './tasks.js'
 import { exportTask } from './export.js'
@@ -36,6 +36,7 @@ interface Parsed {
   custom?: string
   profile?: string
   home?: string
+  after?: string
   task?: string
   project: string
   json: boolean
@@ -61,6 +62,7 @@ function parse(argv: string[]): Parsed | 'help' {
   let question: string | undefined
   let selected: string[] | undefined
   let custom: string | undefined
+  let after: string | undefined
   for (let index = 1; index < argv.length; index += 1) {
     const arg = argv[index]
     if (arg === '--json') {
@@ -70,6 +72,8 @@ function parse(argv: string[]): Parsed | 'help' {
       if (value === undefined) throw new UsageError('--project requires a directory')
       project = resolve(value)
       index += 1
+    } else if (arg === '--after') {
+      after = argv[++index]
     } else if (arg === '--question') {
       question = argv[++index]
     } else if (arg === '--selected') {
@@ -109,6 +113,7 @@ function parse(argv: string[]): Parsed | 'help' {
     ...(question === undefined ? {} : { question }),
     ...(selected === undefined ? {} : { selected }),
     ...(custom === undefined ? {} : { custom }),
+    ...(after === undefined ? {} : { after }),
   }
 }
 
@@ -158,6 +163,21 @@ function printEvents(result: { taskId: string; events: Array<{ seq: number; at: 
   }
   const lines = result.events.map((event) => `${String(event.seq).padStart(4, '0')}  ${event.at}  ${event.type}${event.data === undefined ? '' : `  ${JSON.stringify(event.data)}`}`)
   out(lines.length === 0 ? `task ${result.taskId} has no events` : lines.join('\n'))
+}
+
+function encodeCursor(seq: number | undefined): string | null {
+  return seq === undefined ? null : Buffer.from(JSON.stringify({ seq }), 'utf8').toString('base64url')
+}
+
+function decodeCursor(cursor: string | undefined): number | undefined {
+  if (cursor === undefined) return undefined
+  try {
+    const parsed = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) as { seq?: unknown }
+    if (typeof parsed.seq !== 'number' || !Number.isInteger(parsed.seq) || parsed.seq < 0) throw new Error('bad seq')
+    return parsed.seq
+  } catch {
+    throw new UsageError(`invalid --after cursor: ${cursor}`)
+  }
 }
 
 export async function runCli(argv: string[], io: Partial<CliIo> = {}): Promise<number> {
@@ -242,17 +262,21 @@ export async function runCli(argv: string[], io: Partial<CliIo> = {}): Promise<n
     }
 
     if (parsed.command === 'events') {
+      const afterSeq = decodeCursor(parsed.after)
       const response = await control(parsed.project, {
         id: randomUUID(),
         method: 'events',
         ...(parsed.task === undefined ? {} : { task: parsed.task }),
       })
-      if (response === undefined) {
-        printEvents(await localEvents(parsed.project, parsed.task), parsed.json, out)
-        return 0
-      }
-      if (!response.ok) throw new Error(response.error.message)
-      printEvents(response.result as { taskId: string; events: [] }, parsed.json, out)
+      const result = response === undefined
+        ? await localEvents(parsed.project, parsed.task)
+        : response.ok
+          ? (response.result as { taskId: string; events: TaskEvent[] })
+          : (() => { throw new Error(response.error.message) })()
+      const events = result.events.filter((event) => afterSeq === undefined || event.seq > afterSeq)
+      const envelope = { taskId: result.taskId, events, next_cursor: encodeCursor(events.at(-1)?.seq) }
+      if (parsed.json) out(JSON.stringify(envelope, null, 2))
+      else out(events.length === 0 ? 'no events' : events.map((event) => `${event.seq}  ${event.type}`).join('\n'))
       return 0
     }
 

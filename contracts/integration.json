@@ -1,639 +1,100 @@
 {
   "contract": "orbit-integration",
-  "version": "1.8",
-  "major": 1,
-  "description": "Machine-readable form of contracts/integration.md. Versioned independently of the software version. Within one major version entries are only added, never changed or removed; a breaking change raises the major version and is named in the release notes. `orbit capabilities --json` serves `capabilities` from this file and the contract test reads `commands` and `status_fields` from it.",
-  "status_values": [
-    "starting",
-    "running",
-    "complete",
-    "paused",
-    "needs_user",
-    "failed",
-    "stop_unconfirmed"
-  ],
-  "terminal_status_values": [
-    "complete",
-    "paused",
-    "needs_user",
-    "failed",
-    "stop_unconfirmed"
-  ],
+  "version": "2.0.0",
+  "major": 2,
+  "description": "Machine-readable form of contracts/integration.md for the DSH Orbit integration. 2.0 removes the OMP-era commands and fields. `orbit capabilities --json` serves these capabilities and the contract test reads commands/status fields.",
+  "status_values": ["starting", "running", "complete", "paused", "needs_user", "failed", "stop_unconfirmed"],
+  "terminal_status_values": ["complete", "paused", "needs_user", "failed", "stop_unconfirmed"],
   "commands": {
-    "status_by_external_ref": {
-      "invocation": "orbit status --external-ref REF [--project DIR] --json",
-      "stdout_fields": [
-        "tasks"
-      ],
-      "note": "Exact opaque-string match, all matching tasks including terminal tasks, newest first. Success always returns a tasks array. No match exits 0 with an empty array. TASK is mutually exclusive. Validation and scan/read failures retain non-zero exit and error semantics."
-    },
-    "version": {
-      "invocation": "orbit version --json",
-      "stdout_fields": [
-        "version"
-      ]
-    },
     "capabilities": {
       "invocation": "orbit capabilities --json",
-      "stdout_fields": [
-        "integration_contract.version",
-        "integration_contract.major",
-        "orbit.version",
-        "capabilities"
-      ]
+      "stdout_fields": ["integration_contract.version", "integration_contract.major", "orbit.version", "capabilities"]
     },
-    "start": {
-      "invocation": "orbit start --provider omp --project DIR --thread ID --socket PATH (--message-id ID | --prompt-file FILE|-) [--review-model MODEL] [--basis FILE]... [--external-ref REF]... [--resume-from TASK_DIRECTORY] [--resume-wake] [--allowed-model MODEL]...",
-      "stdout_fields": [
-        "task_directory",
-        "status"
-      ]
+    "launch": {
+      "invocation": "orbit launch --json [--profile P] [--home DIR] [--project DIR]",
+      "stdout_fields": ["kind", "contract", "profile", "cwd", "argv", "env", "stdin", "control_socket", "ready"]
     },
     "status": {
-      "invocation": "orbit status TASK --json",
-      "stdout_fields": [
-        "see status_fields"
-      ]
+      "invocation": "orbit status [TASK] --json [--project DIR]",
+      "stdout_fields": ["ok", "taskId", "status", "inputVersion", "artifactRoot", "checksInFlight", "stop", "stopConfirmation", "completionInvalidation", "members", "workUnits", "checks", "openFindings", "openDisputes"]
     },
-    "check": {
-      "invocation": "orbit check TASK_DIRECTORY",
-      "stdout_fields": [
-        "task_directory",
-        "command_id",
-        "status"
-      ],
-      "note": "status is queued, or rejected with a reason. A queued check is not a result: read requirement_coverage from status."
+    "events": {
+      "invocation": "orbit events [TASK] --after CURSOR [--json] [--project DIR]",
+      "stdout_fields": ["taskId", "events", "next_cursor"],
+      "note": "next_cursor is opaque base64url and must be passed back unchanged."
+    },
+    "sessions": {
+      "invocation": "orbit sessions [TASK] --json [--project DIR]",
+      "stdout_fields": ["as_of_seq", "root", "members"],
+      "note": "Read-only projection. state=unavailable means no live or archived session, not an empty live session."
+    },
+    "questions": {
+      "invocation": "orbit questions [TASK] --json [--project DIR]",
+      "stdout_fields": ["questions"]
+    },
+    "answer": {
+      "invocation": "orbit answer [TASK] --question ID --selected A,B [--custom TEXT] --json [--project DIR]",
+      "stdout_fields": ["question"],
+      "note": "Requires a live host; an answer never implies the model adopted it."
     },
     "stop": {
-      "invocation": "orbit stop TASK --json",
-      "stdout_fields": [
-        "task_directory",
-        "command_id",
-        "status"
-      ],
-      "note": "status queued means only that the request was enqueued. Stopped is established solely by status.stop_confirmation.confirmed."
+      "invocation": "orbit stop [TASK] --json [--project DIR]",
+      "stdout_fields": ["ok", "taskId", "status", "fence", "stop", "stopConfirmation"],
+      "note": "fence=armed is not confirmation; only stopConfirmation.confirmed=true means stopped."
     },
     "export": {
-      "invocation": "orbit export TASK --output FILE",
-      "stdout_fields": [
-        "task_directory",
-        "task_id",
-        "status",
-        "in_flight",
-        "output",
-        "files",
-        "missing"
-      ]
-    },
-    "doctor": {
-      "invocation": "orbit doctor [TASK] --json",
-      "stdout_fields": [
-        "environment_ready"
-      ]
-    },
-    "conversation": {
-      "invocation": "orbit conversation TASK --after OFFSET --json",
-      "stdout_fields": [
-        "session_file",
-        "offset",
-        "next_offset",
-        "messages",
-        "truncated",
-        "dropped",
-        "read_at"
-      ],
-      "note": "Read-only incremental projection of the host-reported session file. OFFSET is a byte offset returned as next_offset by the previous call; --after defaults to 0. Only complete JSONL lines are parsed and only visible assistant text is returned. A missing/invalid session file or an offset beyond the file fails; the command never synthesizes messages, writes a task, starts a session, calls a model or replays the conversation."
-    },
-    "events_read": {
-      "invocation": "orbit events TASK --after CURSOR --json",
-      "stdout_fields": [
-        "cursor",
-        "next_cursor",
-        "events",
-        "truncated",
-        "skipped",
-        "unreadable",
-        "dropped",
-        "read_at"
-      ],
-      "note": "Read-only incremental projection of the task's own events.jsonl. CURSOR is opaque; v1 encodes a byte offset and the caller stores and returns it verbatim. Only complete lines are parsed; events outside the public whitelist are counted in skipped, non-JSON lines in unreadable, and neither is guessed. A single read is capped at 1 MB or 200 events; overflow sets truncated and counts the excess public events in dropped. A task that exists before its log is written returns an empty list with the cursor unchanged. An invalid or out-of-range cursor, or a missing task, fails. The command never writes a task, starts a session, calls a model or synthesizes an event."
-    },
-    "native_user_messages": {
-      "invocation": "orbit messages TASK --json",
-      "stdout_fields": [
-        "session_id",
-        "session_file",
-        "messages",
-        "truncated",
-        "dropped",
-        "read_at"
-      ],
-      "note": "Read-only projection of the native user messages recorded by the host. The task must carry a host-reported session file and identity; the first non-title header line must name that session and a workspace this task owns. Each message carries a stable native id, text and created_at; internal, agent-attributed and non-user entries are never returned. The command never writes a task, starts a session, calls a model or invents an id."
-    },
-    "session_abort": {
-      "invocation": "orbit abort TASK --json",
-      "stdout_fields": [
-        "confirmed",
-        "scope",
-        "at"
-      ],
-      "note": "Abort the bound native session. scope=session means the session was aborted; it is not a task stop and never a business completion. A missing or foreign task fails."
-    },
-    "session_launch": {
-      "invocation": "orbit launch --socket PATH (--model MODEL | --resume ID) --json",
-      "stdout_fields": [
-        "argv",
-        "socket"
-      ],
-      "note": "Host-neutral launch spec for a controlled session. argv excludes the Orbit binary: the caller prepends its configured orbit path. The caller still owns the process (spawn and reap); this command does not start anything."
-    },
-    "session_prompt": {
-      "invocation": "orbit prompt TASK --message TEXT --json",
-      "stdout_fields": [
-        "accepted",
-        "message_id",
-        "at"
-      ],
-      "note": "Inject a real user message into the bound session. The host records attribution=user (not agent). message_id is the native id when the host reports it within the read window, otherwise null; accepted does not mean the model answered. The command never writes task state or calls the model directly."
-    },
-    "question_requests": {
-      "invocation": "orbit questions TASK --json",
-      "stdout_fields": [
-        "asks"
-      ],
-      "note": "List native questions the controlled session is waiting on. Each ask carries a stable id, normalized questions and the time it was raised. Empty means no question is pending; it does not mean the task is complete."
-    },
-    "question_answer": {
-      "invocation": "orbit answer TASK --question ID --answers JSON --json",
-      "stdout_fields": [
-        "accepted",
-        "id"
-      ],
-      "note": "Deliver one answer array for a pending ask (one item per question, selectedOptions from that question's labels, optional customInput). Unknown ids, unknown labels, duplicate labels and single-select multi-answers fail. accepted means the host accepted the answer array, not that the model adopted it."
+      "invocation": "orbit export [TASK] --output FILE --json [--project DIR]",
+      "stdout_fields": ["taskId", "bytes", "output", "files"]
     }
   },
-  "status_fields": [
-    {
-      "path": "id",
-      "present": "always"
-    },
-    {
-      "path": "status",
-      "present": "always"
-    },
-    {
-      "path": "project_root",
-      "present": "always"
-    },
-    {
-      "path": "created_at",
-      "present": "always"
-    },
-    {
-      "path": "stop_reason",
-      "present": "after_stop"
-    },
-    {
-      "path": "stop_confirmation.confirmed",
-      "present": "after_stop"
-    },
-    {
-      "path": "requirement_coverage.current",
-      "present": "after_check"
-    },
-    {
-      "path": "requirement_coverage.complete",
-      "present": "after_check"
-    },
-    {
-      "path": "requirement_coverage.ready",
-      "present": "after_check"
-    },
-    {
-      "path": "requirement_coverage.gap",
-      "present": "after_check"
-    },
-    {
-      "path": "requirement_coverage.items[].requirement",
-      "present": "after_check"
-    },
-    {
-      "path": "requirement_coverage.items[].status",
-      "present": "after_check"
-    },
-    {
-      "path": "requirement_coverage.items[].evidence",
-      "present": "after_check"
-    },
-    {
-      "path": "requirement_coverage.items[].scope",
-      "present": "after_check"
-    },
-    {
-      "path": "requirement_coverage.items[].ref",
-      "present": "when_reported"
-    },
-    {
-      "path": "requirement_coverage.items[].gap_kind",
-      "present": "when_reported"
-    },
-    {
-      "path": "requirement_coverage.items[].verified_by_check",
-      "present": "when_reported"
-    },
-    {
-      "path": "external_refs",
-      "present": "when_provided"
-    },
-    {
-      "path": "continuation.previous_task",
-      "present": "when_resumed"
-    },
-    {
-      "path": "continuation.wake.status",
-      "present": "when_wake_requested"
-    },
-    {
-      "path": "continuation.wake.message_id",
-      "present": "when_wake_requested"
-    },
-    {
-      "path": "revision",
-      "present": "when_recorded"
-    },
-    {
-      "path": "updated_at",
-      "present": "when_recorded"
-    },
-    {
-      "path": "attention.phase",
-      "present": "status_projection"
-    },
-    {
-      "path": "attention.needs_user",
-      "present": "status_projection"
-    },
-    {
-      "path": "latest_check.number",
-      "present": "after_completed_check"
-    },
-    {
-      "path": "latest_check.role",
-      "present": "after_completed_check"
-    },
-    {
-      "path": "latest_check.kind",
-      "present": "after_completed_check"
-    },
-    {
-      "path": "latest_check.finished_at",
-      "present": "after_completed_check"
-    },
-    {
-      "path": "latest_check.input_digest",
-      "present": "after_completed_check"
-    },
-    {
-      "path": "latest_check.artifact_digest",
-      "present": "after_completed_check"
-    },
-    {
-      "path": "latest_check.stale",
-      "present": "after_completed_check"
-    },
-    {
-      "path": "latest_check.stale_reasons",
-      "present": "after_completed_check"
-    },
-    {
-      "path": "latest_check.terminal",
-      "present": "after_completed_check"
-    },
-    {
-      "path": "latest_check.failure_kind",
-      "present": "after_completed_check"
-    },
-    {
-      "path": "latest_check.models",
-      "present": "after_completed_check"
-    },
-    {
-      "path": "latest_check.input_current",
-      "present": "after_completed_check"
-    },
-    {
-      "path": "model_authorization.allowed_models",
-      "present": "when_authorized_models"
-    },
-    {
-      "path": "model_authorization.auxiliary_judgments",
-      "present": "when_authorized_models"
-    },
-    {
-      "path": "session_binding.provider",
-      "present": "always"
-    },
-    {
-      "path": "session_binding.session_id",
-      "present": "always"
-    },
-    {
-      "path": "session_binding.session_file",
-      "present": "always"
-    },
-    {
-      "path": "session_binding.launch_message_id",
-      "present": "always"
-    },
-    {
-      "path": "session_binding.launch_message_source",
-      "present": "always"
-    }
-  ],
+  "status_fields": {
+    "ok": "boolean",
+    "taskId": "string",
+    "status": "status_values",
+    "inputVersion": "integer",
+    "artifactRoot": "absolute path",
+    "checksInFlight": "integer|null",
+    "stop": "string|omitted",
+    "stopConfirmation": "object|omitted",
+    "completionInvalidation": "object|null|omitted",
+    "members": "array",
+    "workUnits": "array",
+    "checks": "array",
+    "openFindings": "string[]",
+    "openDisputes": "string[]|omitted"
+  },
+  "session_fields": {
+    "as_of_seq": "integer",
+    "root": "session_projection",
+    "members": "session_projection[]"
+  },
+  "session_projection": {
+    "session_id": "string",
+    "state": "available|unavailable",
+    "as_of_seq": "integer",
+    "visible_text": "array",
+    "user_messages": "array",
+    "activities": "array",
+    "questions": "array",
+    "deliveries": "array",
+    "gaps": "array|omitted",
+    "archive_segments": "integer|omitted"
+  },
   "capabilities": {
-    "status_json": {
-      "since": "1.0"
-    },
-    "export": {
-      "since": "1.0"
-    },
-    "stop_receipt": {
-      "since": "1.0",
-      "confirmation_field": "stop_confirmation.confirmed"
-    },
-    "start_external_refs": {
-      "since": "1.0",
-      "max_refs": 16,
-      "max_length": 256,
-      "inherited_on_resume": false
-    },
-    "check_coverage_continuation": {
-      "since": "1.6",
-      "gap_field": "gap_kind",
-      "gap_values": [
-        "not_checked",
-        "evidence_missing",
-        "defect"
-      ],
-      "gap_status": "unverified",
-      "verified_source_field": "verified_by_check",
-      "legacy_gap": "unknown",
-      "cross_version_automatic_reuse": false
-    },
-    "check_coverage_ref": {
-      "since": "1.0",
-      "max_length": 200,
-      "blank_is_omitted": true
-    },
-    "resume_from": {
-      "since": "1.0",
-      "from_status": [
-        "paused",
-        "needs_user"
-      ],
-      "requires": "native_user_message"
-    },
-    "external_session_mode": {
-      "since": "1.2",
-      "environment_variable": "ORBIT_EXTERNAL_INTEGRATION",
-      "enabled_value": "1",
-      "automatic_entry": false,
-      "root_start_available": true
-    },
-    "control_socket_env": {
-      "since": "1.2",
-      "environment_variable": "ORBIT_CONTROL_SOCKET",
-      "listen_at": "session_start",
-      "absolute_path_required": true,
-      "realpath": false,
-      "caller_directory_retained": true,
-      "normalized_absolute_path_required": true,
-      "caller_private_directory_required": true,
-      "path_limit_includes_nul": true,
-      "same_filesystem_as_private_tmp_required": true
-    },
-    "status_by_external_ref": {
-      "since": "1.2",
-      "exact_match": true,
-      "includes_terminal_tasks": true,
-      "stdout_container": "tasks",
-      "no_match_exit_code": 0,
-      "max_length": 256,
-      "start_deduplicated": false
-    },
-    "status_revision": {
-      "since": "1.3",
-      "key": [
-        "id",
-        "revision"
-      ],
-      "initial_revision": 1,
-      "atomic_with_state": true,
-      "read_changes_revision": false,
-      "unchanged_tick_changes_revision": false,
-      "legacy_missing": "unknown",
-      "excludes": [
-        "usage_at_any_depth",
-        "next_check_at",
-        "requirement_coverage.current",
-        "requirement_coverage.ready",
-        "requirement_coverage.gap"
-      ],
-      "updated_at_format": "ISO-8601 UTC"
-    },
-    "status_attention": {
-      "since": "1.3",
-      "fields": [
-        "phase",
-        "needs_user"
-      ],
-      "phases": [
-        "starting",
-        "implementing",
-        "checking",
-        "reworking",
-        "stopping",
-        "stopped",
-        "needs_user",
-        "failed",
-        "unknown"
-      ],
-      "needs_user_status": "needs_user",
-      "needs_user_is_stopped_terminal": true,
-      "unknown_phase": "unknown"
-    },
-    "status_latest_check": {
-      "since": "1.3",
-      "selection": "last_completed_in_checks_order",
-      "includes_failed": true,
-      "includes_stale": true,
-      "models": "deduplicated_receipt_provider/model_array",
-      "input_current": "input_digest_only",
-      "no_completed_check": "omitted",
-      "legacy_missing_identity": "scope.json_then_null",
-      "stale_reasons": [
-        "workspace",
-        "artifact",
-        "input",
-        "host",
-        "dispute"
-      ],
-      "failure_kinds": [
-        "auth_or_quota",
-        "unavailable",
-        "invalid_result"
-      ],
-      "terminal_values": [
-        "continue",
-        "correct",
-        "pause",
-        "complete",
-        "needs_user",
-        "failed",
-        "stale"
-      ]
-    },
-    "model_authorization": {
-      "since": "1.4",
-      "start_argument": "--allowed-model",
-      "session_environment_variable": "ORBIT_ALLOWED_MODELS",
-      "environment_format": "nonempty_json_array",
-      "identity": "exact_provider/model",
-      "max_models": 64,
-      "task_immutable": true,
-      "resume_inherits": true,
-      "resume_may_narrow": true,
-      "fallback": "authorized_models_only",
-      "exhausted": "blocked",
-      "auxiliary_judgments": "disabled",
-      "requires": "Agent.streamFn_and_ModelRegistry.resolver_and_getApiKey",
-      "pre_task_calls": "requires_session_environment",
-      "global_configuration_changed": false
-    },
-    "session_binding": {
-      "since": "1.5",
-      "object": "session_binding",
-      "fields": [
-        "provider",
-        "session_id",
-        "session_file",
-        "launch_message_id",
-        "launch_message_source"
-      ],
-      "launch_sources": [
-        "native_user_message",
-        "orbit_instruction"
-      ],
-      "unknown_value": "null",
-      "session_file": "host_reported_path_only",
-      "launch_boundary_stable": true,
-      "legacy_prompt_file_launch": "null",
-      "status_projection_only": true,
-      "export": "excluded"
-    },
-    "resume_wake": {
-      "since": "1.5",
-      "start_argument": "--resume-wake",
-      "requires": "resume_from",
-      "default": false,
-      "channel": "native_send_message_custom",
-      "program_origin_only": true,
-      "statuses": [
-        "requested",
-        "sent",
-        "unconfirmed"
-      ],
-      "status_field": "continuation.wake.status",
-      "message_id_field": "continuation.wake.message_id",
-      "sent_means": "native_ack_only",
-      "attempt_persisted_before_send": true,
-      "automatic_retry": false,
-      "launch_boundary_unchanged": true
-    },
-    "conversation_read": {
-      "since": "1.7",
-      "command": "conversation",
-      "offset_unit": "byte",
-      "default_offset": 0,
-      "max_bytes": 1000000,
-      "max_messages": 100,
-      "roles": [
-        "assistant"
-      ],
-      "source": "host_reported_session_file_only",
-      "missing_or_out_of_range": "error",
-      "writes_task": false,
-      "calls_model": false,
-      "replays_conversation": false
-    },
-    "events_read": {
-      "since": "1.8",
-      "command": "events",
-      "cursor_unit": "byte",
-      "default_cursor": 0,
-      "max_bytes": 1000000,
-      "max_events": 200,
-      "kinds": [
-        "check_started",
-        "check_finished",
-        "check_failed",
-        "finding_recorded",
-        "finding_resolved",
-        "instruction_amended",
-        "correction_sent",
-        "finalization_notice",
-        "completion_stop_queued",
-        "stopped",
-        "stop_unconfirmed",
-        "member_settled"
-      ],
-      "missing_log": "empty_list_same_cursor",
-      "out_of_range": "error",
-      "revision_included": false,
-      "writes_task": false,
-      "calls_model": false
-    },
-    "native_user_messages": {
-      "since": "1.8",
-      "command": "messages",
-      "source": "host_reported_session_file_only",
-      "max_messages": 200,
-      "header_validation": "session_id_and_workspace",
-      "missing_or_mismatch": "error",
-      "writes_task": false,
-      "calls_model": false
-    },
-    "session_abort": {
-      "since": "1.8",
-      "command": "abort",
-      "scope": "session",
-      "writes_task": false,
-      "calls_model": false
-    },
-    "session_launch": {
-      "since": "1.8",
-      "command": "launch",
-      "argv_excludes_binary": true,
-      "spawns": false,
-      "writes_task": false,
-      "calls_model": false
-    },
-    "session_prompt": {
-      "since": "1.8",
-      "command": "prompt",
-      "attribution": "user",
-      "message_id_may_be_null": true,
-      "writes_task": false
-    },
-    "question_relay": {
-      "since": "1.8",
-      "commands": [
-        "questions",
-        "answer"
-      ],
-      "ask_id": "stable",
-      "writes_task": false,
-      "calls_model": false
-    }
-  }
+    "launch": { "since": "2.0.0", "stdin": "keep-open", "process_owner": "caller" },
+    "status": { "since": "2.0.0" },
+    "events": { "since": "2.0.0", "cursor": "opaque" },
+    "sessions": { "since": "2.0.0", "visible_text": true, "user_messages": true, "activities": true, "questions": true, "deliveries": true },
+    "questions": { "since": "2.0.0" },
+    "answer": { "since": "2.0.0" },
+    "stop": { "since": "2.0.0", "receipt": "evidence" },
+    "export": { "since": "2.0.0", "self_contained": true }
+  },
+  "removed_in_2_0": [
+    "provider=omp",
+    "session_file and byte offsets",
+    "conversation and messages commands",
+    "events seq-only response without next_cursor",
+    "1.x status field names"
+  ]
 }
