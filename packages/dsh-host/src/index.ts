@@ -1194,6 +1194,7 @@ export default class OrbitHost extends Service {
                   checkerProvider: (host as any).checkerModel?.provider ?? '',
                   checkerModel: (host as any).checkerModel?.model ?? '',
                   jev: typeof (host as any).jevEndpoint === 'string' && (host as any).jevEndpoint.length > 0,
+                  candidates: ((host as any).memberCandidates as Array<{ label?: string; provider: string; model: string }>).map((candidate) => candidate.label || `${candidate.provider}/${candidate.model}`),
                 },
                 recentEvents: events,
                 pendingQuestions: status.questions.filter((question) => question.status === 'pending')

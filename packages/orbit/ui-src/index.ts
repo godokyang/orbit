@@ -13,7 +13,7 @@ interface OrbitStatus {
   checksInFlight?: number | null
   openFindings?: string[]
   pendingQuestions?: Array<{ id: string; question: string }>
-  config?: { allowedModels: string[]; checkerProvider: string; checkerModel: string; jev: boolean }
+  config?: { allowedModels: string[]; checkerProvider: string; checkerModel: string; jev: boolean; candidates?: string[] }
   recentEvents?: Array<{ seq: number; type: string }>
 }
 
@@ -38,6 +38,7 @@ function action(sessionId: string, body: Record<string, unknown>): Promise<Orbit
 function OrbitPanel({ sessionId }: { sessionId: string }): unknown {
   const [data, setData] = useState<OrbitStatus | undefined>(undefined)
   const [instruction, setInstruction] = useState('')
+  const [showSettings, setShowSettings] = useState(false)
   useEffect(() => {
     let alive = true
     const load = (): void => { void request(sessionId).then((next) => { if (alive && next !== undefined) setData(next) }) }
@@ -57,6 +58,7 @@ function OrbitPanel({ sessionId }: { sessionId: string }): unknown {
     createElement('button', { onClick: () => { if (instruction.trim().length > 0) void action(sessionId, { action: 'prompt', message: `Call the orbit tool with action=start and instruction=${JSON.stringify(instruction.trim())}. Then reply OK.` }) } }, 'Start'),
     createElement('button', { onClick: () => { void action(sessionId, { action: 'prompt', message: 'Call the orbit tool with action=check now. Do not use other tools.' }) } }, 'Check'),
     createElement('button', { onClick: () => { void action(sessionId, { action: 'prompt', message: 'If the latest independent check says complete, call the orbit tool with action=complete now.' }) } }, 'Complete'),
+    createElement('button', { onClick: () => setShowSettings((value) => !value) }, 'Settings'),
     createElement('button', { onClick: () => { void action(sessionId, { action: 'stop' }) } }, 'Stop'),
     pending[0] !== undefined ? createElement('button', {
       onClick: () => { void action(sessionId, { action: 'answer', question: pending[0]!.id, selected: [], custom: 'Continue.' }) },
@@ -65,6 +67,10 @@ function OrbitPanel({ sessionId }: { sessionId: string }): unknown {
     createElement('div', { style: { opacity: 0.65 } },
       config === undefined ? 'config: unavailable' : `models ${config.allowedModels.join(', ') || '(pool)'} · checker ${config.checkerProvider || '(default)'}/${config.checkerModel || '(default)'} · JEV ${config.jev ? 'on' : 'off'}`),
     createElement('div', { style: { opacity: 0.65 } }, `events: ${events}`),
+    showSettings && config !== undefined
+      ? createElement('div', { style: { opacity: 0.8, whiteSpace: 'pre-wrap' } },
+          `allowed: ${config.allowedModels.join(', ') || '(config pool)'}\nchecker: ${config.checkerProvider || '(default)'}/${config.checkerModel || '(default)'}\nJEV: ${config.jev ? 'on' : 'off'}\ncandidates: ${(config.candidates ?? []).join(', ') || '(none)'}`)
+      : null,
   )
 }
 

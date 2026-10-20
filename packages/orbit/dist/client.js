@@ -32,6 +32,7 @@ window.__ModuleLoader__.load({
 		function OrbitPanel({ sessionId }) {
 			const [data, setData] = (0, react.useState)(void 0);
 			const [instruction, setInstruction] = (0, react.useState)("");
+			const [showSettings, setShowSettings] = (0, react.useState)(false);
 			(0, react.useEffect)(() => {
 				let alive = true;
 				const load = () => {
@@ -84,7 +85,7 @@ window.__ModuleLoader__.load({
 					action: "prompt",
 					message: "If the latest independent check says complete, call the orbit tool with action=complete now."
 				});
-			} }, "Complete"), (0, react.createElement)("button", { onClick: () => {
+			} }, "Complete"), (0, react.createElement)("button", { onClick: () => setShowSettings((value) => !value) }, "Settings"), (0, react.createElement)("button", { onClick: () => {
 				action(sessionId, { action: "stop" });
 			} }, "Stop"), pending[0] !== void 0 ? (0, react.createElement)("button", { onClick: () => {
 				action(sessionId, {
@@ -93,7 +94,10 @@ window.__ModuleLoader__.load({
 					selected: [],
 					custom: "Continue."
 				});
-			} }, "Answer") : null), (0, react.createElement)("div", { style: { opacity: .65 } }, config === void 0 ? "config: unavailable" : `models ${config.allowedModels.join(", ") || "(pool)"} · checker ${config.checkerProvider || "(default)"}/${config.checkerModel || "(default)"} · JEV ${config.jev ? "on" : "off"}`), (0, react.createElement)("div", { style: { opacity: .65 } }, `events: ${events}`));
+			} }, "Answer") : null), (0, react.createElement)("div", { style: { opacity: .65 } }, config === void 0 ? "config: unavailable" : `models ${config.allowedModels.join(", ") || "(pool)"} · checker ${config.checkerProvider || "(default)"}/${config.checkerModel || "(default)"} · JEV ${config.jev ? "on" : "off"}`), (0, react.createElement)("div", { style: { opacity: .65 } }, `events: ${events}`), showSettings && config !== void 0 ? (0, react.createElement)("div", { style: {
+				opacity: .8,
+				whiteSpace: "pre-wrap"
+			} }, `allowed: ${config.allowedModels.join(", ") || "(config pool)"}\nchecker: ${config.checkerProvider || "(default)"}/${config.checkerModel || "(default)"}\nJEV: ${config.jev ? "on" : "off"}\ncandidates: ${(config.candidates ?? []).join(", ") || "(none)"}`) : null);
 		}
 		function apply(ctx) {
 			ctx.slots.register({
