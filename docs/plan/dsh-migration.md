@@ -4,6 +4,8 @@
 
 > 2026-10-19 修订：已按[宿主接口与事件通路实施方案](host-port-and-events.md)修正事实与过时结论。本文保留为讨论记录；实施以实施方案为准，现行规则仍以所属仓的合同与 ADR 为准。
 
+> 2026-10-20 补充：本轮仅做迁移准备，未启动 P3。多 Agent 的版本化调研与整合流程集中在[专题](dsh-collaboration.md)，工作区位置见[交接](handoff.md#dsh-迁移工作区)。本文保留历史讨论，不将旧能力判断或 M1–M4 候选自动转成当前待办。
+
 状态：方向讨论稿，2026-10-18。**未确认实施**，不改变现行规则。任务、模型、检查、完成与停止语义仍以[任务运行合同](https://github.com/godokyang/orbit/blob/main/contracts/task-runtime.md)、[ADR-008](https://github.com/godokyang/orbit/blob/main/docs/adr/008-omp-native-collaboration-base.md)、[ADR-009](https://github.com/godokyang/orbit/blob/main/docs/adr/009-user-selected-model-pool.md) 为准；对外集成仍以[集成合同](https://github.com/godokyang/orbit/blob/main/contracts/integration.md)为准。
 
 关联：[ADR-010](https://github.com/godokyang/orbit/blob/main/docs/adr/010-integration-contract.md)（集成合同）、[ADR-011](https://github.com/godokyang/orbit/blob/main/docs/adr/011-agent-autonomy-and-runtime-responsibility.md)（Agent 判断与程序职责）、[ADR-013](https://github.com/godokyang/orbit/blob/main/docs/adr/013-final-review-scope-and-continuation.md)（终检范围与续查）、[交接](https://github.com/godokyang/orbit/blob/main/docs/plan/handoff.md)、[未完成事项](https://github.com/godokyang/orbit/blob/main/docs/plan/debt-ledger.md)。

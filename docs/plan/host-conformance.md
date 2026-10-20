@@ -22,6 +22,8 @@
 
 ## 3. 目录与运行
 
+以下目录与 Ruby 入口是原草案，保留供理解已有探针来源；不作为 [ADR-015](../adr/015-typescript-core-and-dsh-migration.md)的新核心目标。迁移后的主入口与报告实现采用 TypeScript/Node.js，具体文件和测试工具在实施设计时确定，不现在创建。新运行时必须通过自身的合同与行为检查，不能只跑旧 Ruby 测试；真实模型组的证据边界不变。
+
 ```text
 tests/host_conformance/
 ├── zero_model/     # 不需要模型调用
@@ -29,7 +31,8 @@ tests/host_conformance/
 └── report.rb       # 汇总为 JSON 与人类可读摘要
 ```
 
-- 入口：`tests/host_conformance_test.rb`，与现有 Ruby 测试一起跑。
+- 原草案入口（历史）：`tests/host_conformance_test.rb`，曾计划与现有 Ruby 测试一起跑；不是新核心的执行指令。
+- 迁移后入口：TypeScript/Node.js；具体目录、工具与报告接线待实施设计，不能以旧 Ruby 入口通过代替新运行时验证。
 - 零模型组默认运行；真实模型组要求 `ORBIT_REAL_ACCEPTANCE=1`，否则记为 `skipped`，不记为通过。
 - 每组探针独立，单项失败不阻断其余探针，但总体结论为失败。
 - 不使用重试掩盖失败；瞬时错误如实记 `error`。
@@ -95,4 +98,4 @@ tests/host_conformance/
 
 - 真实模型组的预算与安装版来源（依赖发布授权）。
 - Loom 侧探针是否并入本套件，还是保持跨仓引用。
-- 测试入口用 Ruby 还是 Node 为主；当前倾向 Ruby 入口、复用现有 mjs 探针。
+- 迁移后的测试主入口采用 TypeScript/Node.js，复用有效的既有探针；具体工具、目录与报告接线待实施设计，Ruby 不作为新核心的长期测试运行依赖。

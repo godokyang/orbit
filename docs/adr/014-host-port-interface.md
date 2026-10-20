@@ -4,6 +4,8 @@
 
 关联：[ADR-010](010-integration-contract.md)（集成合同）、[ADR-011](011-agent-autonomy-and-runtime-responsibility.md)（Agent 判断与程序职责）、[宿主接口与事件通路实施方案](../plan/host-port-and-events.md)（本仓 docs/plan）。
 
+后续关系：2026-10-20 用户通过 [ADR-015](015-typescript-core-and-dsh-migration.md)选择本次迁移重写 TypeScript Core。本文仍为未采纳提议，其 Ruby 文件布局与“只换适配层”理由保留为当时背景，不作为新核心实现方案；新决定也不自动采纳本文全部协议和能力分级。
+
 ## 背景
 
 Orbit 的核心是 Ruby，但宿主是 OMP。当前耦合集中在少数文件：
