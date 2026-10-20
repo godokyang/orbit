@@ -1,0 +1,34 @@
+- insert:
+    - id: orbit-probe
+      name: '__PROBE_DIR__/index.js'
+
+- insert:
+    - id: orbit-probe-ask-tool
+      name: '@deepseek-ai/dsh-tool-ask-user'
+
+- id: goal-round-driver
+  disabled: true
+- id: command-goal
+  disabled: true
+- id: tool-goal
+  disabled: true
+- id: session-log-deepseek
+  disabled: true
+
+# P6 only: needs `dsh plugin --profile orbit-probe add @deepseek-ai/dsh-subagent-dsh-sdk@<ver> @deepseek-ai/dsh-sdk-client@<ver>`
+- insert:
+    - id: subagent-dsh-sdk
+      name: '@deepseek-ai/dsh-subagent-dsh-sdk'
+      config:
+        dshBin: '__DSH_CLI_JS__'
+        profile: orbit-checker
+        dshHome: '__CHECKER_HOME__'
+        patches:
+          - '__CHECKER_HOME__/child.patch.yml'
+        provider: probe
+        model: probe-1
+        env:
+          ORBIT_PROBE: child
+          ORBIT_PROBE_OUT: '__DSH_HOME__/results/p6-child.out'
+          ORBIT_CHILD_MARKER: '1'
+          ELECTRON_RUN_AS_NODE: '1'

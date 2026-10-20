@@ -1,0 +1,34 @@
+# Orbit DSH host probe (T1)
+
+Loads the built `@orbit/dsh-host` plugin into an isolated DSH home and drives a
+real agent loop with a scripted fake model. This is a zero-model wiring test:
+it proves the plugin registers, the `orbit` tool reaches Core, a controlled
+subagent dispatch is registered before model work, and the stop fence refuses a
+later dispatch. It is not a real-model or full B1 acceptance.
+
+```sh
+pnpm --filter @orbit/dsh-host build
+DSH_HOME=/tmp/orbit-host-probe tests/host_conformance/orbit-host-probe/run-probe.sh
+```
+
+Output is JSON lines in `$DSH_HOME/results/orbit-host.out`. The script copies
+the bundle into the profile so `@deepseek-ai/*` imports resolve inside DSH, as
+the host probe notes require. Nothing touches the user's `~/.dsh`.
+
+Not part of `npm test`: it needs the desktop DSH installation and real child
+processes.
+
+The probe also spawns the built `@orbit/cli` (`ORBIT_CLI`) as a real child
+process to run `status`, `events` and `stop` against the project socket, then
+asserts the task reached `paused` with `confirmed=true` and a later dispatch is
+still fenced.
+
+The checker leg needs the SDK backend installed in the probe profile:
+
+```sh
+DSH_HOME=/tmp/orbit-host-probe dsh plugin --profile orbit-t1 add \
+  @deepseek-ai/dsh-subagent-dsh-sdk@0.2.1-rc.2 @deepseek-ai/dsh-sdk-client@0.2.1-rc.2
+```
+
+The script creates an isolated `-checker` home whose fake model returns a valid
+check result, so it verifies the real subprocess seam without a real model.
