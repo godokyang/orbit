@@ -12,7 +12,14 @@ export const CAPABILITIES = {
   status_by_external_ref: { since: '2.0.0', max_refs: 8, max_length: 256 },
   status_by_session: { since: '2.0.0' },
   check_coverage: { since: '2.0.0' },
-  model_authorization: { since: '2.0.0' },
+  model_authorization: {
+    since: '2.0.0',
+    allowed_models: {
+      in_bootstrap: true,
+      max_models: 64,
+      environment_variable: 'ORBIT_ALLOWED_MODELS',
+    },
+  },
   events: { since: '2.0.0', cursor: 'opaque' },
   sessions: { since: '2.0.0', visible_text: true, user_messages: true, activities: true, questions: true, deliveries: true },
   questions: { since: '2.0.0' },
