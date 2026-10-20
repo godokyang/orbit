@@ -6,8 +6,8 @@ window.__ModuleLoader__.load({
 		Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
 		let react = require("react");
 		//#region src/client/index.ts
-		const inject = ["slots"];
-		async function call(sessionId, init) {
+		const inject = ["slots", "uiConversation"];
+		async function request(sessionId, init) {
 			try {
 				const response = await fetch(`/orbit/api?session=${encodeURIComponent(sessionId)}`, init);
 				if (!response.ok) return void 0;
@@ -17,7 +17,7 @@ window.__ModuleLoader__.load({
 			}
 		}
 		function action(sessionId, body) {
-			return call(sessionId, {
+			return request(sessionId, {
 				method: "POST",
 				headers: {
 					"content-type": "application/json",
@@ -34,7 +34,7 @@ window.__ModuleLoader__.load({
 			(0, react.useEffect)(() => {
 				let alive = true;
 				const load = () => {
-					call(sessionId).then((next) => {
+					request(sessionId).then((next) => {
 						if (alive && next !== void 0) setData(next);
 					});
 				};
@@ -48,17 +48,16 @@ window.__ModuleLoader__.load({
 			if (data === void 0) return (0, react.createElement)("div", { style: {
 				padding: "4px 12px",
 				fontSize: 12,
-				opacity: .6
+				opacity: .65
 			} }, "Orbit");
 			const pending = data.pendingQuestions ?? [];
-			const status = `${data.status ?? "unknown"}${data.stopConfirmation?.confirmed ? " (stopped)" : ""}`;
 			return (0, react.createElement)("div", { style: {
 				display: "flex",
 				gap: 8,
 				alignItems: "center",
 				padding: "4px 12px",
 				fontSize: 12
-			} }, (0, react.createElement)("strong", null, "Orbit"), (0, react.createElement)("span", null, `${data.taskId ?? ""} · ${status} · checks ${data.checksInFlight ?? "none"} · findings ${data.openFindings?.length ?? 0} · questions ${pending.length}`), (0, react.createElement)("button", { onClick: () => {
+			} }, (0, react.createElement)("strong", null, "Orbit"), (0, react.createElement)("span", null, `${data.taskId ?? ""} · ${data.status ?? "unknown"}${data.stopConfirmation?.confirmed ? " stopped" : ""} · checks ${data.checksInFlight ?? "none"} · findings ${data.openFindings?.length ?? 0} · questions ${pending.length}`), (0, react.createElement)("button", { onClick: () => {
 				action(sessionId, { action: "stop" });
 			} }, "Stop"), pending[0] !== void 0 ? (0, react.createElement)("button", { onClick: () => {
 				action(sessionId, {
@@ -72,11 +71,10 @@ window.__ModuleLoader__.load({
 		function apply(ctx) {
 			ctx.slots.register({
 				name: "conversation.input.dock",
-				key: "orbit"
+				id: "orbit-panel"
 			}, OrbitPanel);
 		}
 		//#endregion
-		exports.OrbitPanel = OrbitPanel;
 		exports.apply = apply;
 		exports.inject = inject;
 		return module.exports;

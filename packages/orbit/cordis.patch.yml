@@ -51,3 +51,6 @@
         approval: never
         name: Orbit controlled
         description: Orbit supervised sessions run without approval prompts in the workspace sandbox.
+- insert:
+    - id: orbit-ui
+      name: '@zeen/orbit'

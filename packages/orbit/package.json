@@ -12,8 +12,8 @@
   },
   "exports": {
     ".": {
-      "types": "./dist/host.d.mts",
-      "import": "./dist/host.mjs"
+      "types": "./dist/ui.d.mts",
+      "import": "./dist/ui.mjs"
     },
     "./host": {
       "types": "./dist/host.d.mts",
