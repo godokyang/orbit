@@ -433,3 +433,10 @@ B 阶段开工前只需补一份短设计：JEV 观察输入在 DSH 事件下的
 - 从 UI 发起真实任务后，面板显示 `task-mvgvqp3i... · running · checks none · findings 0 · questions 0`，并出现 Stop。
 - 点击 Stop 后约 5 秒，面板显示 `paused stopped`，说明 `/orbit/api` 与停止确认链路真实生效。
 - 未完成：事件行、设置卡、发起任务/申请检查/确认完成按钮；客户端构建仍未仓库内可复现。
+
+## 实施进展（2026-10-21，React 面板 Check 真实通过）
+
+- 在配置了 dsh-sdk 检查者的隔离 profile 中，从 React 面板新建任务并点击 Check。
+- 面板事件行出现 `check/requested, check/completed`，任务保持 running，open findings 变为 1，说明检查者真实运行且结果未被客户端伪造。
+- 此前 Start 验证：面板新任务从 paused 切换到 running；Stop 验证：变为 paused stopped。
+- 待办：Complete（需检查 ready）、对话流事件行、可复现客户端构建。
