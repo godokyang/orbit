@@ -75,16 +75,20 @@ describe('checker output', () => {
     expect(() => extractCheckerJson('no json here')).toThrow(/no JSON object/)
   })
 
-  it('runs the dsh-sdk activation and parses its final text', async () => {
+  it('runs the dsh-sdk activation, exposes it and disposes it', async () => {
     const subagents = fakeSubagents({ output: [{ type: 'text', text: '{"verdict":"continue","reason":"more"}' }] })
+    const seen: unknown[] = []
     const result = await runChecker({
       subagents,
       parent: { id: 'root-1' } as Agent,
       prompt: 'check',
       cwd: '/repo',
       signal: new AbortController().signal,
+      onActivation: (activation) => seen.push(activation),
     })
     expect(result).toEqual({ verdict: 'continue', reason: 'more' })
+    expect(seen).toHaveLength(1)
+    expect((seen[0] as { dispose: { mock: { calls: unknown[] } } }).dispose.mock.calls).toHaveLength(1)
   })
 
   it('fails closed when the dsh-sdk provider is absent', async () => {

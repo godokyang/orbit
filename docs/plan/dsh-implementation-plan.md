@@ -282,3 +282,10 @@ B 阶段开工前只需补一份短设计：JEV 观察输入在 DSH 事件下的
 - 冻结验收 #2（真实停止）：Root 执行 `sleep 120` 时通过 CLI socket 停止，任务约 1 秒内 `paused`、四项证据全 true、无残留 sleep、会话保留。
 - 细节与边界见[真实模型验收记录](../reference/ts-dsh-real-acceptance-20261020.md)。仍未覆盖成员执行中停止、检查者进程在途、宿主崩溃后的 unconfirmed 重试。
 - 下一步：Loom C 阶段（合同 2.0 与节点迁移）与 D 阶段安装/退场。
+
+## 实施进展（2026-10-20，停止时收束在途检查者）
+
+- `runChecker` 暴露已发布的 `SubagentActivation`；宿主按检查号记录在途检查者。停止收束时先 dispose 所有在途检查者，若对应检查仍在 `inFlight` 则记 `check/failed {kind: stopped}`，再重读 `checks_settled`，避免把“检查者仍在跑”误记为已停止。
+- 检查者结果仍走原有 record/fail 路径；dispose 后的拒绝被限制在本次检查，不污染后续任务。
+- 验证：checker 单测覆盖 activation 暴露与 dispose；DSH 探针完成链路无回归；全套 101 个测试通过。
+- 未覆盖：真实检查者执行中停止的端到端证据（需要慢检查或真实长检查）；成员执行中停止仍只有取消+settle，未验证子进程残留。

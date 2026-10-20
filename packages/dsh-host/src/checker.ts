@@ -1,6 +1,6 @@
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
-import type { SubagentRuntime } from '@deepseek-ai/dsh-subagent'
+import type { SubagentActivation, SubagentRuntime } from '@deepseek-ai/dsh-subagent'
 import type { RequirementVersion, TaskState } from '@orbit/core'
 
 export interface CheckerPromptInput {
@@ -110,6 +110,8 @@ export interface CheckerRunInput {
   cwd: string
   signal: AbortSignal
   model?: { provider: string; model: string }
+  /** Called with the published activation so a stop can dispose it. */
+  onActivation?: (activation: SubagentActivation) => void
 }
 
 /** Run the checker through the independent dsh-sdk backend and return raw JSON. */
@@ -132,6 +134,7 @@ export async function runChecker(input: CheckerRunInput): Promise<unknown> {
     delivery: 'caller',
   })
   try {
+    input.onActivation?.(activation)
     const result = await activation.result
     if (result.structured !== undefined) return result.structured
     if (result.stopReason !== 'completed') {

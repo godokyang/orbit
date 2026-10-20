@@ -290,6 +290,7 @@ export default class OrbitHost extends Service {
   private readonly jevTimers = new Map<string, NodeJS.Timeout>()
   private readonly lastSignalKey = new Map<string, string>()
   private readonly allowedModels: Set<string>
+  private readonly activeCheckers = new Map<number, import('@deepseek-ai/dsh-subagent').SubagentActivation>()
   private readonly memberCandidates: Array<{ label?: string; provider: string; model: string }>
   private readonly selectionRelease: SelectionRelease | undefined
   private readonly modelBindings = new Map<
@@ -477,6 +478,9 @@ export default class OrbitHost extends Service {
                 cwd: checkerCwd,
                 signal: exec.signal,
                 ...(checkerModel === undefined ? {} : { model: checkerModel }),
+                onActivation: (activation) => host.activeCheckers.set(check.number, activation),
+              }).finally(() => {
+                host.activeCheckers.delete(check.number)
               })
               const recorded = await service.recordCheckResult(check.number, raw)
               await host.archiveSession(service, state.root.sessionId)
@@ -1092,6 +1096,9 @@ export default class OrbitHost extends Service {
         cwd: state.workspace.artifactRoot,
         signal: AbortSignal.timeout(10 * 60_000),
         ...(checkerModel === undefined ? {} : { model: checkerModel }),
+        onActivation: (activation) => this.activeCheckers.set(check.number, activation),
+      }).finally(() => {
+        this.activeCheckers.delete(check.number)
       })
       const recorded = await service.recordCheckResult(check.number, raw)
       await service.store.appendEvent('jev/process-check', {
@@ -1144,6 +1151,15 @@ export default class OrbitHost extends Service {
       } else {
         root.cancel({ kind: 'user' }, { keepInbox: true })
         evidence.root_idle = await bounded(root.whenIdle(), STOP_TIMEOUT_MS)
+      }
+
+      for (const [number, activation] of this.activeCheckers) {
+        await activation.dispose().catch(() => undefined)
+        this.activeCheckers.delete(number)
+        const current = await service.state()
+        if (current.checks.inFlight === number) {
+          await service.failCheck(number, { kind: 'stopped', message: 'checker disposed by task stop' }).catch(() => undefined)
+        }
       }
 
       const members = await service.store.members()
