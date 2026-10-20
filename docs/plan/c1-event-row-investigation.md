@@ -1,6 +1,6 @@
 # C1 对话事件行调查
 
-> 更新：DSH **支持**自定义 conversation 行。官方文档 `docs/subsystems/conversation.md` 与 `docs/cookbook/extension-cookbook.md` 给出了 `ConversationNodeDefinition` + `conversation.chat.node` 的完整示例与 `exclusive` 语义；问题在本项目集成，不是 DSH 缺能力。
+> 更新：DSH **支持**自定义 conversation 行，且已实现验证（`Orbit · start/declare/check/complete` 行在真实会话出现）。官方文档 `docs/subsystems/conversation.md` 与 `docs/cookbook/extension-cookbook.md` 给出了 `ConversationNodeDefinition` + `conversation.chat.node` 的完整示例与 `exclusive` 语义；问题在本项目集成，不是 DSH 缺能力。
 
 目标：在对话流里显示独立的 Orbit 任务事件行（started/checked/stopped），而不只是工具卡片。
 
@@ -26,6 +26,10 @@
 
 - `docs/subsystems/conversation.md`：ConversationNodeDefinition 示例、`context.start?.event.seq` 的 anchorSeq、`exclusive: true` 抢占通用 target fallback。
 - `docs/cookbook/extension-cookbook.md`：业务行注册 `ConversationNodeDefinition` + keyed chat renderer。
+
+## 已验证
+
+- 2026-10-21：按官方示例修正 `anchorSeq = context.start?.event?.seq`、注册 `conversation.chat.node` key `orbit-event`，匹配 `tool/call` name=`orbit` 并 `exclusive: true`；真实 DSH Web 会话出现独立行 `Orbit · start/declare/check/complete`，插件无失败。
 
 ## 待决策
 

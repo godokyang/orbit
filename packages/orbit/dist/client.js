@@ -27,6 +27,32 @@ function action(sessionId, body) {
         body: JSON.stringify({ session: sessionId, ...body }),
     });
 }
+const orbitEventDefinition = {
+    kind: 'orbit-event',
+    target: 'chat',
+    match: (event) => event.type === 'tool/call' && event.data?.name === 'orbit'
+        ? { id: String(event.data.callId), role: 'start', exclusive: true }
+        : null,
+    start: (_context, match) => {
+        let action = 'status';
+        try {
+            action = String(JSON.parse(String(match.event.data.arguments ?? '{}')).action ?? 'status');
+        }
+        catch { }
+        return { action };
+    },
+    update: (context) => context.state,
+    buildViewNode: (context) => {
+        if (context.state === undefined)
+            return null;
+        const anchor = context.start?.event?.seq ?? context.matches?.[0]?.event?.seq ?? 0;
+        const location = context.start?.location ?? context.matches?.[0]?.location ?? { kind: 'unresolved' };
+        return { key: context.key, kind: 'orbit-event', id: context.id, target: 'chat', anchorSeq: anchor, location, visibility: 'visible', data: context.state };
+    },
+};
+function OrbitEventView({ node }) {
+    return createElement('div', { style: { fontSize: 12, opacity: 0.8, padding: '2px 0' } }, `Orbit · ${String(node.data?.action ?? 'status')}`);
+}
 function OrbitPanel({ sessionId }) {
     const [data, setData] = useState(undefined);
     const [instruction, setInstruction] = useState('');
@@ -69,6 +95,8 @@ function OrbitPanel({ sessionId }) {
         : null);
 }
 function apply(ctx) {
+    ctx.uiConversation.events.register(orbitEventDefinition);
+    ctx.slots.inject('conversation.chat.node', () => ctx.slots.register({ name: 'conversation.chat.node', key: 'orbit-event' }, OrbitEventView));
     ctx.slots.register({ name: 'conversation.input.dock', id: 'orbit-panel' }, OrbitPanel);
 }
 
