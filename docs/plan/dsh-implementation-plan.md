@@ -419,3 +419,10 @@ B 阶段开工前只需补一份短设计：JEV 观察输入在 DSH 事件下的
 - `orbit doctor --t0`：在 profile 内运行单包自带的 T0，断言受控行、sandbox 与 approval；T0 改为只内联 `profile` 子路径，不再依赖 `@deepseek-ai/cordis` 等 peer。真实 `/tmp/orbit-headless` node profile 返回 `t0 ok (191 rows)`。
 - Loom discovery 的暂停重连不再创建 OMP 会话，只按 2.0 status 恢复绑定；移除 discovery 中未用的 OMP 导入。
 - 验证：Orbit 126、Loom 91 个测试通过。
+
+## 实施进展（2026-10-20，安装命令与运行时去 OMP）
+
+- 新增 `orbit install --home DIR --profile P [--template web|sdk] [--mode app|node|checker]`：创建 profile、复制单包、启用 bundle、应用 overlay，并默认运行自带 T0；`--skip-t0` 供离线测试。
+- 真实安装到 `/tmp/orbit-install`（node overlay，web 模板）返回 `t0: controlled profile OK (191 rows)`。
+- Loom 运行时不再 import `orbit/session.py` 或 `OrbitSession`；`SessionTimeout` 抽到 `orbit/errors.py`，`session.py`/`probe.py` 仅为未删除的旧文件。
+- 验证：Orbit 127、Loom 92 个测试通过。
