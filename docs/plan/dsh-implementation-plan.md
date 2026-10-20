@@ -351,3 +351,10 @@ B 阶段开工前只需补一份短设计：JEV 观察输入在 DSH 事件下的
 - 停止收束会取消 pending 问题并拒绝等待中的请求；答复晚到不能绕过停止围栏。
 - 验证：Core 提问生命周期 3 个单测、CLI questions/answer 2 个单测；全套 115 个测试通过。
 - 边界：答复者 listener 尚未端到端验证（探针中的假成员在提问前已退出，无法作为 live asker）；CLI answer 已由 fake socket 覆盖。
+
+## 实施进展（2026-10-20，成员提问通道的真实限制）
+
+- 真实成员调用 `ask_user_question` 时，DSH 在进入 `user-questions/request` 前即拒绝（“human interaction is unavailable while the calling agent is owned by another live agent”），Orbit listener 收不到成员请求。
+- 因此当前 O3 listener 只对 Root 请求有效；成员提问不能复用 `ask_user_question`。需在“成员专用提问工具”与“降级为 send_message 到 Root”之间做产品选择。
+- 本轮未改变产品语义，只记录事实；Core/CLI 的 questions 存储与答复能力仍保留，可用于 Root 提问或未来成员工具。
+- 全套测试仍 115 个通过；未新增未验证的自动通道。

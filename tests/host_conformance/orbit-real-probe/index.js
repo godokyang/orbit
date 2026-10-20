@@ -5,7 +5,8 @@ import { appendFileSync, mkdirSync, readdirSync, readFileSync, existsSync } from
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { connect } from 'node:net'
-import { execSync } from 'node:child_process'
+import { execFile, execSync } from 'node:child_process'
+import { promisify } from 'node:util'
 
 export const name = 'orbit-real-driver'
 export const inject = ['agents', 'sessions', 'agentPresets']
@@ -18,6 +19,16 @@ mkdirSync(join(HOME, 'results'), { recursive: true })
 function log(record) {
   appendFileSync(OUT, JSON.stringify({ t: new Date().toISOString(), ...record }) + '\n')
 }
+const execFileAsync = promisify(execFile)
+async function cli(args) {
+  const { stdout } = await execFileAsync(process.execPath, [process.env.ORBIT_CLI, ...args], {
+    cwd: WORK,
+    encoding: 'utf8',
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+  })
+  return stdout
+}
+
 function msg(text) {
   return { id: randomUUID(), role: 'user', content: [{ type: 'text', text }], source: { kind: 'user' } }
 }
@@ -245,6 +256,43 @@ Do not stop the task yourself and do not ask questions.`))
   await presetScope?.dispose?.().catch?.(() => undefined)
 }
 
+async function runQuestion(ctx) {
+  mkdirSync(WORK, { recursive: true })
+  mkdirSync(join(HOME, 'results'), { recursive: true })
+  const handle = await createRoot(ctx)
+  log({ step: 'root-created', sessionId: handle.agent.id, scenario: 'question' })
+  handle.agent.followup(msg(`You are running a controlled Orbit question-relay acceptance. Do exactly this and do not ask questions:
+1. Call orbit with {"action":"start","instruction":"Question relay acceptance."}
+2. Call orbit with {"action":"declare","goal":"relay one member question","acceptance":"the member receives the answer"}.
+3. From the declare result take the unit id. Call the subagent tool with description "question member" and a prompt that starts with exactly: orbit-unit: <unit id>
+   In that member prompt, instruct it to call ask_user_question with one question ("Which option?") offering alpha and beta, then report which option it received.
+4. Wait for the member and report its answer. Do not ask questions and do not stop the task.`))
+  const asked = await waitForEvent('question/asked', 90000)
+  const task = latestTask()
+  let questionId
+  if (task !== undefined) {
+    try {
+      const questions = JSON.parse(readFileSync(join(task.dir, 'questions.json'), 'utf8')).questions
+      questionId = questions.find((question) => question.status === 'pending')?.id
+    } catch {}
+  }
+  log({ step: 'question-asked', found: asked !== undefined, questionId })
+  if (questionId !== undefined) {
+    await cli(['answer', '--json', '--project', WORK, '--question', questionId, '--selected', 'beta']).catch((error) => log({ step: 'answer-error', message: String(error) }))
+  }
+  const answered = await waitForEvent('question/answered', 60000)
+  log({ step: 'question-answered', found: answered !== undefined })
+  await cli(['stop', '--json', '--project', WORK]).catch(() => undefined)
+  let state = latestTask()
+  for (let attempt = 0; attempt < 60 && state?.state?.status === 'running'; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    state = latestTask()
+  }
+  log({ step: 'question-result', status: state?.state?.status, confirmed: state?.state?.stop?.confirmation?.confirmed })
+  await handle.dispose().catch(() => undefined)
+  await presetScope?.dispose?.().catch?.(() => undefined)
+}
+
 async function run(ctx) {
   mkdirSync(WORK, { recursive: true })
   mkdirSync(join(HOME, 'results'), { recursive: true })
@@ -258,6 +306,10 @@ async function run(ctx) {
   }
   if (SCENARIO === 'checker-stop') {
     await runCheckerStop(ctx)
+    return
+  }
+  if (SCENARIO === 'question') {
+    await runQuestion(ctx)
     return
   }
   const handle = await createRoot(ctx)

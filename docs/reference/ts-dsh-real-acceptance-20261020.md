@@ -81,3 +81,12 @@
 - 说明：真实检查者进程启动/发布 activation 的窗口长于本次停止时机，宿主拿不到可 dispose 的 activation，因此按合同保持未确认。
 
 结论：检查者启动期间停止会**失败关闭**为 `stop_unconfirmed`，这是预期语义；本次未取得“已发布 activation 被 dispose 后转 paused”的真实证据。后续可用慢速假检查者或更长时序补测。
+
+## 追问：成员提问（O3）受 DSH 限制
+
+尝试让真实成员调用 `ask_user_question` 提问并由 CLI 答复。实际结果：
+
+- 成员会话确实调用了 `ask_user_question`，但 DSH 在进入 Orbit 的 `user-questions/request` 答复者之前就拒绝：
+  `human interaction is unavailable while the calling agent is owned by another live agent`。
+- 因此 Orbit 的提问 listener 只可能收到 Root 的请求，收不到成员请求；本轮没有产生 `question/asked` 事件。
+- 结论：在 DSH 现有 ask 工具语义下，O3 不能直接复用 `ask_user_question` 作为成员提问通道。需要选择：为成员提供 Orbit 自己的提问工具并路由到 Root/用户，或把成员提问降级为 O1 的 `send_message` 到 Root。该选择涉及产品语义，需用户确认。
