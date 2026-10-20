@@ -7,6 +7,7 @@ import { exportTask } from './export.js'
 import { localSessions } from './sessions.js'
 import { CAPABILITIES, INTEGRATION_CONTRACT, buildLaunchSpec } from './capabilities.js'
 import { doctor } from './doctor.js'
+import { installProfile, type OrbitMode } from './install.js'
 
 export interface CliIo {
   out: (text: string) => void
@@ -25,6 +26,7 @@ Usage:
   orbit prompt [TASK] --message TEXT [--json] [--project DIR]
   orbit abort [TASK] [--json] [--project DIR]
   orbit doctor [--json] [--home DIR] [--profile P] [--t0]
+  orbit install --home DIR --profile P [--template web|sdk] [--mode app|node|checker] [--skip-t0] [--json]
   orbit export [TASK] --output FILE [--json] [--project DIR]
   orbit version [--json]
   orbit capabilities [--json]
@@ -35,7 +37,7 @@ back to the durable task record when no host is running. stop requires the
 live host. export snapshots the task record into a self-contained JSON file.`
 
 interface Parsed {
-  command: 'status' | 'events' | 'stop' | 'export' | 'sessions' | 'capabilities' | 'launch' | 'questions' | 'answer' | 'prompt' | 'abort' | 'doctor' | 'version'
+  command: 'status' | 'events' | 'stop' | 'export' | 'sessions' | 'capabilities' | 'launch' | 'questions' | 'answer' | 'prompt' | 'abort' | 'doctor' | 'version' | 'install'
   question?: string
   selected?: string[]
   custom?: string
@@ -48,6 +50,10 @@ interface Parsed {
   resultFile?: string
   dshBin?: string
   t0?: boolean
+  template?: string
+  mode?: OrbitMode
+  skipT0?: boolean
+  packageRoot?: string
   message?: string
   task?: string
   project: string
@@ -61,7 +67,7 @@ function parse(argv: string[]): Parsed | 'help' {
   if (argv.length === 0) throw new UsageError('missing command')
   const command = argv[0]
   if (command === '--help' || command === '-h' || command === 'help') return 'help'
-  const commands = ['status', 'events', 'stop', 'export', 'sessions', 'capabilities', 'launch', 'questions', 'answer', 'prompt', 'abort', 'doctor', 'version'] as const
+  const commands = ['status', 'events', 'stop', 'export', 'sessions', 'capabilities', 'launch', 'questions', 'answer', 'prompt', 'abort', 'doctor', 'version', 'install'] as const
   if (command === undefined || !(commands as readonly string[]).includes(command)) {
     throw new UsageError(`unknown command: ${String(command)}`)
   }
@@ -81,6 +87,10 @@ function parse(argv: string[]): Parsed | 'help' {
   let resultFile: string | undefined
   let dshBin: string | undefined
   let t0 = false
+  let template: string | undefined
+  let mode: OrbitMode | undefined
+  let skipT0 = false
+  let packageRoot: string | undefined
   let message: string | undefined
   for (let index = 1; index < argv.length; index += 1) {
     const arg = argv[index]
@@ -93,6 +103,16 @@ function parse(argv: string[]): Parsed | 'help' {
       index += 1
     } else if (arg === '--message') {
       message = argv[++index]
+    } else if (arg === '--template') {
+      template = argv[++index]
+    } else if (arg === '--mode') {
+      const value = argv[++index]
+      if (value !== 'app' && value !== 'node' && value !== 'checker') throw new UsageError('--mode must be app, node or checker')
+      mode = value
+    } else if (arg === '--package-root') {
+      packageRoot = argv[++index]
+    } else if (arg === '--skip-t0') {
+      skipT0 = true
     } else if (arg === '--t0') {
       t0 = true
     } else if (arg === '--dsh') {
@@ -153,6 +173,10 @@ function parse(argv: string[]): Parsed | 'help' {
     ...(resultFile === undefined ? {} : { resultFile }),
     ...(dshBin === undefined ? {} : { dshBin }),
     ...(t0 ? { t0 } : {}),
+    ...(template === undefined ? {} : { template }),
+    ...(mode === undefined ? {} : { mode }),
+    ...(skipT0 ? { skipT0 } : {}),
+    ...(packageRoot === undefined ? {} : { packageRoot }),
     ...(message === undefined ? {} : { message }),
   }
 }
@@ -307,6 +331,22 @@ export async function runCli(argv: string[], io: Partial<CliIo> = {}): Promise<n
       if (!response.ok) throw new Error(response.error.message)
       const result = response.result as { question: { id: string; status: string } }
       out(parsed.json ? JSON.stringify(result, null, 2) : `answered ${result.question.id} (${result.question.status})`)
+      return 0
+    }
+
+    if (parsed.command === 'install') {
+      const home = parsed.home ?? process.env.DSH_HOME
+      if (home === undefined) throw new UsageError('install requires --home (or DSH_HOME); refusing an unstated home')
+      if (parsed.profile === undefined) throw new UsageError('install requires --profile')
+      const report = installProfile({
+        home,
+        profile: parsed.profile,
+        template: parsed.template ?? 'web',
+        mode: parsed.mode ?? 'app',
+        ...(parsed.skipT0 === true ? { skipT0: true } : {}),
+        ...(parsed.packageRoot === undefined ? {} : { packageRoot: parsed.packageRoot }),
+      })
+      out(parsed.json ? JSON.stringify(report, null, 2) : `installed @zeen/orbit into ${report.profile} (${report.overlay})`)
       return 0
     }
 

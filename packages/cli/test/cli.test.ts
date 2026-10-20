@@ -1,4 +1,5 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { createServer, type Server } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -434,5 +435,24 @@ describe('orbit-ts absolute task directory', () => {
     const sink = capture()
     expect(await runCli(['status', join(dir, '.orbit', 'tasks', taskId), '--json', '--project', dir], sink.io)).toBe(0)
     expect(JSON.parse(sink.out())).toMatchObject({ taskId })
+  })
+})
+
+describe('orbit-ts install', () => {
+  it('copies the package, enables the bundle and applies the mode overlay', async () => {
+    const home = await project()
+    const profile = join(home, 'profiles', 'orbit-node')
+    await mkdir(profile, { recursive: true })
+    await writeFile(join(profile, 'package.json'), JSON.stringify({ dsh: { profile: { bundles: [] } } }))
+    const sink = capture()
+    expect(
+      await runCli(['install', '--home', home, '--profile', 'orbit-node', '--mode', 'node', '--skip-t0', '--json', '--package-root', join(process.cwd(), 'packages', 'orbit')], sink.io),
+    ).toBe(0)
+    const report = JSON.parse(sink.out()) as { ok: boolean; overlay: string }
+    expect(report).toMatchObject({ ok: true, overlay: 'orbit-node.patch.yml' })
+    const manifest = JSON.parse(await readFile(join(profile, 'package.json'), 'utf8')) as { dsh: { profile: { bundles: string[] } } }
+    expect(manifest.dsh.profile.bundles).toContain('@zeen/orbit')
+    expect(existsSync(join(profile, 'node_modules', '@zeen', 'orbit', 'dist', 'host.mjs'))).toBe(true)
+    expect(existsSync(join(profile, 'cordis.patch.yml'))).toBe(true)
   })
 })
