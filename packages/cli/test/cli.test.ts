@@ -254,3 +254,28 @@ describe('orbit-ts capabilities and launch', () => {
     })
   })
 })
+
+describe('orbit-ts questions and answer', () => {
+  it('lists pending questions from the durable record offline', async () => {
+    const dir = await project()
+    const taskId = await startTask(dir)
+    const { TaskService } = await import('@orbit/core')
+    const service = await TaskService.open(join(dir, '.orbit', 'tasks', taskId))
+    await service.askQuestion({ memberId: 'member-1', externalId: 'q1', question: 'Which?', options: [{ label: 'a' }] })
+
+    const sink = capture()
+    expect(await runCli(['questions', '--json', '--project', dir], sink.io)).toBe(0)
+    const payload = JSON.parse(sink.out()) as { questions: Array<{ status: string; question: string }> }
+    expect(payload.questions[0]).toMatchObject({ status: 'pending', question: 'Which?' })
+  })
+
+  it('answers through the live host socket', async () => {
+    const dir = await project()
+    await fakeControl(dir, () => ({ question: { id: 'question-1', status: 'answered' } }))
+    const sink = capture()
+    expect(
+      await runCli(['answer', '--project', dir, '--question', 'question-1', '--selected', 'a,b', '--custom', 'other'], sink.io),
+    ).toBe(0)
+    expect(sink.out()).toContain('answered question-1')
+  })
+})

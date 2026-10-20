@@ -343,3 +343,11 @@ B 阶段开工前只需补一份短设计：JEV 观察输入在 DSH 事件下的
 - 合同仍是草案，命令以 `draft` 标记，避免集成方把草案当冻结合同；字段按检查点 4 的反馈再调整。
 - 验证：CLI 单测 2 个（能力清单、launch 规格）；全套 110 个测试通过。
 - 仍未做：权威合同落地、C1 UI、Loom 节点消费、D 阶段。
+
+## 实施进展（2026-10-20，成员提问与答复，O3 第一版）
+
+- 新增 `questions.json` 与 Core `askQuestion`/`answerQuestion`/`cancelPendingQuestions`：成员提问落盘为 pending，按成员+外部问题 id 去重；答复校验只能是已提供的选项，记录 selected/custom 与时间；停止时批量取消。
+- 宿主注册 `user-questions/request` 答复者：只拦截受控任务中已登记成员的提问，记录后等待 Root/用户答复；`orbit` 工具新增 `answer` 动作，CLI 新增 `orbit questions`（有活宿主走 socket，否则读归档记录）与 `orbit answer`（需要活宿主）。
+- 停止收束会取消 pending 问题并拒绝等待中的请求；答复晚到不能绕过停止围栏。
+- 验证：Core 提问生命周期 3 个单测、CLI questions/answer 2 个单测；全套 115 个测试通过。
+- 边界：答复者 listener 尚未端到端验证（探针中的假成员在提问前已退出，无法作为 live asker）；CLI answer 已由 fake socket 覆盖。

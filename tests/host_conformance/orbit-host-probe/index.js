@@ -10,7 +10,7 @@ import { join } from 'node:path'
 import { LlmAdapter } from '@deepseek-ai/dsh-llm'
 
 export const name = 'orbit-host-probe'
-export const inject = ['llm', 'agents', 'sessions', 'tools', 'sessionQuery', 'sessionProjections']
+export const inject = ['llm', 'agents', 'sessions', 'tools', 'sessionQuery', 'sessionProjections', 'userQuestions']
 
 const HOME = process.env.DSH_HOME
 const WORK = join(HOME, 'project')

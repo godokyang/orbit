@@ -91,6 +91,13 @@ export async function localStatus(projectRoot: string, id?: string): Promise<Sta
   )
 }
 
+export async function localQuestions(projectRoot: string, id?: string): Promise<{ taskId: string; questions: unknown[] }> {
+  const service = await openTask(projectRoot, id)
+  const state = await service.state()
+  const file = await service.store.questions()
+  return { taskId: state.id, questions: file.questions }
+}
+
 export async function localEvents(projectRoot: string, id?: string): Promise<{ taskId: string; events: TaskEvent[] }> {
   const service = await openTask(projectRoot, id)
   return { taskId: (await service.state()).id, events: await service.store.events() }

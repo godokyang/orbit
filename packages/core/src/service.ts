@@ -14,6 +14,7 @@ import type {
   CoverageFile,
   DisputeRecord,
   DisputesFile,
+  QuestionRecord,
   CoverageRecord,
   DispatchAttempt,
   FindingRecord,
@@ -183,6 +184,7 @@ export class TaskService {
         workUnits: { schemaVersion: 1, taskId: id, units: [] },
         findings: { schemaVersion: 1, taskId: id, findings: [] },
         disputes: { schemaVersion: 1, taskId: id, disputes: [] },
+        questions: { schemaVersion: 1, taskId: id, questions: [] },
         coverage: { schemaVersion: 1, taskId: id, records: [] },
       },
       clock,
@@ -560,6 +562,107 @@ export class TaskService {
       })
       await this.store.appendEvent('takeover/scope-declared', { text, reason })
       return next
+    })
+  }
+
+  /** Record one member question awaiting a Root/user answer. */
+  async askQuestion(input: {
+    memberId: string
+    externalId: string
+    question: string
+    header?: string
+    detail?: string
+    options?: Array<{ label: string; description?: string }>
+    multiSelect?: boolean
+  }): Promise<QuestionRecord> {
+    nonEmpty(input.question, 'question')
+    nonEmpty(input.externalId, 'question id')
+    return this.mutex.run(async () => {
+      const state = await this.store.readState()
+      this.assertRunning(state, 'askQuestion')
+      const file = await this.store.questions()
+      const existing = file.questions.find(
+        (candidate) =>
+          candidate.memberId === input.memberId && candidate.externalId === input.externalId && candidate.status === 'pending',
+      )
+      if (existing !== undefined) return existing
+      const question: QuestionRecord = {
+        id: newId('question'),
+        memberId: input.memberId,
+        externalId: input.externalId,
+        question: input.question,
+        status: 'pending',
+        askedAt: this.store.now(),
+        source: 'member',
+        ...(input.header === undefined ? {} : { header: input.header }),
+        ...(input.detail === undefined ? {} : { detail: input.detail }),
+        ...(input.options === undefined ? {} : { options: input.options.map((option) => ({ ...option })) }),
+        ...(input.multiSelect === undefined ? {} : { multiSelect: input.multiSelect }),
+      }
+      await this.store.updateQuestions((draft) => {
+        draft.questions.push(question)
+      })
+      await this.store.appendEvent('question/asked', {
+        questionId: question.id,
+        memberId: question.memberId,
+        externalId: question.externalId,
+      })
+      return question
+    })
+  }
+
+  /** Answer one pending member question with selected labels and optional text. */
+  async answerQuestion(id: string, answer: { selected: string[]; custom?: string }): Promise<QuestionRecord> {
+    return this.mutex.run(async () => {
+      const state = await this.store.readState()
+      this.assertRunning(state, 'answerQuestion')
+      const file = await this.store.questions()
+      const question = file.questions.find((candidate) => candidate.id === id)
+      if (question === undefined) throw new OrbitError('not_found', `unknown question: ${id}`)
+      if (question.status !== 'pending') throw new OrbitError('invalid_state', `question ${id} is ${question.status}`)
+      if (question.options !== undefined) {
+        for (const selected of answer.selected) {
+          if (!question.options.some((option) => option.label === selected)) {
+            throw new OrbitError('invalid_input', `selected label is not an offered option: ${selected}`)
+          }
+        }
+      }
+      const now = this.store.now()
+      const updated: QuestionRecord = {
+        ...question,
+        status: 'answered',
+        answeredAt: now,
+        answer: { selected: [...answer.selected], ...(answer.custom === undefined ? {} : { custom: answer.custom }) },
+      }
+      await this.store.updateQuestions((draft) => {
+        const index = draft.questions.findIndex((candidate) => candidate.id === id)
+        draft.questions[index] = updated
+      })
+      await this.store.appendEvent('question/answered', {
+        questionId: id,
+        memberId: question.memberId,
+        selected: answer.selected,
+        custom: answer.custom,
+      })
+      return updated
+    })
+  }
+
+  /** Mark pending questions cancelled (for example when a member or task stops). */
+  async cancelPendingQuestions(memberId?: string): Promise<number> {
+    return this.mutex.run(async () => {
+      const file = await this.store.questions()
+      let cancelled = 0
+      await this.store.updateQuestions((draft) => {
+        for (const question of draft.questions) {
+          if (question.status !== 'pending') continue
+          if (memberId !== undefined && question.memberId !== memberId) continue
+          question.status = 'cancelled'
+          cancelled += 1
+        }
+      })
+      if (cancelled > 0) await this.store.appendEvent('question/cancelled', { memberId, count: cancelled })
+      return cancelled
     })
   }
 
@@ -1084,17 +1187,19 @@ export class TaskService {
     checks: CheckRecord[]
     findings: FindingsFile
     disputes: DisputesFile
+    questions: QuestionRecord[]
     coverage: CoverageFile
     openFindings: FindingRecord[]
     openDisputes: DisputeRecord[]
   }> {
-    const [state, members, workUnits, checks, findings, disputes, coverage] = await Promise.all([
+    const [state, members, workUnits, checks, findings, disputes, questions, coverage] = await Promise.all([
       this.store.readState(),
       this.store.members(),
       this.store.workUnits(),
       this.store.listChecks(),
       this.store.findings(),
       this.store.disputes(),
+      this.store.questions(),
       this.store.coverage(),
     ])
     return {
@@ -1105,6 +1210,7 @@ export class TaskService {
       checks,
       findings,
       disputes,
+      questions: questions.questions,
       coverage,
       openFindings: findings.findings.filter((finding) => finding.status === 'open'),
       openDisputes: disputes.disputes.filter((dispute) => dispute.status === 'pending'),

@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { join, resolve } from 'node:path'
 import { CONTROL_SOCKET_FILE, type ControlRequest, type ControlResponse } from '@orbit/core'
 import { requestControl } from './client.js'
-import { localEvents, localStatus, type StatusView } from './tasks.js'
+import { localEvents, localQuestions, localStatus, type StatusView } from './tasks.js'
 import { exportTask } from './export.js'
 import { localSessions } from './sessions.js'
 import { CAPABILITIES, INTEGRATION_CONTRACT, buildLaunchSpec } from './capabilities.js'
@@ -19,6 +19,8 @@ Usage:
   orbit-ts events [TASK] [--json] [--project DIR]
   orbit stop   [TASK] [--json] [--project DIR]
   orbit sessions [TASK] [--json] [--project DIR]
+  orbit questions [TASK] [--json] [--project DIR]
+  orbit answer [TASK] --question ID --selected A,B [--custom TEXT] [--json] [--project DIR]
   orbit export [TASK] --output FILE [--json] [--project DIR]
   orbit capabilities [--json]
   orbit launch [--json] [--profile P] [--home DIR] [--project DIR]
@@ -28,7 +30,10 @@ back to the durable task record when no host is running. stop requires the
 live host. export snapshots the task record into a self-contained JSON file.`
 
 interface Parsed {
-  command: 'status' | 'events' | 'stop' | 'export' | 'sessions' | 'capabilities' | 'launch'
+  command: 'status' | 'events' | 'stop' | 'export' | 'sessions' | 'capabilities' | 'launch' | 'questions' | 'answer'
+  question?: string
+  selected?: string[]
+  custom?: string
   profile?: string
   home?: string
   task?: string
@@ -43,7 +48,7 @@ function parse(argv: string[]): Parsed | 'help' {
   if (argv.length === 0) throw new UsageError('missing command')
   const command = argv[0]
   if (command === '--help' || command === '-h' || command === 'help') return 'help'
-  const commands = ['status', 'events', 'stop', 'export', 'sessions', 'capabilities', 'launch'] as const
+  const commands = ['status', 'events', 'stop', 'export', 'sessions', 'capabilities', 'launch', 'questions', 'answer'] as const
   if (command === undefined || !(commands as readonly string[]).includes(command)) {
     throw new UsageError(`unknown command: ${String(command)}`)
   }
@@ -53,6 +58,9 @@ function parse(argv: string[]): Parsed | 'help' {
   let output: string | undefined
   let profile: string | undefined
   let home: string | undefined
+  let question: string | undefined
+  let selected: string[] | undefined
+  let custom: string | undefined
   for (let index = 1; index < argv.length; index += 1) {
     const arg = argv[index]
     if (arg === '--json') {
@@ -62,6 +70,14 @@ function parse(argv: string[]): Parsed | 'help' {
       if (value === undefined) throw new UsageError('--project requires a directory')
       project = resolve(value)
       index += 1
+    } else if (arg === '--question') {
+      question = argv[++index]
+    } else if (arg === '--selected') {
+      const value = argv[++index]
+      if (value === undefined) throw new UsageError('--selected requires labels')
+      selected = value.split(',').map((entry) => entry.trim()).filter((entry) => entry.length > 0)
+    } else if (arg === '--custom') {
+      custom = argv[++index]
     } else if (arg === '--profile') {
       profile = argv[++index]
     } else if (arg === '--home') {
@@ -90,6 +106,9 @@ function parse(argv: string[]): Parsed | 'help' {
     ...(output === undefined ? {} : { output }),
     ...(profile === undefined ? {} : { profile }),
     ...(home === undefined ? {} : { home }),
+    ...(question === undefined ? {} : { question }),
+    ...(selected === undefined ? {} : { selected }),
+    ...(custom === undefined ? {} : { custom }),
   }
 }
 
@@ -160,6 +179,40 @@ export async function runCli(argv: string[], io: Partial<CliIo> = {}): Promise<n
     if (parsed.command === 'capabilities') {
       const payload = { integration_contract: INTEGRATION_CONTRACT, orbit: { version: '0.0.0' }, capabilities: CAPABILITIES }
       out(JSON.stringify(payload, null, 2))
+      return 0
+    }
+
+    if (parsed.command === 'questions') {
+      const response = await control(parsed.project, {
+        id: randomUUID(),
+        method: 'questions',
+        ...(parsed.task === undefined ? {} : { task: parsed.task }),
+      })
+      const result = response !== undefined && response.ok
+        ? (response.result as { questions: unknown[] })
+        : await localQuestions(parsed.project, parsed.task)
+      if (parsed.json) out(JSON.stringify(result, null, 2))
+      else {
+        const questions = result.questions as Array<{ id: string; memberId: string; question: string; status: string }>
+        out(questions.length === 0 ? 'no questions' : questions.map((entry) => `${entry.id}  ${entry.status}  ${entry.memberId}  ${entry.question}`).join('\n'))
+      }
+      return 0
+    }
+
+    if (parsed.command === 'answer') {
+      if (parsed.question === undefined) throw new UsageError('answer requires --question ID')
+      const response = await control(parsed.project, {
+        id: randomUUID(),
+        method: 'answer',
+        question: parsed.question,
+        selected: parsed.selected ?? [],
+        ...(parsed.custom === undefined ? {} : { custom: parsed.custom }),
+        ...(parsed.task === undefined ? {} : { task: parsed.task }),
+      })
+      if (response === undefined) throw new Error(`no live Orbit host for ${parsed.project} (control socket missing)`)
+      if (!response.ok) throw new Error(response.error.message)
+      const result = response.result as { question: { id: string; status: string } }
+      out(parsed.json ? JSON.stringify(result, null, 2) : `answered ${result.question.id} (${result.question.status})`)
       return 0
     }
 

@@ -320,6 +320,31 @@ export interface FindingsFile {
   findings: FindingRecord[]
 }
 
+export type QuestionStatus = 'pending' | 'answered' | 'cancelled'
+
+export interface QuestionRecord {
+  id: string
+  memberId: string
+  /** Question id inside the original ask_user_question call. */
+  externalId: string
+  question: string
+  header?: string
+  detail?: string
+  options?: Array<{ label: string; description?: string }>
+  multiSelect?: boolean
+  status: QuestionStatus
+  askedAt: string
+  answeredAt?: string
+  answer?: { selected: string[]; custom?: string }
+  source: 'member'
+}
+
+export interface QuestionsFile {
+  schemaVersion: typeof TASK_SCHEMA_VERSION
+  taskId: string
+  questions: QuestionRecord[]
+}
+
 export type DisputeStatus = 'pending' | 'adopted' | 'upheld'
 
 export interface DisputeRecord {

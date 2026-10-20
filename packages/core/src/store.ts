@@ -10,6 +10,7 @@ import type {
   DisputesFile,
   FindingsFile,
   MembersFile,
+  QuestionsFile,
   TaskEvent,
   TaskState,
   WorkUnitsFile,
@@ -22,6 +23,7 @@ export interface TaskFiles {
   findings: FindingsFile
   disputes: DisputesFile
   coverage: CoverageFile
+  questions: QuestionsFile
 }
 
 type Clock = () => Date
@@ -59,6 +61,7 @@ export class TaskStore {
     await atomicWriteJson(join(tempDir, 'work-units.json'), files.workUnits)
     await atomicWriteJson(join(tempDir, 'findings.json'), files.findings)
     await atomicWriteJson(join(tempDir, 'disputes.json'), files.disputes)
+    await atomicWriteJson(join(tempDir, 'questions.json'), files.questions)
     await atomicWriteJson(join(tempDir, 'requirement-coverage.json'), files.coverage)
     await ensureDir(join(tempDir, 'checks'))
     const createdAt = files.state.createdAt
@@ -150,6 +153,19 @@ export class TaskStore {
       const file = await this.findings()
       mutator(file)
       await atomicWriteJson(this.path('findings.json'), file)
+      return file
+    })
+  }
+
+  async questions(): Promise<QuestionsFile> {
+    return readJsonFile<QuestionsFile>(this.path('questions.json'))
+  }
+
+  async updateQuestions(mutator: (file: QuestionsFile) => void): Promise<QuestionsFile> {
+    return this.mutex.run(async () => {
+      const file = await this.questions()
+      mutator(file)
+      await atomicWriteJson(this.path('questions.json'), file)
       return file
     })
   }

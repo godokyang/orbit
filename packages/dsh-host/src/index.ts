@@ -11,6 +11,7 @@ import type {} from '@deepseek-ai/dsh-agent-loop'
 import type {} from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-jobs'
 import type {} from '@deepseek-ai/dsh-session-query'
+import type {} from '@deepseek-ai/dsh-user-questions'
 import {
   CONTROL_SOCKET_FILE,
   JEV_OBSERVATION_QUESTIONS,
@@ -297,6 +298,10 @@ export default class OrbitHost extends Service {
   private readonly allowedModels: Set<string>
   private readonly instanceId = randomUUID()
   private readonly activeCheckers = new Map<number, import('@deepseek-ai/dsh-subagent').SubagentActivation>()
+  private readonly pendingQuestions = new Map<
+    string,
+    { resolve: (answer: { selected: string[]; custom?: string }) => void; reject: (error: Error) => void }
+  >()
   private readonly memberCandidates: Array<{ label?: string; provider: string; model: string }>
   private readonly selectionRelease: SelectionRelease | undefined
   private readonly modelBindings = new Map<
@@ -349,8 +354,8 @@ export default class OrbitHost extends Service {
           action: {
             type: 'string',
             required: true,
-            enum: ['start', 'status', 'stop', 'declare', 'finish', 'accept', 'reject', 'check', 'complete', 'amend', 'dispute', 'ruling', 'rebind', 'resume', 'takeover', 'takeover-scope', 'assess'],
-            description: 'start | status | stop | declare | finish | accept | reject | check | complete | amend | dispute | ruling | rebind | resume | takeover | takeover-scope | assess',
+            enum: ['start', 'status', 'stop', 'declare', 'finish', 'accept', 'reject', 'check', 'complete', 'amend', 'dispute', 'ruling', 'rebind', 'resume', 'takeover', 'takeover-scope', 'assess', 'answer'],
+            description: 'start | status | stop | declare | finish | accept | reject | check | complete | amend | dispute | ruling | rebind | resume | takeover | takeover-scope | assess | answer',
           },
           instruction: { type: 'string', description: 'The user instruction, verbatim. Required for action=start.' },
           amendment: { type: 'string', description: 'The user amendment text, verbatim. Required for action=amend.' },
@@ -370,6 +375,13 @@ export default class OrbitHost extends Service {
           artifactRoot: { type: 'string', description: 'New artifact root. Required for action=rebind.' },
           from: { type: 'string', description: 'Previous task id. Required for action=resume.' },
           priorScope: { type: 'string', description: 'Root-declared scope before takeover. Optional for action=takeover; declaration text for action=takeover-scope.' },
+          question: { type: 'string', description: 'Question record id (or pending external id). Required for action=answer.' },
+          selected: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Selected option labels. Required for action=answer.',
+          },
+          custom: { type: 'string', description: 'Optional free-text answer. Optional for action=answer.' },
           assessKind: {
             type: 'string',
             enum: ['members', 'checker'],
@@ -621,6 +633,23 @@ export default class OrbitHost extends Service {
             return JSON.stringify({ ok: true, ...summarize(state), taskDir: service.store.dir })
           }
 
+          if (action === 'answer') {
+            const { question, selected, custom } = args as { question?: string; selected?: string[]; custom?: string }
+            if (question === undefined) throw new Error('orbit: action=answer requires question')
+            const service = await openTask(projectRoot, maxTasks, (args as { task?: string }).task)
+            const questions = await service.store.questions()
+            const record = questions.questions.find((candidate) => candidate.id === question)
+              ?? questions.questions.find((candidate) => candidate.externalId === question && candidate.status === 'pending')
+            if (record === undefined) throw new Error(`orbit: unknown question ${question}`)
+            const answered = await service.answerQuestion(record.id, { selected: selected ?? [], ...(custom === undefined ? {} : { custom }) })
+            const pending = host.pendingQuestions.get(record.id)
+            if (pending !== undefined) {
+              host.pendingQuestions.delete(record.id)
+              pending.resolve({ selected: selected ?? [], ...(custom === undefined ? {} : { custom }) })
+            }
+            return JSON.stringify({ ok: true, question: answered })
+          }
+
           if (action === 'assess') {
             const service = await host.open(projectRoot, maxTasks, (args as { task?: string }).task)
             const state = await service.state()
@@ -842,6 +871,42 @@ export default class OrbitHost extends Service {
       }
     })
 
+    // O3: member questions are recorded durably and wait for a Root/user answer.
+    ctx.on('user-questions/request', async (request, next) => {
+      const asker = request.agent
+      if (asker === undefined) return next()
+      const session = ctx.sessions.get(asker.id)
+      const projectRoot = session?.header.cwd
+      if (projectRoot === undefined) return next()
+      const task = await findTaskForSession(projectRoot, maxTasks, String(asker.id)).catch(() => undefined)
+      if (task === undefined) return next()
+      const state = await task.state()
+      if (state.status !== 'running' || state.stop !== undefined) return next()
+      const members = await task.store.members()
+      if (!members.members.some((member) => member.id === String(asker.id))) return next()
+
+      try {
+        const answers = []
+        for (const question of request.questions) {
+          const record = await task.askQuestion({
+            memberId: String(asker.id),
+            externalId: question.id,
+            question: question.question,
+            ...(question.header === undefined ? {} : { header: question.header }),
+            ...(question.detail === undefined ? {} : { detail: question.detail }),
+            ...(question.options === undefined ? {} : { options: question.options.map((option) => ({ ...option })) }),
+            ...(question.multiSelect === undefined ? {} : { multiSelect: question.multiSelect }),
+          })
+          const answer = await host.waitForAnswer(task, record.id, request.signal)
+          answers.push({ id: question.id, selected: answer.selected, ...(answer.custom === undefined ? {} : { custom: answer.custom }) })
+        }
+        return { answers }
+      } catch (error) {
+        await task.cancelPendingQuestions(String(asker.id)).catch(() => undefined)
+        throw error
+      }
+    })
+
     // H3/H5: a stopped task's agents cannot use tools. The fence cache is
     // rebuilt from DSH_HOME at load; the durable task record remains the authority.
     // Strict model authorization: the listener must stay synchronous and
@@ -910,6 +975,25 @@ export default class OrbitHost extends Service {
     if (request.method === 'events') {
       const service = await this.open(projectRoot, this.maxTasks, request.task)
       return { ok: true, taskId: (await service.state()).id, events: await service.store.events() }
+    }
+    if (request.method === 'questions') {
+      const service = await this.open(projectRoot, this.maxTasks, request.task)
+      const file = await service.store.questions()
+      return { ok: true, questions: file.questions }
+    }
+    if (request.method === 'answer') {
+      if (request.question === undefined) throw new Error('answer requires question')
+      const service = await this.open(projectRoot, this.maxTasks, request.task)
+      const answered = await service.answerQuestion(request.question, {
+        selected: request.selected ?? [],
+        ...(request.custom === undefined ? {} : { custom: request.custom }),
+      })
+      const pending = this.pendingQuestions.get(answered.id)
+      if (pending !== undefined) {
+        this.pendingQuestions.delete(answered.id)
+        pending.resolve({ selected: request.selected ?? [], ...(request.custom === undefined ? {} : { custom: request.custom }) })
+      }
+      return { ok: true, question: answered }
     }
     if (request.method === 'sessions') {
       const service = await this.open(projectRoot, this.maxTasks, request.task)
@@ -1131,6 +1215,39 @@ export default class OrbitHost extends Service {
     }
   }
 
+  private waitForAnswer(
+    task: TaskService,
+    questionId: string,
+    signal: AbortSignal | undefined,
+  ): Promise<{ selected: string[]; custom?: string }> {
+    return new Promise((resolve, reject) => {
+      const finish = (error: Error | undefined, answer?: { selected: string[]; custom?: string }): void => {
+        this.pendingQuestions.delete(questionId)
+        clearTimeout(timer)
+        signal?.removeEventListener('abort', onAbort)
+        if (error !== undefined) reject(error)
+        else if (answer !== undefined) resolve(answer)
+      }
+      const onAbort = (): void => finish(new Error('question aborted'))
+      const timer = setTimeout(() => finish(new Error('question answer timed out')), 10 * 60_000)
+      timer.unref?.()
+      signal?.addEventListener('abort', onAbort, { once: true })
+      this.pendingQuestions.set(questionId, {
+        resolve: (answer) => finish(undefined, answer),
+        reject: (error) => finish(error),
+      })
+      // A CLI answer may race the registration above; check the durable state.
+      void task.store.questions().then((file) => {
+        const record = file.questions.find((candidate) => candidate.id === questionId)
+        if (record?.status === 'answered' && record.answer !== undefined) {
+          finish(undefined, record.answer)
+        } else if (record?.status === 'cancelled') {
+          finish(new Error('question cancelled'))
+        }
+      }).catch(() => undefined)
+    })
+  }
+
   /** Read-only projection for one session; unavailable after the host is gone. */
   private async projectSession(sessionId: string): Promise<ReturnType<typeof unavailableSession>> {
     try {
@@ -1256,6 +1373,10 @@ export default class OrbitHost extends Service {
         root.cancel({ kind: 'user' }, { keepInbox: true })
         evidence.root_idle = await bounded(root.whenIdle(), STOP_TIMEOUT_MS)
       }
+
+      await service.cancelPendingQuestions().catch(() => undefined)
+      for (const pending of this.pendingQuestions.values()) pending.reject(new Error('task stopped'))
+      this.pendingQuestions.clear()
 
       for (const [number, activation] of this.activeCheckers) {
         await activation.dispose().catch(() => undefined)
