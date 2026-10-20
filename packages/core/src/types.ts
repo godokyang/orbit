@@ -338,7 +338,7 @@ export interface QuestionRecord {
   askedAt: string
   answeredAt?: string
   answer?: { selected: string[]; custom?: string }
-  source: 'member'
+  source: 'member' | 'root'
 }
 
 export interface QuestionsFile {

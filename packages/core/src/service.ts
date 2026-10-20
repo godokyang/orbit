@@ -594,6 +594,7 @@ export class TaskService {
     detail?: string
     options?: Array<{ label: string; description?: string }>
     multiSelect?: boolean
+    source?: 'member' | 'root'
   }): Promise<QuestionRecord> {
     nonEmpty(input.question, 'question')
     nonEmpty(input.externalId, 'question id')
@@ -613,7 +614,7 @@ export class TaskService {
         question: input.question,
         status: 'pending',
         askedAt: this.store.now(),
-        source: 'member',
+        source: input.source ?? 'member',
         ...(input.header === undefined ? {} : { header: input.header }),
         ...(input.detail === undefined ? {} : { detail: input.detail }),
         ...(input.options === undefined ? {} : { options: input.options.map((option) => ({ ...option })) }),

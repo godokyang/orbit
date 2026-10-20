@@ -372,10 +372,6 @@ export default class OrbitHost extends Service {
         ? { provider: config.checkerProvider, model: config.checkerModel }
         : undefined
     this.jevEndpoint = config.jevEndpoint === undefined || config.jevEndpoint.length === 0 ? undefined : config.jevEndpoint
-    if (process.env.ORBIT_BOOTSTRAP !== undefined) {
-      void this.bootstrapHeadless(ctx)
-    }
-
     this.jevModel = config.jevModel === undefined || config.jevModel.length === 0 ? undefined : config.jevModel
     this.jevThreshold = config.jevThreshold ?? JEV_OBSERVATION_THRESHOLD
     this.jevIntervalMs = config.jevIntervalMs ?? 300_000
@@ -888,8 +884,10 @@ export default class OrbitHost extends Service {
           const state = await task.state()
           if (state.status !== 'running' || state.stop !== undefined) throw new Error('orbit_ask: the task is stopped')
           const members = await task.store.members()
-          if (!members.members.some((member) => member.id === exec.agent?.id)) {
-            throw new Error('orbit_ask is only available to registered members of a running Orbit task')
+          const isMember = members.members.some((member) => member.id === exec.agent?.id)
+          const isRoot = state.root.sessionId === exec.agent?.id && process.env.ORBIT_BOOTSTRAP !== undefined
+          if (!isMember && !isRoot) {
+            throw new Error('orbit_ask is only available to registered members or a headless Root of a running Orbit task')
           }
           const input = args as {
             question?: string
@@ -911,6 +909,7 @@ export default class OrbitHost extends Service {
               ? {}
               : { options: input.options.map((label) => ({ label })) }),
             ...(input.multiSelect === undefined ? {} : { multiSelect: input.multiSelect }),
+            source: isRoot ? 'root' : 'member',
           })
           const answer = await host.waitForAnswer(task, record.id, exec.signal)
           return JSON.stringify({
@@ -992,7 +991,7 @@ export default class OrbitHost extends Service {
     })
 
     // O3: member questions are recorded durably and wait for a Root/user answer.
-    ;(ctx.on as any)('user-questions/request', async (
+    const questionRelay = async (
       request: {
         agent?: { id: string }
         questions: Array<{
@@ -1010,14 +1009,16 @@ export default class OrbitHost extends Service {
       const asker = request.agent
       if (asker === undefined) return next()
       const session = ctx.sessions.get(asker.id as never)
-      const projectRoot = session?.header.cwd
+      const projectRoot = session?.header.cwd ?? process.cwd()
       if (projectRoot === undefined) return next()
       const task = await findTaskForSession(projectRoot, maxTasks, String(asker.id)).catch(() => undefined)
       if (task === undefined) return next()
       const state = await task.state()
       if (state.status !== 'running' || state.stop !== undefined) return next()
       const members = await task.store.members()
-      if (!members.members.some((member) => member.id === String(asker.id))) return next()
+      const isMember = members.members.some((member) => member.id === String(asker.id))
+      const isRoot = state.root.sessionId === String(asker.id)
+      if (!isMember && !(isRoot && process.env.ORBIT_BOOTSTRAP !== undefined)) return next()
 
       try {
         const answers = []
@@ -1030,6 +1031,7 @@ export default class OrbitHost extends Service {
             ...(question.detail === undefined ? {} : { detail: question.detail }),
             ...(question.options === undefined ? {} : { options: question.options.map((option) => ({ ...option })) }),
             ...(question.multiSelect === undefined ? {} : { multiSelect: question.multiSelect }),
+            source: isRoot ? 'root' : 'member',
           })
           const answer = await host.waitForAnswer(task, record.id, request.signal)
           answers.push({ id: question.id, selected: answer.selected, ...(answer.custom === undefined ? {} : { custom: answer.custom }) })
@@ -1039,7 +1041,10 @@ export default class OrbitHost extends Service {
         await task.cancelPendingQuestions(String(asker.id)).catch(() => undefined)
         throw error
       }
-    })
+    }
+
+    ;(ctx.root.on as any)('user-questions/request', questionRelay)
+    ;(ctx.on as any)('user-questions/request', questionRelay)
 
     // H3/H5: a stopped task's agents cannot use tools. The fence cache is
     // rebuilt from DSH_HOME at load; the durable task record remains the authority.
@@ -1089,6 +1094,10 @@ export default class OrbitHost extends Service {
       for (const server of host.controls.values()) void server.close()
       host.controls.clear()
     })
+
+    if (process.env.ORBIT_BOOTSTRAP !== undefined) {
+      void this.bootstrapHeadless(ctx)
+    }
   }
 
   /** Start the private control socket for this project on first use. */
