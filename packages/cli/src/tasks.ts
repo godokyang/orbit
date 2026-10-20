@@ -160,6 +160,21 @@ export async function localStatusByRef(projectRoot: string, ref: string, limit =
   return tasks
 }
 
+export async function localStatusBySession(projectRoot: string, sessionId: string, limit = 64): Promise<StatusView[]> {
+  const tasks: StatusView[] = []
+  for (const dir of (await taskDirs(projectRoot, limit)).reverse()) {
+    let service: TaskService
+    try {
+      service = await TaskService.open(dir)
+    } catch {
+      continue
+    }
+    const state = await service.state()
+    if (state.root.sessionId === sessionId) tasks.push(await statusOf(service))
+  }
+  return tasks
+}
+
 export async function localQuestions(projectRoot: string, id?: string): Promise<{ taskId: string; questions: unknown[] }> {
   const service = await openTask(projectRoot, id)
   const state = await service.state()

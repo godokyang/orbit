@@ -10,6 +10,7 @@ export const CAPABILITIES = {
   resume_from: { since: '2.0.0', action: 'headless', same_root_session: true, resume_wake: false },
   status: { since: '2.0.0' },
   status_by_external_ref: { since: '2.0.0', max_refs: 8, max_length: 256 },
+  status_by_session: { since: '2.0.0' },
   check_coverage: { since: '2.0.0' },
   model_authorization: { since: '2.0.0' },
   events: { since: '2.0.0', cursor: 'opaque' },

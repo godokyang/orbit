@@ -26,6 +26,7 @@
     "resume_from": { "since": "2.0.0", "action": "headless", "same_root_session": true, "resume_wake": false },
     "status": { "since": "2.0.0" },
     "status_by_external_ref": { "since": "2.0.0", "max_refs": 8, "max_length": 256 },
+    "status_by_session": { "since": "2.0.0" },
     "check_coverage": { "since": "2.0.0" },
     "model_authorization": { "since": "2.0.0" },
     "events": { "since": "2.0.0", "cursor": "opaque" },
@@ -54,6 +55,7 @@
 | `orbit launch --json [--profile P] [--home DIR] [--project DIR]` | 返回 DSH 启动参数；不启动进程 |
 | `orbit status [TASK] --json [--project DIR]` | 任务事实与阻塞原因；只读 |
 | `orbit status --external-ref REF --json [--project DIR]` | 精确引用查询；成功恒返回 `{tasks:[]}` |
+| `orbit status --session SESSION --json [--project DIR]` | 按 Root 会话精确查询；成功恒返回 `{tasks:[]}` |
 | `orbit events [TASK] --after CURSOR [--json] [--project DIR]` | 增量任务事件；只读 |
 | `orbit sessions [TASK] --json [--project DIR]` | Root/成员会话投影；只读 |
 | `orbit questions [TASK] --json [--project DIR]` | 问题记录；只读 |

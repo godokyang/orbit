@@ -403,3 +403,19 @@ describe('orbit-ts doctor', () => {
     }
   })
 })
+
+describe('orbit-ts status by session', () => {
+  it('finds the task owning the root session', async () => {
+    const dir = await project()
+    const started = await TaskService.start({ projectRoot: dir, rootSessionId: 'root-session-1', instruction: 'work' })
+    const sink = capture()
+    expect(await runCli(['status', '--session', 'root-session-1', '--json', '--project', dir], sink.io)).toBe(0)
+    const payload = JSON.parse(sink.out()) as { tasks: Array<{ taskId: string; rootSessionId: string }> }
+    expect(payload.tasks).toHaveLength(1)
+    expect(payload.tasks[0]).toMatchObject({ taskId: started.state.id, rootSessionId: 'root-session-1' })
+
+    const empty = capture()
+    expect(await runCli(['status', '--session', 'missing', '--json', '--project', dir], empty.io)).toBe(0)
+    expect(JSON.parse(empty.out())).toEqual({ tasks: [] })
+  })
+})
