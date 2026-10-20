@@ -19,7 +19,7 @@
 | JEV 观察输入在 DSH 上的投影 | [观察投影设计](plan/jev-observation-projection.md)；操作记录字段、窗口与游标、去重键、校准影响 |
 | 整次迁移执行指令 | [Goal 提示](plan/ts-dsh-migration-goal.md)；交给实施 Agent 的完整指令：B/C/D 三个阶段的范围、工作区规则、顺序、用户检查点、验收、纪律 |
 | DSH 宿主接缝探针结果 | [探针记录](plan/dsh-host-probes.md)；九项探针与组合断言在桌面版 0.2.1-rc.2 上的结果与实现约束；复跑方法见 `tests/host_conformance/dsh-probe/` |
-| OMP 适配细节 | [OMP 适配说明](../contracts/host-omp.md)；入口、注入位置与宿主观察窗口，不改变产品规则 |
+| DSH 宿主边界 | [DSH 宿主说明](../contracts/host-dsh.md)；入口、注入位置与宿主观察窗口，不改变产品规则 |
 | 宿主接口与事件通路实施方案 | [实施方案](plan/host-port-and-events.md)；P0/P1/P2 原阶段依据，P3 仅为宿主接缝试验，不覆盖完整重写 |
 | P2 设计与实施状态 | [P2 设计](plan/p2-design.md)；能力、进程归属与受阻项 |
 | 文档对齐清单 | [文档对齐清单](plan/doc-march.md) |
