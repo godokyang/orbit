@@ -39,11 +39,14 @@ function toolChunks(toolName, args) {
 }
 
 const scripts = []
+const calls = []
 class ProbeAdapter extends LlmAdapter {
   providerInfo(provider) { return { id: provider, provider, name: 'Orbit probe', displayName: 'Orbit probe' } }
   async listModels(provider) { return [{ id: 'probe-1', provider, model: 'probe-1', name: 'probe-1', displayName: 'probe-1' }] }
   async resolveModel(provider, model) { return { provider, id: model, name: model, model, context: { contextWindow: 100000 } } }
-  async *stream() {
+  async *stream(options) {
+    const serialized = JSON.stringify(options)
+    calls.push({ sawOrbitContext: serialized.includes('Orbit 受控任务') && serialized.includes('Build the migration slice.') })
     const script = scripts.shift()
     yield* script ? script() : textChunks('ok')
   }
@@ -154,9 +157,21 @@ async function run(ctx) {
   scripts.push(() => textChunks('stopped'))
   handle.agent.followup(msg('Stop the task.'))
   await handle.agent.whenIdle()
-  task = readTask(WORK)
+  task = await waitFor(async () => {
+    const current = readTask(WORK)
+    return current?.state?.status !== 'running' ? current : undefined
+  }, 12000, 'stop confirmation').catch(() => readTask(WORK))
   const stopResults = await toolResults(ctx, handle.agent.id)
-  log({ step: 'stop', status: task?.state?.status, stop: task?.state?.stop?.reason, fence: task?.state?.stop?.fence, newResults: stopResults.length - beforeStop, last: stopResults.at(-1) })
+  log({
+    step: 'stop',
+    status: task?.state?.status,
+    stop: task?.state?.stop?.reason,
+    fence: task?.state?.stop?.fence,
+    confirmed: task?.state?.stop?.confirmation?.confirmed,
+    missing: task?.state?.stop?.confirmation?.missing,
+    newResults: stopResults.length - beforeStop,
+    last: stopResults.at(-1),
+  })
 
   scripts.length = 0
   const beforeFence = stopResults.length
@@ -168,7 +183,15 @@ async function run(ctx) {
   log({ step: 'fenced-dispatch', newResults: after.length - beforeFence, last: after.at(-1) })
 
   await handle.dispose()
-  log({ phase: 'done', ok: true, taskCreated: Boolean(task), unitId: unit?.id, memberRegistered: Boolean(registered) })
+  log({
+    phase: 'done',
+    ok: true,
+    taskCreated: Boolean(task),
+    unitId: unit?.id,
+    memberRegistered: Boolean(registered),
+    modelCalls: calls.length,
+    callsWithOrbitContext: calls.filter((call) => call.sawOrbitContext).length,
+  })
 }
 
 export async function apply(ctx) {

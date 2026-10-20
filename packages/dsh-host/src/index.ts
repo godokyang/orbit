@@ -1,9 +1,12 @@
+import { readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { Service, type Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-agent'
+import type {} from '@deepseek-ai/dsh-agent-loop'
+import type {} from '@deepseek-ai/dsh-session'
 import { TaskService, TaskStore, type TaskState } from '@orbit/core'
 
 export const name = 'orbit'
@@ -32,6 +35,8 @@ const TEXT_OUTPUT = {
   schema: { type: 'string' as const },
   render: (_args: unknown, value: string) => [{ type: 'text' as const, text: value }],
 }
+
+const STOP_TIMEOUT_MS = 5_000
 
 function agentCwd(ctx: Context, agentId: string): string {
   const session = ctx.sessions.get(agentId as never)
@@ -106,14 +111,77 @@ function orbitUnitOf(prompt: unknown): string | undefined {
   return /\borbit-unit:\s*(wu-[A-Za-z0-9-]+)\b/.exec(prompt)?.[1]
 }
 
+function fenceRegistryPath(): string | undefined {
+  const home = process.env.DSH_HOME
+  return home === undefined || home.length === 0 ? undefined : join(home, 'orbit-fences.json')
+}
+
+function loadFenceRegistry(): Set<string> {
+  const path = fenceRegistryPath()
+  if (path === undefined) return new Set()
+  try {
+    const parsed = JSON.parse(readFileSync(path, 'utf8')) as { sessionIds?: unknown }
+    return new Set(Array.isArray(parsed.sessionIds) ? parsed.sessionIds.filter((id): id is string => typeof id === 'string') : [])
+  } catch {
+    return new Set()
+  }
+}
+
+function saveFenceRegistry(sessions: Set<string>): void {
+  const path = fenceRegistryPath()
+  if (path === undefined) return
+  const temp = `${path}.tmp`
+  try {
+    writeFileSync(temp, JSON.stringify({ version: 1, sessionIds: [...sessions] }), { mode: 0o600 })
+    renameSync(temp, path)
+  } catch {
+    // The task record stays authoritative; a lost host cache only weakens
+    // restart fencing, it never confirms a stop.
+  }
+}
+
+function renderRequirements(taskDir: string): string {
+  try {
+    const state = JSON.parse(readFileSync(join(taskDir, 'state.json'), 'utf8')) as TaskState
+    const versions = state.input.versions
+      .map((version) => {
+        const label = version.version === 1 ? '原始要求' : `修订 v${version.version}`
+        const source = version.source.kind === 'user-message' ? `用户消息 ${version.source.messageId ?? ''}` : '显式文本'
+        return `${label}（来源：${source}）：\n${version.text}`
+      })
+      .join('\n\n')
+    return [
+      `[Orbit 受控任务 ${state.id}]`,
+      `状态：${state.status}；输入版本：${state.input.versions.length}；产物根：${state.workspace.artifactRoot}`,
+      versions,
+      '要求与修订以本块为准；原生用户消息本身不自动成为修订。',
+      '停止使用 orbit 工具 action=stop；完成必须经过独立检查与停止确认，不得自行声称完成。',
+    ].join('\n')
+  } catch (error) {
+    return `[Orbit] 任务记录不可读（${(error as Error).message}）；不要按缩小后的授权继续。`
+  }
+}
+
+async function bounded(promise: Promise<unknown>, ms: number): Promise<boolean> {
+  let timer: NodeJS.Timeout | undefined
+  const timeout = new Promise<false>((resolve) => {
+    timer = setTimeout(() => resolve(false), ms)
+  })
+  try {
+    return (await Promise.race([promise.then(() => true), timeout])) === true
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+  }
+}
+
 /**
  * Orbit host service. This slice owns task creation/status/stop and controlled
  * delegation: a Root must reference a declared work unit in a `subagent` prompt,
- * the child is registered durably before its first model call, and a stopped
- * task's agents are fenced from further tool use.
+ * the child is registered durably before its first model call, a stopped task's
+ * agents are fenced, and stop teardown records the evidence it actually saw.
  */
 export default class OrbitHost extends Service {
-  static inject = ['tools', 'sessions', 'agents']
+  static inject = ['tools', 'sessions', 'agents', 'systemPrompt']
 
   static Config: z<Config> = z.object({
     maxTasks: z.number().step(1).min(1).default(64),
@@ -123,7 +191,8 @@ export default class OrbitHost extends Service {
   private readonly maxTasks: number
   private readonly subagentTool: string
   private readonly pending = new Map<string, PendingDispatch[]>()
-  private readonly fencedSessions = new Set<string>()
+  private readonly fencedSessions = loadFenceRegistry()
+  private readonly requirementDisposers = new Map<string, () => void>()
 
   constructor(ctx: Context, config: Config = {}) {
     super(ctx, 'orbit')
@@ -138,7 +207,7 @@ export default class OrbitHost extends Service {
         description:
           'Start or inspect an Orbit supervised task in the current workspace. '
           + 'start requires the verbatim user instruction; declare creates a work unit; '
-          + 'accept/reject settle a finished unit; status/stop target the latest task.',
+          + 'finish/accept/reject settle a member unit; status/stop target the latest task.',
         parameters: {
           action: {
             type: 'string',
@@ -192,6 +261,7 @@ export default class OrbitHost extends Service {
               instruction,
               source: { kind: 'explicit-text', verbatim: true, at: new Date().toISOString() },
             })
+            host.attachRequirements(agent, service)
             return JSON.stringify({ ok: true, ...summarize(state), taskDir: service.store.dir })
           }
 
@@ -214,7 +284,9 @@ export default class OrbitHost extends Service {
             const members = await service.store.members()
             host.fencedSessions.add(state.root.sessionId)
             for (const member of members.members) host.fencedSessions.add(member.id)
-            return JSON.stringify({ ok: true, ...summarize(state), fence: state.stop?.fence ?? 'none' })
+            saveFenceRegistry(host.fencedSessions)
+            setTimeout(() => { void host.performStop(service) }, 50)
+            return JSON.stringify({ ok: true, ...summarize(state), fence: state.stop?.fence ?? 'none', teardown: 'scheduled' })
           }
 
           if (action === 'declare') {
@@ -331,13 +403,72 @@ export default class OrbitHost extends Service {
       }
     })
 
-    // H3/H5: a stopped task's agents cannot use tools. The fence is the durable
-    // stop record, so it survives plugin reloads.
+    // H3/H5: a stopped task's agents cannot use tools. The fence cache is
+    // rebuilt from DSH_HOME at load; the durable task record remains the authority.
     ctx.tools.guard((exec) => {
       if (exec.agent !== undefined && host.fencedSessions.has(exec.agent.id)) {
         return 'orbit: this task is stopped; tool use is fenced'
       }
       return undefined
     })
+  }
+
+  /** H2: per-Root dynamic context; each admission rereads the durable record. */
+  private attachRequirements(agent: NonNullable<import('@deepseek-ai/dsh-tools').ToolRunContext['agent']>, service: TaskService): void {
+    const taskDir = service.store.dir
+    if (this.requirementDisposers.has(taskDir)) return
+    const dispose = agent.ctx.systemPrompt.context({
+      name: `orbit:requirements:${taskDir}`,
+      order: 800,
+      required: true,
+      text: () => renderRequirements(taskDir),
+    })
+    this.requirementDisposers.set(taskDir, dispose)
+  }
+
+  /**
+   * Stop the task's actual execution after the tool result is delivered:
+   * cancel the Root and registered members, wait for idle, settle members, then
+   * confirm stop with the observed evidence. Missing evidence stays unconfirmed.
+   */
+  private async performStop(service: TaskService): Promise<void> {
+    const state = await service.state()
+    if (state.stop === undefined) return
+    const evidence: Record<string, boolean> = {
+      fence_persisted: true,
+      root_idle: false,
+      members_stopped: false,
+      checks_settled: state.checks.inFlight === null,
+    }
+    try {
+      const root = this.ctx.agents.get(state.root.sessionId as never)
+      if (root === undefined) {
+        evidence.root_idle = true
+      } else {
+        root.cancel({ kind: 'user' }, { keepInbox: true })
+        evidence.root_idle = await bounded(root.whenIdle(), STOP_TIMEOUT_MS)
+      }
+
+      const members = await service.store.members()
+      let stopped = true
+      for (const member of members.members) {
+        if (member.status !== 'registered') continue
+        const agent = this.ctx.agents.get(member.id as never)
+        if (agent !== undefined) {
+          agent.cancel({ kind: 'user' }, { keepInbox: true })
+          const idle = await bounded(agent.whenIdle(), STOP_TIMEOUT_MS)
+          if (!idle) stopped = false
+        }
+        await service.settleMember(member.id, 'stopped').catch(() => undefined)
+      }
+      evidence.members_stopped = stopped
+      evidence.checks_settled = (await service.state()).checks.inFlight === null
+
+      await service.confirmStop({ artifactDigest: '', evidence })
+    } catch (error) {
+      // Never fabricate confirmation: a failed teardown leaves the durable stop
+      // record unconfirmed for a later explicit retry.
+      console.error(`orbit: stop teardown failed: ${(error as Error).message}`)
+    }
   }
 }

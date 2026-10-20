@@ -115,3 +115,11 @@ B 阶段开工前只需补一份短设计：JEV 观察输入在 DSH 事件下的
 - 验证：`tests/host_conformance/orbit-host-probe` 在隔离 `DSH_HOME` 用假模型跑通 start → declare → 受控 subagent 派发与成员登记 → stop 围栏 → 第二次派发被拒；日志在 `$DSH_HOME/results/orbit-host.out`。零真实模型、零网络。
 - 尚未实现：停止的实际资源收束与 `confirmStop` 证据、成员结算后的自动状态、要求注入与每轮状态、观察投影、检查者子进程、CLI/socket、T0 组合断言、受控 profile bundle。
 - 已知限制：围栏集合是进程内缓存，插件重启后需从任务记录重建；当前 probe 的 `stop` 只落围栏，任务仍为 `running`，不宣称停止已确认。
+
+### 同日追加：停止收束与要求注入
+
+- `orbit` 工具 `stop` 先持久化围栏，再在工具结果送达后异步执行收束：取消 Root 与已登记成员、等待 idle（每项 5 秒上限）、把未结算成员记为 `stopped`、重读检查在途状态，最后用实际观察到的证据调用 `confirmStop`；证据缺失保持 `stop_unconfirmed`，不伪造确认。
+- 围栏集合持久到 `$DSH_HOME/orbit-fences.json`（原子替换），插件重启时加载；任务记录仍是唯一权威，缓存丢失只会削弱重启围栏。
+- H2 第一版：任务启动后在 Root 的 agent 作用域注册 `systemPrompt.context`，每次 admission 从 `state.json` 重读原始要求与全部修订；读取失败显式声明记录不可读。
+- 探针新增断言：停止后状态为 `paused`、`stop.confirmation.confirmed=true`、`missing=[]`；成员结算为 `stopped`；第二次派发被拒；模型侧观察到 Orbit 要求上下文的调用 10/12。
+- 仍未做：检查者子进程、CLI/socket、T0 组合断言与受控 profile bundle、冻结验收 #1/#2、真实模型与 Loom。
