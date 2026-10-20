@@ -51,12 +51,18 @@ window.__ModuleLoader__.load({
 				opacity: .65
 			} }, "Orbit");
 			const pending = data.pendingQuestions ?? [];
+			const config = data.config;
+			const events = (data.recentEvents ?? []).map((event) => event.type).join(", ") || "none";
 			return (0, react.createElement)("div", { style: {
 				display: "flex",
-				gap: 8,
-				alignItems: "center",
+				flexDirection: "column",
+				gap: 2,
 				padding: "4px 12px",
 				fontSize: 12
+			} }, (0, react.createElement)("div", { style: {
+				display: "flex",
+				gap: 8,
+				alignItems: "center"
 			} }, (0, react.createElement)("strong", null, "Orbit"), (0, react.createElement)("span", null, `${data.taskId ?? ""} · ${data.status ?? "unknown"}${data.stopConfirmation?.confirmed ? " stopped" : ""} · checks ${data.checksInFlight ?? "none"} · findings ${data.openFindings?.length ?? 0} · questions ${pending.length}`), (0, react.createElement)("button", { onClick: () => {
 				action(sessionId, { action: "stop" });
 			} }, "Stop"), pending[0] !== void 0 ? (0, react.createElement)("button", { onClick: () => {
@@ -66,7 +72,7 @@ window.__ModuleLoader__.load({
 					selected: [],
 					custom: "Continue."
 				});
-			} }, "Answer") : null);
+			} }, "Answer") : null), (0, react.createElement)("div", { style: { opacity: .65 } }, config === void 0 ? "config: unavailable" : `models ${config.allowedModels.join(", ") || "(pool)"} · checker ${config.checkerProvider || "(default)"}/${config.checkerModel || "(default)"} · JEV ${config.jev ? "on" : "off"}`), (0, react.createElement)("div", { style: { opacity: .65 } }, `events: ${events}`));
 		}
 		function apply(ctx) {
 			ctx.slots.register({

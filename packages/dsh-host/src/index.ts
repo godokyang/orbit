@@ -1186,8 +1186,16 @@ export default class OrbitHost extends Service {
               const service = await findTaskForSession(projectRoot, maxTasks, sessionId)
               if (service === undefined) return send(404, { error: 'no Orbit task for this session' })
               const status = await service.status()
+              const events = (await service.store.events()).slice(-5).map((event) => ({ seq: event.seq, type: event.type }))
               return send(200, {
                 ...(await projectStatus(service)),
+                config: {
+                  allowedModels: [...(host as any).allowedModels],
+                  checkerProvider: (host as any).checkerModel?.provider ?? '',
+                  checkerModel: (host as any).checkerModel?.model ?? '',
+                  jev: typeof (host as any).jevEndpoint === 'string' && (host as any).jevEndpoint.length > 0,
+                },
+                recentEvents: events,
                 pendingQuestions: status.questions.filter((question) => question.status === 'pending')
                   .map((question) => ({ id: question.id, question: question.question, options: question.options ?? [] })),
               })
