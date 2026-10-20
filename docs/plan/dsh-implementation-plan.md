@@ -70,13 +70,13 @@ Orbit 持久记录每个任务的归属集合：Root 会话、每次派发的 ac
 | --- | --- | --- |
 | A 在线投影 | 宿主运行中 | `sessionProjections.stateOf`、`sessionQuery.readSurface` 派生可见文本、用户消息、活动、问题、送达；经 socket 给 CLI，经 Remote 给 UI |
 | B 证据归档 | 检查开始/结束、完成、停止、宿主关闭 | `sessionQuery.readSession` 取完整校验快照，对 Root 与成员增量写入任务目录，附 DSH 版本、逻辑格式版本、seq 范围、摘要 |
-| C 事后读取 | 宿主已退出 | CLI 只读 B 层；旧 OMP 任务走旧读取器 |
+| C 事后读取 | 宿主已退出 | CLI 只读 B 层 |
 
-B 层用 DSH 官方读取 API 与逻辑格式，不解析物理 zstd 文件。两个缺口如实记录：宿主死后不能再取快照，最后归档到停止之间记 gap；两个归档点之间生灭且未观察的成员会话记未归档。DSH 任务上旧的字节偏移读取返回结构化错误。
+B 层用 DSH 官方读取 API 与逻辑格式，不解析物理 zstd 文件。两个缺口如实记录：宿主死后不能再取快照，最后归档到停止之间记 gap；两个归档点之间生灭且未观察的成员会话记未归档。不读旧 OMP 记录，不提供旧字节偏移读取（ADR-015 修订第 8 条）。
 
 ## 6. Loom
 
-节点拉起 `dsh --profile orbit-node`，持有 stdin，全程只用 `orbit` CLI；停止确认后关 stdin。Root 会话由插件创建，`--thread` 不再需要。合同 1.9 候选能力：`session_launch`（dsh 规格、`host` 字段）、`conversation_read`（不透明游标；旧偏移结构化拒绝）、`activity_read`（新）、`answer_delivery`（新）、`session_binding.provider="dsh"` 与 `host_session_ref`；`session_prompt`、`question_relay`、`native_user_messages` 形状不变。节点必改：启动、活动来源、送达取证、会话文件解析、续接改走 `resume_from`/`resume_wake`、探针改走 `capabilities`/`doctor`。沿用 P2 模式按能力存在选路径。
+节点拉起 `dsh --profile orbit-node`，持有 stdin，全程只用 `orbit` CLI；停止确认后关 stdin。Root 会话由插件创建，`--thread` 不再需要。集成合同出 **2.0**，字段按 DSH 重新设计（ADR-015 修订第 9 条）：能力集合至少覆盖启动规格、状态、停止回执、事件游标、会话投影（可见文本、用户消息、活动、问题与送达）、提问答复、导出、模型授权；不再保留 OMP 时代的 `session_file`、字节偏移与 `provider="omp"` 假设。节点必改：启动、活动来源、送达取证、会话文件解析、续接改走 `resume_from`/`resume_wake`、探针改走 `capabilities`/`doctor`，一次改到 2.0；不做 1.x 并行路径。
 
 ## 7. 凭据与模型参数
 
@@ -95,4 +95,4 @@ JEV 的 key 走 `ctx.credentials` 引用（默认 `TYPESAFE_API_KEY`），每次
 | C | 应用 UI、合同 1.9、Loom 节点改造 | 未开始 |
 | D | 历史读取、安装升级、干净切换、Ruby 退场 | 未开始 |
 
-B 阶段开工前要补：Root 的 `orbit` 工具参数级定义；工作单元范围 guard 规则；JEV 观察输入投影；任务记录 TS 读写与旧记录兼容判定；UI 页面定义；合同 1.9 字段级形状。
+B 阶段开工前只需补一份短设计：JEV 观察输入在 DSH 事件下的投影形状与去重键，因为它决定重校准。其余在实施中决定：Root 的 `orbit` 工具参数定义（做完给用户过目）、工作单元范围 guard 规则、工具链与包命名（开工时问一次 npm scope）、任务记录格式（全新设计，不兼容旧记录）。C 阶段的界面由 AI 先做第一版，合同 2.0 字段在 C 阶段设计时定。
