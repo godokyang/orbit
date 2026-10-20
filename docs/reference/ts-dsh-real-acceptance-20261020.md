@@ -28,3 +28,30 @@
 未证明：真实检查发现缺陷后的纠正回合（冻结验收 #1）、真实停止中断场景（#2）、多任务并发/重启、校准后的 JEV 选型、Loom 整链、发布安装路径。凭据复制方式只用于本地验收，不作为生产凭据方案。
 
 证据目录保留在 `/tmp/orbit-real`（任务记录、快照、归档、驱动日志），未提交仓库。
+
+## 冻结验收 #1：真实缺陷纠正
+
+场景：Root 先写入错误内容 `goodbye`，检查者应发现并要求纠正；Root 改为 `hello` 后重新检查并完成。
+
+实际结果：
+
+- check #1：真实检查者 `verdict=continue`、`delivery.ready=false`、finding `hello-txt-wrong-content`，理由明确指出快照中的内容为 `goodbye`、不含 `hello`。
+- Root 读取 finding 后修正 `hello.txt`，发起 check #2。
+- check #2：`verdict=complete`、`ready=true`、无 finding、`resolved=1`。
+- 最终 `complete`，`completion.checkNumber=2`；停止证据四项全 true。
+- 事件序列保留两次 check、`finalization/notice`、成员登记/结算、finish/accept、completion 与 stop 确认。
+
+结论：真实模型下的“独立检查发现真实缺陷 → Root 修正 → 再次独立检查通过 → 完成”闭环成立。该次只有一个明显缺陷，不覆盖多缺陷或争议裁定。
+
+## 冻结验收 #2：真实停止中断
+
+场景：Root 启动任务并用 bash 执行 `sleep 120`，外部 CLI/socket 在 8 秒后请求停止。
+
+实际结果：
+
+- stop 请求返回 `fence=armed`；宿主取消 Root、等待 idle、结算成员、核对检查在途。
+- 任务在约 1 秒内变为 `paused`，`stop.confirmation.confirmed=true`，`missing=[]`，四项证据全 true。
+- `ps` 未发现残留 `sleep 120`；没有新增模型调用；Root 会话使用 `keepInbox` 取消，上下文保留。
+- 事件：`stop/requested → stop/confirmed {status: paused}`。
+
+结论：真实运行中的停止能在有界时间内确认，后台 bash 动作被实际终止。该次未覆盖成员执行中停止、检查者进程在途或宿主崩溃后的 `stop_unconfirmed` 重试。

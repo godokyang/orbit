@@ -4,6 +4,8 @@
 import { appendFileSync, mkdirSync, readdirSync, readFileSync, existsSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
+import { connect } from 'node:net'
+import { execSync } from 'node:child_process'
 
 export const name = 'orbit-real-driver'
 export const inject = ['agents', 'sessions', 'agentPresets']
@@ -41,13 +43,16 @@ function checksOf(task) {
     .sort((a, b) => a.number - b.number)
 }
 
+const SCENARIO = process.env.ORBIT_REAL_SCENARIO ?? 'clean'
+const INITIAL_CONTENT = SCENARIO === 'correction' ? 'goodbye' : 'hello'
+
 function promptText() {
   return `You are running a controlled Orbit acceptance task. Do exactly these steps with tools and do not ask the user anything.
 
 1. Call the orbit tool with {"action":"start","instruction":"Create hello.txt in the workspace containing the word hello."}
 2. Call the orbit tool with {"action":"declare","goal":"write hello.txt","acceptance":"hello.txt exists and contains hello"}.
-3. Call the write tool with {"file_path":"${join(WORK, 'hello.txt')}","content":"hello"}.
-4. Call the orbit tool with {"action":"check"}.
+3. Call the write tool with {"file_path":"${join(WORK, 'hello.txt')}","content":"${INITIAL_CONTENT}"}.
+4. Call the orbit tool with {"action":"check"}. If the check is not ready, read the finding, write ${join(WORK, 'hello.txt')} again with content hello, and call orbit check again.
 5. From the declare result, take the work unit id (wu-...). Call the orbit tool with {"action":"finish","unit":"<the unit id>","outcome":"completed","summary":"wrote hello.txt"}.
 6. Call the orbit tool with {"action":"accept","unit":"<the same unit id>"}.
 7. Call the orbit tool with {"action":"complete"}.
@@ -95,11 +100,68 @@ async function createRoot(ctx) {
   throw lastError
 }
 
-async function run(ctx) {
+function stopViaSocket() {
+  return new Promise((resolve, reject) => {
+    const socket = connect(join(WORK, '.orbit', 'orbit.sock'))
+    let buffer = ''
+    socket.setEncoding('utf8')
+    socket.once('connect', () => socket.write(JSON.stringify({ id: randomUUID(), method: 'stop' }) + '\n'))
+    socket.on('data', (chunk) => {
+      buffer += chunk
+      const index = buffer.indexOf('\n')
+      if (index >= 0) {
+        socket.destroy()
+        resolve(JSON.parse(buffer.slice(0, index)))
+      }
+    })
+    socket.once('error', reject)
+    setTimeout(() => reject(new Error('stop socket timeout')), 5000)
+  })
+}
+
+async function runStop(ctx) {
   mkdirSync(WORK, { recursive: true })
   mkdirSync(join(HOME, 'results'), { recursive: true })
   const handle = await createRoot(ctx)
-  log({ step: 'root-created', sessionId: handle.agent.id })
+  log({ step: 'root-created', sessionId: handle.agent.id, scenario: 'stop' })
+  handle.agent.followup(msg(`You are running a controlled Orbit stop acceptance. Do exactly this and do not ask questions:
+1. Call orbit with {"action":"start","instruction":"Start a long-running command for the stop acceptance."}
+2. Call orbit with {"action":"declare","goal":"run a long command","acceptance":"the command is stopped by Orbit"}.
+3. Call the bash tool with {"command":"sleep 120","description":"long wait for stop acceptance"}.
+Do not stop the task yourself and do not ask questions.`))
+  await new Promise((resolve) => setTimeout(resolve, 8000))
+  const response = await stopViaSocket().catch((error) => ({ error: String(error && error.message) }))
+  log({ step: 'socket-stop', response })
+  let task = latestTask()
+  for (let attempt = 0; attempt < 60 && task?.state?.status === 'running'; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    task = latestTask()
+  }
+  let sleepLeft = ''
+  try {
+    sleepLeft = execSync('ps -axo pid,command | grep -F "sleep 120" | grep -v grep || true', { encoding: 'utf8' }).trim()
+  } catch {}
+  log({
+    step: 'stop-result',
+    status: task?.state?.status,
+    stop: task?.state?.stop?.reason,
+    confirmed: task?.state?.stop?.confirmation?.confirmed,
+    missing: task?.state?.stop?.confirmation?.missing,
+    sleepLeft,
+  })
+  await handle.dispose().catch(() => undefined)
+  await presetScope?.dispose?.().catch?.(() => undefined)
+}
+
+async function run(ctx) {
+  mkdirSync(WORK, { recursive: true })
+  mkdirSync(join(HOME, 'results'), { recursive: true })
+  if (SCENARIO === 'stop') {
+    await runStop(ctx)
+    return
+  }
+  const handle = await createRoot(ctx)
+  log({ step: 'root-created', sessionId: handle.agent.id, scenario: SCENARIO, initialContent: INITIAL_CONTENT })
   handle.agent.followup(msg(promptText()))
   const timeout = new Promise((resolve) => setTimeout(() => resolve('timeout'), 300_000))
   let finished = await Promise.race([handle.agent.whenIdle().then(() => 'idle'), timeout])
@@ -126,7 +188,17 @@ async function run(ctx) {
     status: task?.state?.status,
     inputVersion: task?.state?.input?.versions?.length,
     members: task?.state?.members?.length,
-    checks: task ? checksOf(task).map((check) => ({ number: check.number, kind: check.kind, status: check.status, verdict: check.result?.verdict })) : [],
+    checks: task
+      ? checksOf(task).map((check) => ({
+          number: check.number,
+          kind: check.kind,
+          status: check.status,
+          verdict: check.result?.verdict,
+          ready: check.result?.delivery?.ready,
+          findings: check.result?.findings?.length,
+          reason: check.result?.reason?.slice(0, 240),
+        }))
+      : [],
     completion: task?.state?.completion,
   })
   await handle.dispose().catch(() => undefined)

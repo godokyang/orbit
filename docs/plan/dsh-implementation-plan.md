@@ -275,3 +275,10 @@ B 阶段开工前只需补一份短设计：JEV 观察输入在 DSH 事件下的
 - 在隔离 `/tmp/orbit-real`（web）与 `/tmp/orbit-real-checker`（sdk 只读）上，用 `deepseek-account/deepseek-flash` 跑通真实 Root + 独立检查者：Root 写 `hello.txt` → 手动 artifact 检查 → 检查者返回 complete/ready/coverage complete → 成员派发/结算 → finish/accept → `complete`，停止四项证据全 true。
 - 细节、证明与边界见[真实模型验收记录](../reference/ts-dsh-real-acceptance-20261020.md)。凭据只读副本验收后删除，原 `~/.dsh` 未改。
 - 仍未做：冻结验收 #1（真实缺陷纠正）与 #2（真实停止中断）、多任务/重启、JEV 校准、Loom、发布安装。
+
+## 实施进展（2026-10-20，冻结验收 #1/#2 真实通过）
+
+- 冻结验收 #1（真实缺陷纠正）：真实检查者先发现 `goodbye` 不符合要求并给出 finding，Root 修正为 `hello`，第二次检查 complete/ready，任务以 checkNumber=2 完成。
+- 冻结验收 #2（真实停止）：Root 执行 `sleep 120` 时通过 CLI socket 停止，任务约 1 秒内 `paused`、四项证据全 true、无残留 sleep、会话保留。
+- 细节与边界见[真实模型验收记录](../reference/ts-dsh-real-acceptance-20261020.md)。仍未覆盖成员执行中停止、检查者进程在途、宿主崩溃后的 unconfirmed 重试。
+- 下一步：Loom C 阶段（合同 2.0 与节点迁移）与 D 阶段安装/退场。
