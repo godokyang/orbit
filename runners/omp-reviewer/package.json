@@ -1,7 +1,0 @@
-{
-  "name": "orbit-omp-reviewer",
-  "version": "0.0.0",
-  "private": true,
-  "type": "module",
-  "description": "Trusted Orbit factory using the installed OMP host exports; no private SDK dependencies."
-}

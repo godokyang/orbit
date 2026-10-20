@@ -1,4 +1,4 @@
-# D 阶段退场清单（待授权）
+# D 阶段退场清单（已执行）
 
 目标：新安装只依赖 DSH 与单一 npm 包 `@zeen/orbit`；仓库不再保留 Ruby/OMP 执行代码；`orbit doctor` 与 README 与现实一致。每个删除步骤需用户单独授权。
 
@@ -6,12 +6,12 @@
 
 | 项 | 动作 | 风险/前置 |
 | --- | --- | --- |
-| `contracts/host-omp.md` | 删除，新增 `contracts/host-dsh.md` | 需确认没有外部链接依赖旧路径 |
-| Ruby 执行代码与 `runners/omp-reviewer` | 删除 | 先确认旧 OMP 任务已停止、无未归档记录 |
-| `install.sh` 中 Ruby/OMP 探测与安装分支 | 删除/改写为 `orbit install` | 需要新安装脚本通过干净环境验证 |
-| OMP 专用测试与 fixtures | 删除 | 先跑完整 DSH 测试替代覆盖 |
+| `contracts/host-omp.md` | 已删除，新增 `contracts/host-dsh.md` | 完成 |
+| Ruby 执行代码与 `runners/omp-reviewer` | 已删除 | 完成 |
+| `install.sh`/`uninstall.sh` 旧分支 | 已删除，安装改用 `orbit install` | 干净 profile 已验证 |
+| OMP 专用测试与 fixtures | 已删除 | Orbit 127 / Loom 89 测试通过 |
 | `packages/*` 中 @orbit 私有包 | 保留为构建期 devDependencies；发布包已不依赖 | 确认 `pnpm pack` 内容 |
-| `private: true`、`version: 0.0.0` | 改为发布版本并去掉 private | **需版本号与发布授权** |
+| `private: true`、`version: 0.0.0` | 已改为 `0.1.0` 并去掉 private | **发布仍未执行** |
 | README/使用参考 | 已改写为 DSH；发布后补 npm 安装命令 | 发布前不要声称 npm 可用 |
 
 ## 2. Loom 仓库（工作树 `feat/dsh-migration`）

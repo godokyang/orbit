@@ -1,7 +1,6 @@
 {
   "name": "@zeen/orbit",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0",
   "type": "module",
   "description": "Single Orbit DSH bundle: host service, CLI, T0 and controlled profile patches.",
   "main": "./dist/host.mjs",
@@ -70,5 +69,13 @@
     "@orbit/cli": "workspace:*",
     "@orbit/core": "workspace:*",
     "@orbit/dsh-host": "workspace:*"
-  }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/godokyang/orbit.git"
+  },
+  "license": "MIT"
 }

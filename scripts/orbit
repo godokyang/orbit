@@ -1,6 +1,0 @@
-#!/usr/bin/env -S ruby --disable-gems
-# frozen_string_literal: true
-
-require_relative "../lib/orbit/cli"
-
-exit Orbit::CLI.run(ARGV)
