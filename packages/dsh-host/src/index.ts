@@ -908,6 +908,20 @@ export default class OrbitHost extends Service {
           multiSelect: { type: 'boolean', description: 'Whether several options may be selected.' },
         },
         output: TEXT_OUTPUT,
+        presentCall() {
+          return { card: 'generic', title: 'Orbit ask', kind: 'other' }
+        },
+        presentResult(_args: unknown, result: { content: Array<{ type?: string; text?: string }> }) {
+          const raw = result.content.find((block) => block.type === 'text')?.text ?? ''
+          try {
+            const parsed = JSON.parse(raw) as { answers?: Array<{ id?: string; selected?: string[]; custom?: string }> }
+            const first = parsed.answers?.[0]
+            const answer = first === undefined ? '' : [...(first.selected ?? []), first.custom ?? ''].filter(Boolean).join(' / ')
+            return { card: 'generic', title: 'Orbit ask', content: [{ type: 'text', text: answer || 'answered' }] }
+          } catch {
+            return { card: 'generic', title: 'Orbit ask', content: [{ type: 'text', text: raw }] }
+          }
+        },
         async execute(args: {
           question: string
           id?: string
