@@ -358,3 +358,9 @@ B 阶段开工前只需补一份短设计：JEV 观察输入在 DSH 事件下的
 - 因此当前 O3 listener 只对 Root 请求有效；成员提问不能复用 `ask_user_question`。需在“成员专用提问工具”与“降级为 send_message 到 Root”之间做产品选择。
 - 本轮未改变产品语义，只记录事实；Core/CLI 的 questions 存储与答复能力仍保留，可用于 Root 提问或未来成员工具。
 - 全套测试仍 115 个通过；未新增未验证的自动通道。
+
+## 实施进展（2026-10-20，成员专用 orbit_ask）
+
+- 按用户选择新增成员专用 `orbit_ask` 工具：成员调用后，Core 落盘 pending 问题，宿主等待 Root/用户答复；`orbit answer`/CLI 可答复，停止时取消并拒绝等待。
+- 工具仅接受受控任务中已登记成员；Root 或非成员调用会明确报错。问题 schema 为单问题（id/question/header/detail/options/multiSelect），避免 DSH ask 对子代理的限制。
+- 验证：typecheck/build 通过；全套 115 个测试通过。真实端到端尚未拿到：一次运行中 Root 未进入 start（只执行了 bash），另一次成员使用了已过期的 profile bundle；需刷新 profile 后重跑。

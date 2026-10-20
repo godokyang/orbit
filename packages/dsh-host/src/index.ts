@@ -11,7 +11,6 @@ import type {} from '@deepseek-ai/dsh-agent-loop'
 import type {} from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-jobs'
 import type {} from '@deepseek-ai/dsh-session-query'
-import type {} from '@deepseek-ai/dsh-user-questions'
 import {
   CONTROL_SOCKET_FILE,
   JEV_OBSERVATION_QUESTIONS,
@@ -805,6 +804,72 @@ export default class OrbitHost extends Service {
       }),
     )
 
+    ctx.tools.register(
+      defineTool({
+        name: 'orbit_ask',
+        description:
+          'Ask the Orbit supervisor a question while working as a supervised member. '
+          + 'The question is recorded durably and answered by the Root or the user; '
+          + 'the call waits for that answer. Only members of a running Orbit task may use this tool.',
+        parameters: {
+          question: { type: 'string', required: true, description: 'The question text.' },
+          id: { type: 'string', description: 'Stable question id. Defaults to "q".' },
+          header: { type: 'string', description: 'Optional short heading.' },
+          detail: { type: 'string', description: 'Optional supporting detail.' },
+          options: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Optional offered labels.',
+          },
+          multiSelect: { type: 'boolean', description: 'Whether several options may be selected.' },
+        },
+        async execute(args: {
+          question: string
+          id?: string
+          header?: string
+          detail?: string
+          options?: string[]
+          multiSelect?: boolean
+        }, exec: any): Promise<string> {
+          if (exec.agent === undefined) throw new Error('orbit_ask: no calling agent')
+          const projectRoot = agentCwd(ctx, exec.agent.id)
+          const task = await findTaskForSession(projectRoot, maxTasks, exec.agent.id)
+          if (task === undefined) throw new Error('orbit_ask is only available to members of a running Orbit task')
+          const state = await task.state()
+          if (state.status !== 'running' || state.stop !== undefined) throw new Error('orbit_ask: the task is stopped')
+          const members = await task.store.members()
+          if (!members.members.some((member) => member.id === exec.agent?.id)) {
+            throw new Error('orbit_ask is only available to registered members of a running Orbit task')
+          }
+          const input = args as {
+            question?: string
+            id?: string
+            header?: string
+            detail?: string
+            options?: string[]
+            multiSelect?: boolean
+          }
+          if (typeof input.question !== 'string' || input.question.length === 0) throw new Error('orbit_ask requires question')
+          const externalId = input.id ?? 'q'
+          const record = await task.askQuestion({
+            memberId: exec.agent.id,
+            externalId,
+            question: input.question,
+            ...(input.header === undefined ? {} : { header: input.header }),
+            ...(input.detail === undefined ? {} : { detail: input.detail }),
+            ...(input.options === undefined
+              ? {}
+              : { options: input.options.map((label) => ({ label })) }),
+            ...(input.multiSelect === undefined ? {} : { multiSelect: input.multiSelect }),
+          })
+          const answer = await host.waitForAnswer(task, record.id, exec.signal)
+          return JSON.stringify({
+            answers: [{ id: externalId, selected: answer.selected, ...(answer.custom === undefined ? {} : { custom: answer.custom }) }],
+          })
+        },
+      } as any),
+    )
+
     // H4: the Root's subagent call must reference a declared unit; park the
     // dispatch so agent/created can register the child before its first model call.
     ctx.on('tools/pre-execute', async (exec, next) => {
@@ -872,10 +937,24 @@ export default class OrbitHost extends Service {
     })
 
     // O3: member questions are recorded durably and wait for a Root/user answer.
-    ctx.on('user-questions/request', async (request, next) => {
+    ;(ctx.on as any)('user-questions/request', async (
+      request: {
+        agent?: { id: string }
+        questions: Array<{
+          id: string
+          question: string
+          header?: string
+          detail?: string
+          options?: Array<{ label: string; description?: string }>
+          multiSelect?: boolean
+        }>
+        signal?: AbortSignal
+      },
+      next: () => unknown,
+    ) => {
       const asker = request.agent
       if (asker === undefined) return next()
-      const session = ctx.sessions.get(asker.id)
+      const session = ctx.sessions.get(asker.id as never)
       const projectRoot = session?.header.cwd
       if (projectRoot === undefined) return next()
       const task = await findTaskForSession(projectRoot, maxTasks, String(asker.id)).catch(() => undefined)

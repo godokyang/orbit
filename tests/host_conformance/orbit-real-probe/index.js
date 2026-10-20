@@ -265,7 +265,7 @@ async function runQuestion(ctx) {
 1. Call orbit with {"action":"start","instruction":"Question relay acceptance."}
 2. Call orbit with {"action":"declare","goal":"relay one member question","acceptance":"the member receives the answer"}.
 3. From the declare result take the unit id. Call the subagent tool with description "question member" and a prompt that starts with exactly: orbit-unit: <unit id>
-   In that member prompt, instruct it to call ask_user_question with one question ("Which option?") offering alpha and beta, then report which option it received.
+   In that member prompt, instruct it to call the orbit_ask tool with {"question":"Which option?","options":["alpha","beta"]}, then report which option it received.
 4. Wait for the member and report its answer. Do not ask questions and do not stop the task.`))
   const asked = await waitForEvent('question/asked', 90000)
   const task = latestTask()
