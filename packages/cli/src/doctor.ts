@@ -18,7 +18,7 @@ export interface DoctorReport {
 }
 
 /** Local, read-only install check: profile exists, bundle is enabled, host dist is present. */
-export function doctor(home: string, profile: string): DoctorReport {
+export function doctor(home: string, profile: string, runT0 = false): DoctorReport {
   const checks: DoctorCheck[] = []
   const profileDir = join(home, 'profiles', profile)
   const manifestPath = join(profileDir, 'package.json')
@@ -51,6 +51,23 @@ export function doctor(home: string, profile: string): DoctorReport {
   })
   const hostDist = join(profileDir, 'node_modules', '@zeen', 'orbit', 'dist', 'host.mjs')
   checks.push({ name: 'host_dist', ok: existsSync(hostDist), detail: hostDist })
+  if (runT0) {
+    const t0 = join(profileDir, 'node_modules', '@zeen', 'orbit', 'dist', 't0.mjs')
+    if (!existsSync(t0)) {
+      checks.push({ name: 't0', ok: false, detail: `${t0} is missing` })
+    } else {
+      const result = spawnSync(process.execPath, [t0, '--profile', profile, '--role', 'node', '--sandbox', 'workspace-write'], {
+        encoding: 'utf8',
+        env: { ...process.env, DSH_HOME: home, ...(version === null ? {} : { DSH_BIN: binary }) },
+        timeout: 60_000,
+      })
+      checks.push({
+        name: 't0',
+        ok: result.status === 0,
+        detail: (result.status === 0 ? result.stdout : result.stderr || result.stdout).trim().slice(0, 500),
+      })
+    }
+  }
   return {
     ok: checks.every((check) => check.ok),
     contract: '2.0.0',

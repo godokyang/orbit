@@ -24,7 +24,7 @@ Usage:
   orbit answer [TASK] --question ID --selected A,B [--custom TEXT] [--json] [--project DIR]
   orbit prompt [TASK] --message TEXT [--json] [--project DIR]
   orbit abort [TASK] [--json] [--project DIR]
-  orbit doctor [--json] [--home DIR] [--profile P]
+  orbit doctor [--json] [--home DIR] [--profile P] [--t0]
   orbit export [TASK] --output FILE [--json] [--project DIR]
   orbit version [--json]
   orbit capabilities [--json]
@@ -47,6 +47,7 @@ interface Parsed {
   bootstrap?: string
   resultFile?: string
   dshBin?: string
+  t0?: boolean
   message?: string
   task?: string
   project: string
@@ -79,6 +80,7 @@ function parse(argv: string[]): Parsed | 'help' {
   let bootstrap: string | undefined
   let resultFile: string | undefined
   let dshBin: string | undefined
+  let t0 = false
   let message: string | undefined
   for (let index = 1; index < argv.length; index += 1) {
     const arg = argv[index]
@@ -91,6 +93,8 @@ function parse(argv: string[]): Parsed | 'help' {
       index += 1
     } else if (arg === '--message') {
       message = argv[++index]
+    } else if (arg === '--t0') {
+      t0 = true
     } else if (arg === '--dsh') {
       dshBin = argv[++index]
     } else if (arg === '--bootstrap') {
@@ -148,6 +152,7 @@ function parse(argv: string[]): Parsed | 'help' {
     ...(bootstrap === undefined ? {} : { bootstrap }),
     ...(resultFile === undefined ? {} : { resultFile }),
     ...(dshBin === undefined ? {} : { dshBin }),
+    ...(t0 ? { t0 } : {}),
     ...(message === undefined ? {} : { message }),
   }
 }
@@ -306,7 +311,11 @@ export async function runCli(argv: string[], io: Partial<CliIo> = {}): Promise<n
     }
 
     if (parsed.command === 'doctor') {
-      const report = doctor(parsed.home ?? process.env.DSH_HOME ?? join(process.env.HOME ?? '', '.dsh'), parsed.profile ?? 'orbit-app')
+      const report = doctor(
+        parsed.home ?? process.env.DSH_HOME ?? join(process.env.HOME ?? '', '.dsh'),
+        parsed.profile ?? 'orbit-app',
+        parsed.t0 === true,
+      )
       out(parsed.json ? JSON.stringify(report, null, 2) : `${report.ok ? 'ok' : 'problems'}  ${report.profile}  ${report.checks.map((check) => `${check.name}:${check.ok ? 'ok' : 'FAIL'}`).join(' ')}`)
       return report.ok ? 0 : 1
     }

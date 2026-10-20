@@ -384,6 +384,7 @@ describe('orbit-ts doctor', () => {
     await mkdir(join(profile, 'node_modules', '@zeen', 'orbit', 'dist'), { recursive: true })
     await writeFile(join(profile, 'package.json'), JSON.stringify({ dsh: { profile: { bundles: ['@zeen/orbit'] } } }))
     await writeFile(join(profile, 'node_modules', '@zeen', 'orbit', 'dist', 'host.mjs'), '')
+    await writeFile(join(profile, 'node_modules', '@zeen', 'orbit', 'dist', 't0.mjs'), 'process.exit(0)\n')
     const bin = join(home, 'dsh')
     await writeFile(bin, '#!/bin/sh\necho 0.2.1-rc.2\n', { mode: 0o755 })
     const previous = process.env.DSH_BIN
@@ -397,6 +398,12 @@ describe('orbit-ts doctor', () => {
       const bad = capture()
       expect(await runCli(['doctor', '--json', '--home', home, '--profile', 'orbit-app'], bad.io)).toBe(1)
       expect(JSON.parse(bad.out())).toMatchObject({ ok: false })
+
+      await writeFile(join(profile, 'package.json'), JSON.stringify({ dsh: { profile: { bundles: ['@zeen/orbit'] } } }))
+      const t0 = capture()
+      expect(await runCli(['doctor', '--json', '--t0', '--home', home, '--profile', 'orbit-app'], t0.io)).toBe(0)
+      expect(JSON.parse(t0.out())).toMatchObject({ ok: true })
+      expect((JSON.parse(t0.out()) as { checks: Array<{ name: string; ok: boolean }> }).checks.find((check) => check.name === 't0')).toMatchObject({ ok: true })
     } finally {
       if (previous === undefined) delete process.env.DSH_BIN
       else process.env.DSH_BIN = previous

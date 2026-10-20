@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
-import { assertControlledProfile, CONTROLLED_CORE_DISABLED, CONTROLLED_DISABLED } from '@orbit/dsh-host'
+import { assertControlledProfile, CONTROLLED_CORE_DISABLED, CONTROLLED_DISABLED } from '@orbit/dsh-host/profile'
 
 interface Args {
   profile?: string

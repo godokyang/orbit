@@ -64,7 +64,7 @@
 | `orbit abort [TASK] --json` | 中止绑定会话；不等于任务停止 |
 | `orbit stop [TASK] --json [--project DIR]` | 请求停止；返回不表示已确认 |
 | `orbit export [TASK] --output FILE --json [--project DIR]` | 自包含证据包 |
-| `orbit doctor --json [--home DIR] [--profile P]` | 安装检查：profile、bundle、host dist、dsh 版本 |
+| `orbit doctor --json [--home DIR] [--profile P] [--t0]` | 安装检查：profile、bundle、host dist、dsh 版本；`--t0` 追加受控配置断言 |
 
 `--project` 省略时从当前目录定位项目。`TASK` 省略时取最新任务；有多个历史任务时优先 running。
 

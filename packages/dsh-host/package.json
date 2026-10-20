@@ -14,6 +14,10 @@
     "./t0": {
       "types": "./dist/t0.d.mts",
       "import": "./dist/t0.mjs"
+    },
+    "./profile": {
+      "types": "./dist/profile.d.mts",
+      "import": "./dist/profile.mjs"
     }
   },
   "files": [

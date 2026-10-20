@@ -67,7 +67,7 @@
       "note": "fence=armed is not confirmation; only stopConfirmation.confirmed=true means stopped."
     },
     "doctor": {
-      "invocation": "orbit doctor [--json] [--home DIR] [--profile P]",
+      "invocation": "orbit doctor [--json] [--home DIR] [--profile P] [--t0]",
       "stdout_fields": ["ok", "contract", "home", "profile", "dsh", "checks"]
     },
     "export": {

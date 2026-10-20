@@ -6,5 +6,5 @@ export default defineConfig({
   dts: true,
   clean: true,
   sourcemap: true,
-  noExternal: ['@orbit/core', '@orbit/dsh-host', '@orbit/cli'],
+  noExternal: ['@orbit/core', '@orbit/dsh-host', '@orbit/dsh-host/profile', '@orbit/cli'],
 })
