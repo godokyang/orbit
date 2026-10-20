@@ -93,6 +93,26 @@ describe('orbit-ts status/events', () => {
     expect(JSON.parse(sink.out())).toMatchObject({ taskId: 'task-from-socket', inputVersion: 2 })
   })
 
+  it('reads session projections from the live host', async () => {
+    const dir = await project()
+    await startTask(dir)
+    await fakeControl(dir, () => ({
+      as_of_seq: 9,
+      root: {
+        session_id: 'root-1',
+        state: 'available',
+        visible_text: [{ seq: 1, text: 'done' }],
+        user_messages: [{ id: 'u1', seq: 2, text: 'go' }],
+        activities: [],
+        questions: [],
+      },
+      members: [],
+    }))
+    const sink = capture()
+    expect(await runCli(['sessions', '--json', '--project', dir], sink.io)).toBe(0)
+    expect(JSON.parse(sink.out())).toMatchObject({ as_of_seq: 9, root: { session_id: 'root-1' } })
+  })
+
   it('prints a human summary with a next action', async () => {
     const dir = await project()
     await startTask(dir)

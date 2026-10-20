@@ -15,15 +15,16 @@ const USAGE = `orbit — Orbit thin client
 Usage:
   orbit-ts status [TASK] [--json] [--project DIR]
   orbit-ts events [TASK] [--json] [--project DIR]
-  orbit-ts stop   [TASK] [--json] [--project DIR]
-  orbit-ts export [TASK] --output FILE [--json] [--project DIR]
+  orbit stop   [TASK] [--json] [--project DIR]
+  orbit sessions [TASK] [--json] [--project DIR]
+  orbit export [TASK] --output FILE [--json] [--project DIR]
 
 status/events read the live host through the project control socket and fall
 back to the durable task record when no host is running. stop requires the
 live host. export snapshots the task record into a self-contained JSON file.`
 
 interface Parsed {
-  command: 'status' | 'events' | 'stop' | 'export'
+  command: 'status' | 'events' | 'stop' | 'export' | 'sessions'
   task?: string
   project: string
   json: boolean
@@ -36,7 +37,7 @@ function parse(argv: string[]): Parsed | 'help' {
   if (argv.length === 0) throw new UsageError('missing command')
   const command = argv[0]
   if (command === '--help' || command === '-h' || command === 'help') return 'help'
-  if (command !== 'status' && command !== 'events' && command !== 'stop' && command !== 'export') {
+  if (command !== 'status' && command !== 'events' && command !== 'stop' && command !== 'export' && command !== 'sessions') {
     throw new UsageError(`unknown command: ${String(command)}`)
   }
   let task: string | undefined
@@ -162,6 +163,33 @@ export async function runCli(argv: string[], io: Partial<CliIo> = {}): Promise<n
       }
       if (!response.ok) throw new Error(response.error.message)
       printEvents(response.result as { taskId: string; events: [] }, parsed.json, out)
+      return 0
+    }
+
+    if (parsed.command === 'sessions') {
+      const response = await control(parsed.project, {
+        id: randomUUID(),
+        method: 'sessions',
+        ...(parsed.task === undefined ? {} : { task: parsed.task }),
+      })
+      if (response === undefined) throw new Error(`no live Orbit host for ${parsed.project} (control socket missing)`)
+      if (!response.ok) throw new Error(response.error.message)
+      const result = response.result as {
+        as_of_seq: number
+        root: { session_id: string; state: string; visible_text: unknown[]; user_messages: unknown[]; activities: unknown[]; questions: unknown[] }
+        members: Array<{ session_id: string; state: string; visible_text: unknown[]; user_messages: unknown[]; activities: unknown[]; questions: unknown[] }>
+      }
+      if (parsed.json) {
+        out(JSON.stringify(result, null, 2))
+      } else {
+        const sessions = [result.root, ...result.members]
+        out(`as_of_seq ${result.as_of_seq}`)
+        for (const session of sessions) {
+          out(
+            `${session.session_id}  ${session.state}  visible ${session.visible_text.length}  user ${session.user_messages.length}  activities ${session.activities.length}  questions ${session.questions.length}`,
+          )
+        }
+      }
       return 0
     }
 

@@ -40,6 +40,7 @@ import { ControlServer } from './control.js'
 import { buildCheckerPrompt, buildProcessCheckerPrompt, runChecker } from './checker.js'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import { observationWindow, orbitObservationDefinition } from './observation.js'
+import { projectSession, unavailableSession } from './sessions-projection.js'
 import { allowedSet, authorizeRoute, routeKey, type ModelRoute } from './authorization.js'
 
 export { ControlServer } from './control.js'
@@ -879,6 +880,17 @@ export default class OrbitHost extends Service {
       const service = await this.open(projectRoot, this.maxTasks, request.task)
       return { ok: true, taskId: (await service.state()).id, events: await service.store.events() }
     }
+    if (request.method === 'sessions') {
+      const service = await this.open(projectRoot, this.maxTasks, request.task)
+      const state = await service.state()
+      const members = await service.store.members()
+      const root = await this.projectSession(state.root.sessionId)
+      const projected = []
+      for (const member of members.members) {
+        projected.push(await this.projectSession(member.id))
+      }
+      return { ok: true, as_of_seq: root.as_of_seq, root, members: projected }
+    }
     if (request.method === 'stop') {
       const service = await this.open(projectRoot, this.maxTasks, request.task)
       const state = await this.beginStop(service, 0)
@@ -1085,6 +1097,20 @@ export default class OrbitHost extends Service {
       await service.store.writeArchive(`sessions/${sessionId}/seq-${segment.first}-${segment.last}.json`, payload)
     } catch (error) {
       console.error(`orbit: session archive failed for ${sessionId}: ${(error as Error).message}`)
+    }
+  }
+
+  /** Read-only projection for one session; unavailable after the host is gone. */
+  private async projectSession(sessionId: string): Promise<ReturnType<typeof unavailableSession>> {
+    try {
+      const snapshot = await this.ctx.sessionQuery.readSession(sessionId as never)
+      if (snapshot === undefined) return unavailableSession(sessionId)
+      const session = this.ctx.sessions.get(sessionId as never)
+      const observation = session === undefined ? undefined : this.ctx.sessionProjections.stateOf(session, 'orbitObservation')
+      const questions = session === undefined ? undefined : this.ctx.sessionProjections.stateOf(session, 'userQuestions' as never)
+      return projectSession(snapshot as never, observation, questions)
+    } catch {
+      return unavailableSession(sessionId)
     }
   }
 

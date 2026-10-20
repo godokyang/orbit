@@ -302,3 +302,10 @@ B 阶段开工前只需补一份短设计：JEV 观察输入在 DSH 事件下的
 - 若 owner 是另一个仍存活的进程（例如另一个窗口），不误判为孤儿，只记录警告并保留原状态，避免两个窗口互相抢占。
 - 验证：Core 孤儿恢复单测（同实例不变、异实例转 unconfirmed、事件）；DSH 探针完整链路无回归；全套 102 个测试通过。
 - 边界：没有心跳/租约，pid 复用或宿主窗口并发写同一任务仍未完全排除；CLI 本地只读 status 不做对账。
+
+## 实施进展（2026-10-20，会话投影与 CLI sessions）
+
+- 新增只读 `projectSession`：从已提交的 DSH 会话事件与 observation 单元投影可见助手文本、真实用户消息（仅 `source.kind=user`）、工具活动、待答问题与 turn 完成送达；宿主已退出或会话不可读时返回 `unavailable`，不伪造在线状态。
+- 私有 socket 新增 `sessions` 方法：返回 Root 与全部已登记成员的投影及 `as_of_seq`；CLI 新增 `orbit sessions [TASK] --json`，仅在有活宿主时可用。
+- 验证：投影单测 2 个、CLI fake socket 单测 1 个；DSH 探针 CLI 读取 `asOfSeq=22`、visible=1、userMessages=1、activities=1；全套 105 个测试通过。
+- 仍未做：投影字段最终按合同 2.0 冻结、离线归档投影、问题/送达的更细分类、Loom 消费。

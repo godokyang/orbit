@@ -172,6 +172,15 @@ async function run(ctx) {
   log({ step: 'cli-status', source: 'socket', taskId: cliStatus.taskId, status: cliStatus.status })
   const cliEvents = JSON.parse(await cli(['events', '--json', '--project', WORK]))
   log({ step: 'cli-events', count: cliEvents.events?.length })
+  const cliSessions = JSON.parse(await cli(['sessions', '--json', '--project', WORK]))
+  log({
+    step: 'cli-sessions',
+    asOfSeq: cliSessions.as_of_seq,
+    rootState: cliSessions.root?.state,
+    visible: cliSessions.root?.visible_text?.length,
+    userMessages: cliSessions.root?.user_messages?.length,
+    activities: cliSessions.root?.activities?.length,
+  })
 
   // Amendment: the durable version becomes v2 and the next admission sees it.
   scripts.length = 0
