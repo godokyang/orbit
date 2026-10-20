@@ -7,8 +7,9 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent-loop'
 import type {} from '@deepseek-ai/dsh-session'
-import { CONTROL_SOCKET_FILE, TaskService, TaskStore, type ControlRequest, type TaskState } from '@orbit/core'
+import { CONTROL_SOCKET_FILE, TaskService, TaskStore, digestWorkspace, type ControlRequest, type ModelIdentity, type TaskState } from '@orbit/core'
 import { ControlServer } from './control.js'
+import { buildCheckerPrompt, runChecker } from './checker.js'
 
 export { ControlServer } from './control.js'
 
@@ -25,6 +26,9 @@ export interface Config {
   maxTasks?: number
   /** Native subagent tool name; controlled dispatch requires this exact tool. */
   subagentTool?: string
+  /** Optional explicit checker route; the dsh-sdk provider defaults apply when absent. */
+  checkerProvider?: string
+  checkerModel?: string
 }
 
 interface PendingDispatch {
@@ -195,15 +199,18 @@ async function bounded(promise: Promise<unknown>, ms: number): Promise<boolean> 
  * agents are fenced, and stop teardown records the evidence it actually saw.
  */
 export default class OrbitHost extends Service {
-  static inject = ['tools', 'sessions', 'agents', 'systemPrompt']
+  static inject = ['tools', 'sessions', 'agents', 'systemPrompt', 'subagents']
 
   static Config: z<Config> = z.object({
     maxTasks: z.number().step(1).min(1).default(64),
     subagentTool: z.string().default('subagent'),
+    checkerProvider: z.string().default(''),
+    checkerModel: z.string().default(''),
   })
 
   private readonly maxTasks: number
   private readonly subagentTool: string
+  private readonly checkerModel: ModelIdentity | undefined
   private readonly pending = new Map<string, PendingDispatch[]>()
   private readonly fencedSessions = loadFenceRegistry()
   private readonly requirementDisposers = new Map<string, () => void>()
@@ -214,6 +221,10 @@ export default class OrbitHost extends Service {
     const maxTasks = config.maxTasks ?? 64
     this.maxTasks = maxTasks
     this.subagentTool = config.subagentTool ?? 'subagent'
+    this.checkerModel =
+      config.checkerProvider !== undefined && config.checkerProvider.length > 0 && config.checkerModel !== undefined && config.checkerModel.length > 0
+        ? { provider: config.checkerProvider, model: config.checkerModel }
+        : undefined
     const host = this
 
     ctx.tools.register(
@@ -227,8 +238,8 @@ export default class OrbitHost extends Service {
           action: {
             type: 'string',
             required: true,
-            enum: ['start', 'status', 'stop', 'declare', 'finish', 'accept', 'reject'],
-            description: 'start | status | stop | declare | finish | accept | reject',
+            enum: ['start', 'status', 'stop', 'declare', 'finish', 'accept', 'reject', 'check', 'complete'],
+            description: 'start | status | stop | declare | finish | accept | reject | check | complete',
           },
           instruction: { type: 'string', description: 'The user instruction, verbatim. Required for action=start.' },
           task: { type: 'string', description: 'Optional task id; defaults to the latest task.' },
@@ -254,7 +265,7 @@ export default class OrbitHost extends Service {
           reason: { type: 'string', description: 'Rejection reason. Required for action=reject.' },
         },
         output: TEXT_OUTPUT,
-        timeoutMs: 15_000,
+        timeoutMs: 600_000,
         async execute(args, exec) {
           const agent = exec.agent
           if (agent === undefined) throw new Error('orbit: the tool requires an agent-bound caller')
@@ -276,6 +287,8 @@ export default class OrbitHost extends Service {
               instruction,
               source: { kind: 'explicit-text', verbatim: true, at: new Date().toISOString() },
             })
+            host.fencedSessions.delete(agent.id)
+            saveFenceRegistry(host.fencedSessions)
             host.attachRequirements(agent, service)
             await host.ensureControl(projectRoot).catch((error: Error) => {
               console.error(`orbit: control socket unavailable: ${error.message}`)
@@ -292,6 +305,56 @@ export default class OrbitHost extends Service {
             const service = await openTask(projectRoot, maxTasks, (args as { task?: string }).task)
             const state = await host.beginStop(service, 50)
             return JSON.stringify({ ok: true, ...summarize(state), fence: state.stop?.fence ?? 'none', teardown: 'scheduled' })
+          }
+
+          if (action === 'check') {
+            const service = await openTask(projectRoot, maxTasks, (args as { task?: string }).task)
+            const state = await service.state()
+            if (state.status !== 'running') throw new Error(`orbit: cannot check a ${state.status} task`)
+            const rootAgent = ctx.agents.get(state.root.sessionId as never)
+            if (rootAgent === undefined) throw new Error('orbit: the Root agent is not live; cannot run an independent check')
+            const snapshot = await digestWorkspace(state.workspace.artifactRoot)
+            const check = await service.requestCheck({
+              role: 'reviewer',
+              kind: 'artifact',
+              trigger: 'manual',
+              artifactDigest: snapshot.digest,
+              ...(host.checkerModel === undefined ? {} : { model: host.checkerModel }),
+            })
+            const prompt = buildCheckerPrompt({ state, taskDir: service.store.dir, artifactDigest: snapshot.digest })
+            try {
+              const raw = await runChecker({
+                subagents: ctx.subagents,
+                parent: rootAgent,
+                prompt,
+                cwd: state.workspace.artifactRoot,
+                signal: exec.signal,
+                ...(host.checkerModel === undefined ? {} : { model: host.checkerModel }),
+              })
+              const recorded = await service.recordCheckResult(check.number, raw)
+              return JSON.stringify({
+                ok: true,
+                checkNumber: check.number,
+                finalization: recorded.finalization,
+                verdict: recorded.check.result?.verdict,
+                ready: recorded.check.result?.delivery.ready,
+                findings: recorded.check.result?.findings.length ?? 0,
+              })
+            } catch (error) {
+              await service.failCheck(check.number, { kind: 'checker_error', message: (error as Error).message }).catch(() => undefined)
+              throw new Error(`orbit: independent check failed: ${(error as Error).message}`)
+            }
+          }
+
+          if (action === 'complete') {
+            const service = await openTask(projectRoot, maxTasks, (args as { task?: string }).task)
+            const state = await service.state()
+            if (state.status !== 'running') throw new Error(`orbit: cannot complete a ${state.status} task`)
+            const snapshot = await digestWorkspace(state.workspace.artifactRoot)
+            const gate = await service.requestCompletion(snapshot.digest)
+            if (!gate.ok) return JSON.stringify({ ...gate })
+            setTimeout(() => { void host.performStop(service, snapshot.digest) }, 50)
+            return JSON.stringify({ ok: true, completion: 'scheduled', artifactDigest: snapshot.digest })
           }
 
           if (action === 'declare') {
@@ -411,8 +474,8 @@ export default class OrbitHost extends Service {
     // H3/H5: a stopped task's agents cannot use tools. The fence cache is
     // rebuilt from DSH_HOME at load; the durable task record remains the authority.
     ctx.tools.guard((exec) => {
-      if (exec.agent !== undefined && host.fencedSessions.has(exec.agent.id)) {
-        return 'orbit: this task is stopped; tool use is fenced'
+      if (exec.agent !== undefined && host.fencedSessions.has(exec.agent.id) && exec.name !== 'orbit') {
+        return 'orbit: this task is stopped; tool use is fenced (the orbit tool may start a new task)'
       }
       return undefined
     })
@@ -479,7 +542,7 @@ export default class OrbitHost extends Service {
    * cancel the Root and registered members, wait for idle, settle members, then
    * confirm stop with the observed evidence. Missing evidence stays unconfirmed.
    */
-  private async performStop(service: TaskService): Promise<void> {
+  private async performStop(service: TaskService, artifactDigest = ''): Promise<void> {
     const state = await service.state()
     if (state.stop === undefined) return
     const evidence: Record<string, boolean> = {
@@ -512,7 +575,7 @@ export default class OrbitHost extends Service {
       evidence.members_stopped = stopped
       evidence.checks_settled = (await service.state()).checks.inFlight === null
 
-      await service.confirmStop({ artifactDigest: '', evidence })
+      await service.confirmStop({ artifactDigest, evidence })
     } catch (error) {
       // Never fabricate confirmation: a failed teardown leaves the durable stop
       // record unconfirmed for a later explicit retry.

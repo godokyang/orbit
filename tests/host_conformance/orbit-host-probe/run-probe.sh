@@ -9,6 +9,8 @@ DSH_HOME=${DSH_HOME:-/tmp/orbit-host-probe}
 export DSH_HOME
 PROFILE=${PROFILE:-orbit-t1}
 DSH_BIN=${DSH_BIN:-/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh}
+DSH_CLI_JS=${DSH_CLI_JS:-/Applications/DeepSeek Harness.app/Contents/Resources/app.asar/dsh/node_modules/@deepseek-ai/dsh-desktop-host/lib/cli.js}
+CHECKER_HOME="${DSH_HOME}-checker"
 HOST_DIST="$REPO/packages/dsh-host/dist/index.mjs"
 CLI_DIST="$REPO/packages/cli/dist/cli.mjs"
 
@@ -20,6 +22,14 @@ rm -rf "$DSH_HOME/project"
 if [ ! -f "$DSH_HOME/profiles/$PROFILE/package.json" ]; then
   "$DSH_BIN" --profile "$PROFILE" --from-default-profile sdk --dump-config > /dev/null
 fi
+if [ ! -d "$DSH_HOME/profiles/$PROFILE/node_modules/@deepseek-ai/dsh-subagent-dsh-sdk" ]; then
+  echo "missing dsh-sdk provider; run: DSH_HOME=$DSH_HOME dsh plugin --profile $PROFILE add @deepseek-ai/dsh-subagent-dsh-sdk@0.2.1-rc.2 @deepseek-ai/dsh-sdk-client@0.2.1-rc.2" >&2
+  exit 1
+fi
+mkdir -p "$CHECKER_HOME"
+if [ ! -f "$CHECKER_HOME/profiles/orbit-checker/package.json" ]; then
+  DSH_HOME="$CHECKER_HOME" "$DSH_BIN" --profile orbit-checker --from-default-profile sdk --dump-config > /dev/null
+fi
 
 HOST_RUN="$DSH_HOME/profiles/$PROFILE/orbit-host"
 PROBE_RUN="$DSH_HOME/profiles/$PROFILE/orbit-host-probe"
@@ -29,12 +39,36 @@ printf '{"type":"module"}\n' > "$HOST_RUN/package.json"
 cp "$PROBE_DIR/index.js" "$PROBE_RUN/index.js"
 printf '{"type":"module"}\n' > "$PROBE_RUN/package.json"
 
+CHILD_RUN="$CHECKER_HOME/profiles/orbit-checker/orbit-checker-probe"
+mkdir -p "$CHILD_RUN"
+cp "$PROBE_DIR/checker-child.js" "$CHILD_RUN/index.js"
+printf '{"type":"module"}\n' > "$CHILD_RUN/package.json"
+cat > "$CHECKER_HOME/child.patch.yml" <<EOF
+- insert:
+    - id: orbit-checker-probe
+      name: '$CHILD_RUN/index.js'
+- id: session-log-deepseek
+  disabled: true
+EOF
+
 cat > "$DSH_HOME/probe.patch.yml" <<EOF
 - insert:
     - id: orbit-host
       name: '$HOST_RUN/index.mjs'
     - id: orbit-host-probe
       name: '$PROBE_RUN/index.js'
+    - id: subagent-dsh-sdk
+      name: '@deepseek-ai/dsh-subagent-dsh-sdk'
+      config:
+        dshBin: '$DSH_CLI_JS'
+        profile: orbit-checker
+        dshHome: '$CHECKER_HOME'
+        patches:
+          - '$CHECKER_HOME/child.patch.yml'
+        provider: probe
+        model: probe-1
+        env:
+          ELECTRON_RUN_AS_NODE: '1'
 EOF
 
 OUT="$DSH_HOME/results/orbit-host.out"

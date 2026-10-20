@@ -67,10 +67,10 @@ function tasksRoot(project) { return join(project, '.orbit', 'tasks') }
 function taskDirs(project) {
   const root = tasksRoot(project)
   if (!existsSync(root)) return []
-  return readdirSync(root).filter((entry) => !entry.startsWith('.')).map((entry) => join(root, entry))
+  return readdirSync(root).filter((entry) => !entry.startsWith('.')).sort().map((entry) => join(root, entry))
 }
 function readTask(project) {
-  for (const dir of taskDirs(project)) {
+  for (const dir of taskDirs(project).reverse()) {
     const stateFile = join(dir, 'state.json')
     const unitsFile = join(dir, 'work-units.json')
     const membersFile = join(dir, 'members.json')
@@ -143,6 +143,26 @@ async function run(ctx) {
   const unit = task?.units?.units?.[0]
   log({ step: 'declare', unitId: unit?.id, unitStatus: unit?.status, inputVersion: unit?.inputVersion })
 
+  // Independent checker through the dsh-sdk child process.
+  scripts.length = 0
+  scripts.push(() => toolChunks('orbit', { action: 'check' }))
+  scripts.push(() => textChunks('checked'))
+  handle.agent.followup(msg('Run the independent check.'))
+  await handle.agent.whenIdle()
+  task = readTask(WORK)
+  const checkFile = join(task.dir, 'checks', '1.json')
+  const check = existsSync(checkFile) ? JSON.parse(readFileSync(checkFile, 'utf8')) : undefined
+  const checkResults = await toolResults(ctx, handle.agent.id)
+  log({
+    step: 'check',
+    checkStatus: check?.status,
+    verdict: check?.result?.verdict,
+    ready: check?.result?.delivery?.ready,
+    coverageComplete: check?.result?.coverage?.complete,
+    finalization: Boolean(task?.state?.finalization),
+    last: checkResults.at(-1),
+  })
+
   // Controlled dispatch: fake Root calls subagent with the unit reference.
   scripts.push(() => toolChunks('subagent', {
     description: 'implement slice',
@@ -164,23 +184,45 @@ async function run(ctx) {
   const results = await toolResults(ctx, handle.agent.id)
   log({ step: 'dispatch-result', last: results.at(-1) })
 
-  // Let the child settle, then stop through the external CLI/socket path.
+  // Let the child settle, then finish/accept the unit and request completion.
   await new Promise((resolve) => setTimeout(resolve, 1200))
   log({ step: 'child-status', status: ctx.agents.get(registered.member.id)?.status })
   scripts.length = 0
-  const stopCli = JSON.parse(await cli(['stop', '--json', '--project', WORK]))
-  log({ step: 'cli-stop', taskId: stopCli.taskId, status: stopCli.status, fence: stopCli.fence })
+  scripts.push(() => toolChunks('orbit', { action: 'finish', unit: unit?.id, outcome: 'completed', summary: 'probe worker delivered' }))
+  scripts.push(() => textChunks('finished'))
+  handle.agent.followup(msg('Finish the member unit.'))
+  await handle.agent.whenIdle()
+  task = readTask(WORK)
+  log({
+    step: 'finish',
+    unitStatus: task?.units?.units?.[0]?.status,
+    memberStatus: task?.members?.members?.[0]?.status,
+  })
+
+  scripts.length = 0
+  scripts.push(() => toolChunks('orbit', { action: 'accept', unit: unit?.id }))
+  scripts.push(() => textChunks('accepted'))
+  handle.agent.followup(msg('Accept the unit.'))
+  await handle.agent.whenIdle()
+  task = readTask(WORK)
+  log({ step: 'accept', unitStatus: task?.units?.units?.[0]?.status })
+
+  scripts.length = 0
+  scripts.push(() => toolChunks('orbit', { action: 'complete' }))
+  handle.agent.followup(msg('Complete the task.'))
+  await handle.agent.whenIdle()
   task = await waitFor(async () => {
     const current = readTask(WORK)
     return current?.state?.status !== 'running' ? current : undefined
-  }, 12000, 'stop confirmation').catch(() => readTask(WORK))
+  }, 15000, 'completion confirmation').catch(() => readTask(WORK))
   log({
-    step: 'stop',
+    step: 'complete',
     status: task?.state?.status,
     stop: task?.state?.stop?.reason,
-    fence: task?.state?.stop?.fence,
     confirmed: task?.state?.stop?.confirmation?.confirmed,
     missing: task?.state?.stop?.confirmation?.missing,
+    completion: task?.state?.completion,
+    invalidation: task?.state?.completionInvalidation,
   })
 
   scripts.length = 0
@@ -191,6 +233,22 @@ async function run(ctx) {
   await handle.agent.whenIdle()
   const after = await toolResults(ctx, handle.agent.id)
   log({ step: 'fenced-dispatch', newResults: after.length - beforeFence, last: after.at(-1) })
+
+  // A stopped session may start a fresh task; the old fence must not block it.
+  scripts.length = 0
+  scripts.push(() => toolChunks('orbit', { action: 'start', instruction: 'Second supervised task.' }))
+  scripts.push(() => textChunks('second started'))
+  handle.agent.followup(msg('Start a second task.'))
+  await handle.agent.whenIdle()
+  task = readTask(WORK)
+  log({ step: 'new-task-after-stop', taskId: task?.state?.id, status: task?.state?.status })
+  const stopSecond = JSON.parse(await cli(['stop', '--json', '--project', WORK]))
+  log({ step: 'cli-stop-second', taskId: stopSecond.taskId, status: stopSecond.status, fence: stopSecond.fence })
+  const secondState = await waitFor(async () => {
+    const current = readTask(WORK)
+    return current?.state?.status !== 'running' ? current : undefined
+  }, 12000, 'second stop confirmation').catch(() => readTask(WORK))
+  log({ step: 'second-stop', status: secondState?.state?.status, confirmed: secondState?.state?.stop?.confirmation?.confirmed })
 
   await handle.dispose()
   log({

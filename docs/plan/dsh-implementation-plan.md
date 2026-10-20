@@ -130,3 +130,11 @@ B 阶段开工前只需补一份短设计：JEV 观察输入在 DSH 事件下的
 - `@orbit/cli`（bin `orbit-ts`，D 阶段再并入 `orbit`）实现 `status` / `events` / `stop`：有活宿主时走 socket，status/events 无宿主时回退只读本地记录；stop 无活宿主时失败关闭。
 - 验证：新增 8 个 vitest（control server 3、CLI 5），全套 22 个通过；DSH T1 探针改为通过真实 CLI 子进程执行 status/events/stop，外部 stop 后任务 `paused`、`confirmed=true`、围栏仍拒绝第二次派发。
 - 仍未做：检查者子进程（H7）、T0 组合断言与受控 profile bundle、真实模型、冻结验收 #1/#2、Loom。
+
+## 实施进展（2026-10-20，独立检查者与完成门）
+
+- H7：`orbit` 工具新增 `check`，用 `digestWorkspace` 对产物根做确定性摘要（路径、可执行位、大小、内容/链接目标；排除 `.git`/`.orbit`/`node_modules`，有界），再经 `dsh-sdk` 后端启动独立 DSH 子进程；子进程使用隔离 `DSH_HOME`、独立 profile 与只读意图，返回 `check-result` JSON，由 Core 的 zod/语义校验落盘。provider 缺失、非 completed 或非法结果都失败关闭并记 `check/failed`。
+- 新增 `complete` 动作：先核对完成门（当前手动终检、覆盖完整、无 open finding、成员结算、无在途检查），再入队完成停止；收束后用同一产物摘要复核并记 `complete`，否则 `paused` + `completion_invalidation`。
+- 停止围栏改为任务边界：停止后除 `orbit` 工具外全部 fenced；同一 Root 会话成功 `start` 新任务会释放会话围栏，旧任务记录与成员仍保持终态。
+- 验证：DSH 探针装入 `@deepseek-ai/dsh-subagent-dsh-sdk` / `dsh-sdk-client`，用独立 checker profile 的假模型返回合法结果，跑通 start → declare → check（completed、finalization=true）→ subagent 登记 → finish/accept → complete（confirmed、missing=[]、completion 记录）→ 旧任务围栏拒绝派发 → 同会话新任务 start → CLI stop 后 paused。实时日志见 `$DSH_HOME/results/orbit-host.out`。
+- 仍未做：T0 组合断言、受控 profile bundle/preset、真实模型（checker 与 Root）、冻结验收 #1/#2、Loom。

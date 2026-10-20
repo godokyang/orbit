@@ -22,3 +22,13 @@ The probe also spawns the built `@orbit/cli` (`ORBIT_CLI`) as a real child
 process to run `status`, `events` and `stop` against the project socket, then
 asserts the task reached `paused` with `confirmed=true` and a later dispatch is
 still fenced.
+
+The checker leg needs the SDK backend installed in the probe profile:
+
+```sh
+DSH_HOME=/tmp/orbit-host-probe dsh plugin --profile orbit-t1 add \
+  @deepseek-ai/dsh-subagent-dsh-sdk@0.2.1-rc.2 @deepseek-ai/dsh-sdk-client@0.2.1-rc.2
+```
+
+The script creates an isolated `-checker` home whose fake model returns a valid
+check result, so it verifies the real subprocess seam without a real model.
