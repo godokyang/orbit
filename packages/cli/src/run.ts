@@ -28,7 +28,7 @@ Usage:
   orbit export [TASK] --output FILE [--json] [--project DIR]
   orbit version [--json]
   orbit capabilities [--json]
-  orbit launch [--json] [--profile P] [--home DIR] [--project DIR] [--bootstrap FILE] [--result FILE]
+  orbit launch [--json] [--profile P] [--home DIR] [--project DIR] [--bootstrap FILE] [--result FILE] [--dsh BIN]
 
 status/events read the live host through the project control socket and fall
 back to the durable task record when no host is running. stop requires the
@@ -46,6 +46,7 @@ interface Parsed {
   session?: string
   bootstrap?: string
   resultFile?: string
+  dshBin?: string
   message?: string
   task?: string
   project: string
@@ -77,6 +78,7 @@ function parse(argv: string[]): Parsed | 'help' {
   let session: string | undefined
   let bootstrap: string | undefined
   let resultFile: string | undefined
+  let dshBin: string | undefined
   let message: string | undefined
   for (let index = 1; index < argv.length; index += 1) {
     const arg = argv[index]
@@ -89,6 +91,8 @@ function parse(argv: string[]): Parsed | 'help' {
       index += 1
     } else if (arg === '--message') {
       message = argv[++index]
+    } else if (arg === '--dsh') {
+      dshBin = argv[++index]
     } else if (arg === '--bootstrap') {
       bootstrap = argv[++index]
     } else if (arg === '--result') {
@@ -143,6 +147,7 @@ function parse(argv: string[]): Parsed | 'help' {
     ...(session === undefined ? {} : { session }),
     ...(bootstrap === undefined ? {} : { bootstrap }),
     ...(resultFile === undefined ? {} : { resultFile }),
+    ...(dshBin === undefined ? {} : { dshBin }),
     ...(message === undefined ? {} : { message }),
   }
 }
@@ -313,6 +318,7 @@ export async function runCli(argv: string[], io: Partial<CliIo> = {}): Promise<n
         ...(parsed.home === undefined ? {} : { home: parsed.home }),
         ...(parsed.bootstrap === undefined ? {} : { bootstrap: parsed.bootstrap }),
         ...(parsed.resultFile === undefined ? {} : { result: parsed.resultFile }),
+        ...(parsed.dshBin === undefined ? {} : { dshBin: parsed.dshBin }),
       })
       out(parsed.json ? JSON.stringify(spec, null, 2) : `${spec.profile}  cwd ${spec.cwd}  socket ${spec.control_socket}`)
       return 0

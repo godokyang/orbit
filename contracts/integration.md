@@ -74,6 +74,7 @@
 {
   "kind": "dsh",
   "contract": "2.0.0",
+  "command": "dsh",
   "profile": "orbit-node",
   "cwd": "/abs/project",
   "argv": ["--profile", "orbit-node"],

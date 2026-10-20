@@ -28,6 +28,7 @@ export const CAPABILITIES = {
 export interface LaunchSpec {
   kind: 'dsh'
   contract: string
+  command: string
   profile: string
   cwd: string
   argv: string[]
@@ -51,6 +52,7 @@ export function buildLaunchSpec(input: {
   const spec: LaunchSpec = {
     kind: 'dsh',
     contract: INTEGRATION_CONTRACT.version,
+    command: input.dshBin ?? process.env.DSH_BIN ?? 'dsh',
     profile,
     cwd: input.projectRoot,
     argv: ['--profile', profile],

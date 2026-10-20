@@ -15,8 +15,8 @@
       "stdout_fields": ["integration_contract.version", "integration_contract.major", "orbit.version", "capabilities"]
     },
     "launch": {
-      "invocation": "orbit launch --json [--profile P] [--home DIR] [--project DIR]",
-      "stdout_fields": ["kind", "contract", "profile", "cwd", "argv", "env", "stdin", "control_socket", "ready"]
+      "invocation": "orbit launch --json [--profile P] [--home DIR] [--project DIR] [--dsh BIN]",
+      "stdout_fields": ["kind", "contract", "command", "profile", "cwd", "argv", "env", "stdin", "control_socket", "ready"]
     },
     "status": {
       "invocation": "orbit status [TASK] --json [--project DIR]",
