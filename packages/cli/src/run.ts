@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { join, resolve } from 'node:path'
 import { CONTROL_SOCKET_FILE, type ControlRequest, type ControlResponse, type TaskEvent } from '@orbit/core'
 import { requestControl } from './client.js'
-import { localEvents, localQuestions, localStatus, type StatusView } from './tasks.js'
+import { localEvents, localQuestions, localStatus, localStatusByRef, type StatusView } from './tasks.js'
 import { exportTask } from './export.js'
 import { localSessions } from './sessions.js'
 import { CAPABILITIES, INTEGRATION_CONTRACT, buildLaunchSpec } from './capabilities.js'
@@ -37,6 +37,7 @@ interface Parsed {
   profile?: string
   home?: string
   after?: string
+  externalRef?: string
   task?: string
   project: string
   json: boolean
@@ -63,6 +64,7 @@ function parse(argv: string[]): Parsed | 'help' {
   let selected: string[] | undefined
   let custom: string | undefined
   let after: string | undefined
+  let externalRef: string | undefined
   for (let index = 1; index < argv.length; index += 1) {
     const arg = argv[index]
     if (arg === '--json') {
@@ -72,6 +74,8 @@ function parse(argv: string[]): Parsed | 'help' {
       if (value === undefined) throw new UsageError('--project requires a directory')
       project = resolve(value)
       index += 1
+    } else if (arg === '--external-ref') {
+      externalRef = argv[++index]
     } else if (arg === '--after') {
       after = argv[++index]
     } else if (arg === '--question') {
@@ -114,6 +118,7 @@ function parse(argv: string[]): Parsed | 'help' {
     ...(selected === undefined ? {} : { selected }),
     ...(custom === undefined ? {} : { custom }),
     ...(after === undefined ? {} : { after }),
+    ...(externalRef === undefined ? {} : { externalRef }),
   }
 }
 
@@ -243,6 +248,14 @@ export async function runCli(argv: string[], io: Partial<CliIo> = {}): Promise<n
         ...(parsed.home === undefined ? {} : { home: parsed.home }),
       })
       out(parsed.json ? JSON.stringify(spec, null, 2) : `${spec.profile}  cwd ${spec.cwd}  socket ${spec.control_socket}`)
+      return 0
+    }
+
+    if (parsed.command === 'status' && parsed.externalRef !== undefined) {
+      if (parsed.task !== undefined) throw new UsageError('TASK and --external-ref are mutually exclusive')
+      const tasks = await localStatusByRef(parsed.project, parsed.externalRef)
+      if (parsed.json) out(JSON.stringify({ tasks }, null, 2))
+      else out(tasks.length === 0 ? 'no tasks' : tasks.map((task) => `${task.taskId}  ${task.status}  ${task.artifactRoot}`).join('\n'))
       return 0
     }
 

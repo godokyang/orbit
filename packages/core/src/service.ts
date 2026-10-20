@@ -57,6 +57,7 @@ export interface StartTaskOptions {
   continuation?: TaskState['continuation']
   takeover?: TaskState['takeover']
   runtime?: TaskState['runtime']
+  externalRefs?: string[]
   taskId?: string
   clock?: () => Date
 }
@@ -104,6 +105,22 @@ export interface ConfirmStopOptions {
 
 export function inputDigest(versions: RequirementVersion[]): string {
   return sha256Hex(versions.map((v) => `${v.version}\n${v.sha256}\n${v.text}`).join('\n---\n'))
+}
+
+function validateExternalRefs(refs: string[]): string[] {
+  if (refs.length > 8) throw new OrbitError('invalid_input', 'at most 8 external references are allowed')
+  const seen = new Set<string>()
+  for (const ref of refs) {
+    if (typeof ref !== 'string' || ref.length === 0 || ref.length > 256 || ref.trim() !== ref) {
+      throw new OrbitError('invalid_input', 'external references must be non-empty, trimmed, at most 256 characters')
+    }
+    if ([...ref].some((character) => character.charCodeAt(0) < 32)) {
+      throw new OrbitError('invalid_input', 'external references cannot contain control characters')
+    }
+    if (seen.has(ref)) throw new OrbitError('invalid_input', `duplicate external reference: ${ref}`)
+    seen.add(ref)
+  }
+  return [...refs]
 }
 
 function nonEmpty(value: string, field: string): string {
@@ -173,6 +190,9 @@ export class TaskService {
       ...(options.continuation === undefined ? {} : { continuation: options.continuation }),
       ...(options.takeover === undefined ? {} : { takeover: options.takeover }),
       ...(options.runtime === undefined ? {} : { runtime: options.runtime }),
+      ...(options.externalRefs === undefined || options.externalRefs.length === 0
+        ? {}
+        : { externalRefs: validateExternalRefs(options.externalRefs) }),
       eventSeq: 0,
     }
     const store = await TaskStore.create(

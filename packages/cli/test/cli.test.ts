@@ -312,3 +312,32 @@ describe('orbit-ts events cursor', () => {
     expect(await runCli(['events', '--project', dir, '--after', 'not-a-cursor'], sink.io)).toBe(1)
   })
 })
+
+describe('orbit-ts status by external ref', () => {
+  it('returns matching tasks and an empty array for no match', async () => {
+    const dir = await project()
+    const taskId = await startTask(dir)
+    const { TaskService } = await import('@orbit/core')
+    const service = await TaskService.open(join(dir, '.orbit', 'tasks', taskId))
+    // Rewrite the durable state with refs through the public start path is not
+    // available here; use a fresh task started directly by the core.
+    const projectRoot = await mkdtemp(join(tmpdir(), 'orbit-refs-cli-'))
+    const started = await TaskService.start({
+      projectRoot,
+      rootSessionId: 'root-ref',
+      instruction: 'work',
+      externalRefs: ['loom:run-42'],
+    })
+    void service
+
+    const sink = capture()
+    expect(await runCli(['status', '--external-ref', 'loom:run-42', '--json', '--project', projectRoot], sink.io)).toBe(0)
+    const payload = JSON.parse(sink.out()) as { tasks: Array<{ taskId: string; externalRefs: string[] }> }
+    expect(payload.tasks).toHaveLength(1)
+    expect(payload.tasks[0]).toMatchObject({ taskId: started.state.id, externalRefs: ['loom:run-42'] })
+
+    const empty = capture()
+    expect(await runCli(['status', '--external-ref', 'missing', '--json', '--project', projectRoot], empty.io)).toBe(0)
+    expect(JSON.parse(empty.out())).toEqual({ tasks: [] })
+  })
+})

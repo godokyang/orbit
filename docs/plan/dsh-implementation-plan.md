@@ -372,3 +372,11 @@ B 阶段开工前只需补一份短设计：JEV 观察输入在 DSH 事件下的
 - ADR-010 增 2.0 变更记录；目标文档的 1.8 描述更新。
 - 验证：CLI 游标 2 个单测、capabilities/launch 单测；全套测试通过。
 - 仍未做：Loom 实际消费、C1 UI、`models` 能力、导出/会话的合同一致性回归。
+
+## 实施进展（2026-10-20，C3 启动与外部引用）
+
+- 从 Loom `origin/main`（0e0f3e7）新建独立工作树 `/Users/yangke/Personal/workspace/ai-tools/loom-dsh`，分支 `feat/dsh-migration`；未推送，不影响用户原 Loom 工作区。
+- 产出 [Loom 迁移分析](../../loom-dsh/docs/plan/dsh-migration.md)（本地提交 390921e）：列出现状 OMP 耦合、2.0 能力缺口与迁移切片。关键缺口：无头 Root 启动、`start_external_refs`、续接、prompt/abort、检查覆盖投影、模型授权、doctor。
+- Orbit 侧先补外部引用：TaskState 持久化 `externalRefs`（最多 8 条、每条 ≤256、精确、去重、无控制字符）；宿主 start 接受并投影；CLI 新增 `status --external-ref REF --json`，成功恒返回 `{tasks:[...]}`，无匹配空数组；合同 2.0 增 `status_by_external_ref` 能力。
+- 验证：Core 与 CLI 外部引用单测；全套 118 个测试通过。
+- 仍未做：headless bootstrap/start、resume/prompt/abort、coverage/model authorization/doctor、Loom 代码替换。

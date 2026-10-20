@@ -8,6 +8,8 @@ export interface StatusView {
   status: TaskState['status']
   inputVersion: number
   artifactRoot: string
+  externalRefs?: string[]
+  modelAuthorization?: unknown
   checksInFlight: number | null
   stop?: string
   completionInvalidation?: TaskState['completionInvalidation']
@@ -63,6 +65,8 @@ function viewOf(
     status: state.status,
     inputVersion: state.input.versions.length,
     artifactRoot: state.workspace.artifactRoot,
+    ...(state.externalRefs === undefined ? {} : { externalRefs: state.externalRefs }),
+    modelAuthorization: state.authorization ?? null,
     checksInFlight: state.checks.inFlight,
     ...(state.stop === undefined ? {} : { stop: state.stop.reason }),
     ...(state.completionInvalidation === undefined ? {} : { completionInvalidation: state.completionInvalidation }),
@@ -78,8 +82,7 @@ function viewOf(
   }
 }
 
-export async function localStatus(projectRoot: string, id?: string): Promise<StatusView> {
-  const service = await openTask(projectRoot, id)
+export async function statusOf(service: TaskService): Promise<StatusView> {
   const status = await service.status()
   return viewOf(
     status.state,
@@ -89,6 +92,25 @@ export async function localStatus(projectRoot: string, id?: string): Promise<Sta
     status.openFindings.map((finding) => finding.id),
     status.openDisputes.map((dispute) => dispute.id),
   )
+}
+
+export async function localStatus(projectRoot: string, id?: string): Promise<StatusView> {
+  return statusOf(await openTask(projectRoot, id))
+}
+
+export async function localStatusByRef(projectRoot: string, ref: string, limit = 64): Promise<StatusView[]> {
+  const tasks: StatusView[] = []
+  for (const dir of (await taskDirs(projectRoot, limit)).reverse()) {
+    let service: TaskService
+    try {
+      service = await TaskService.open(dir)
+    } catch {
+      continue
+    }
+    const state = await service.state()
+    if (state.externalRefs?.includes(ref) === true) tasks.push(await statusOf(service))
+  }
+  return tasks
 }
 
 export async function localQuestions(projectRoot: string, id?: string): Promise<{ taskId: string; questions: unknown[] }> {

@@ -5,6 +5,7 @@ export const INTEGRATION_CONTRACT = { name: 'orbit-integration', version: '2.0.0
 export const CAPABILITIES = {
   launch: { since: '2.0.0', stdin: 'keep-open', process_owner: 'caller' },
   status: { since: '2.0.0' },
+  status_by_external_ref: { since: '2.0.0', max_refs: 8, max_length: 256 },
   events: { since: '2.0.0', cursor: 'opaque' },
   sessions: { since: '2.0.0', visible_text: true, user_messages: true, activities: true, questions: true, deliveries: true },
   questions: { since: '2.0.0' },

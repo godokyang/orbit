@@ -23,6 +23,7 @@
   "capabilities": {
     "launch": { "since": "2.0.0", "stdin": "keep-open", "process_owner": "caller" },
     "status": { "since": "2.0.0" },
+    "status_by_external_ref": { "since": "2.0.0", "max_refs": 8, "max_length": 256 },
     "events": { "since": "2.0.0", "cursor": "opaque" },
     "sessions": { "since": "2.0.0", "visible_text": true, "user_messages": true, "activities": true, "questions": true, "deliveries": true },
     "questions": { "since": "2.0.0" },
@@ -44,6 +45,7 @@
 | `orbit capabilities --json` | 能力协商；只读 |
 | `orbit launch --json [--profile P] [--home DIR] [--project DIR]` | 返回 DSH 启动参数；不启动进程 |
 | `orbit status [TASK] --json [--project DIR]` | 任务事实与阻塞原因；只读 |
+| `orbit status --external-ref REF --json [--project DIR]` | 精确引用查询；成功恒返回 `{tasks:[]}` |
 | `orbit events [TASK] --after CURSOR [--json] [--project DIR]` | 增量任务事件；只读 |
 | `orbit sessions [TASK] --json [--project DIR]` | Root/成员会话投影；只读 |
 | `orbit questions [TASK] --json [--project DIR]` | 问题记录；只读 |
@@ -84,6 +86,8 @@
   "status": "running",
   "inputVersion": 2,
   "artifactRoot": "/abs/project",
+  "externalRefs": ["loom:run-1"],
+  "modelAuthorization": { "allowedModels": ["deepseek-account/deepseek-flash"] },
   "checksInFlight": null,
   "stop": "user",
   "stopConfirmation": {

@@ -132,3 +132,21 @@ describe('takeover', () => {
     )
   })
 })
+
+describe('external references', () => {
+  it('stores refs exactly and rejects duplicates/oversize', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'orbit-refs-'))
+    dirs.push(projectRoot)
+    const { service, state } = await TaskService.start({
+      projectRoot,
+      rootSessionId: 'root-1',
+      instruction: 'work',
+      externalRefs: ['loom:run-1', 'loom:attempt-1'],
+    })
+    expect(state.externalRefs).toEqual(['loom:run-1', 'loom:attempt-1'])
+    await expect(
+      TaskService.start({ projectRoot, rootSessionId: 'root-2', instruction: 'work', externalRefs: ['same', 'same'] }),
+    ).rejects.toSatisfy((error) => isOrbitError(error) && error.code === 'invalid_input')
+    expect(service.store.dir).toContain('.orbit')
+  })
+})

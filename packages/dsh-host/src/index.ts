@@ -184,6 +184,8 @@ function summarize(state: TaskState): Record<string, unknown> {
     status: state.status,
     inputVersion: state.input.versions.length,
     artifactRoot: state.workspace.artifactRoot,
+    externalRefs: state.externalRefs ?? [],
+    modelAuthorization: state.authorization ?? null,
     checksInFlight: state.checks.inFlight,
     stop: state.stop?.reason,
     stopConfirmation: state.stop?.confirmation,
@@ -358,6 +360,11 @@ export default class OrbitHost extends Service {
             description: 'start | status | stop | declare | finish | accept | reject | check | complete | amend | dispute | ruling | rebind | resume | takeover | takeover-scope | assess | answer',
           },
           instruction: { type: 'string', description: 'The user instruction, verbatim. Required for action=start.' },
+          externalRefs: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Opaque caller references (max 8). Optional for action=start.',
+          },
           amendment: { type: 'string', description: 'The user amendment text, verbatim. Required for action=amend.' },
           messageId: { type: 'string', description: 'Native user message id that carries the amendment. Optional for action=amend.' },
           kind: {
@@ -422,6 +429,7 @@ export default class OrbitHost extends Service {
             if (typeof instruction !== 'string' || instruction.trim().length === 0) {
               throw new Error('orbit: action=start requires a non-empty instruction')
             }
+            const externalRefs = (args as { externalRefs?: string[] }).externalRefs
             const active = await host.latest(projectRoot, maxTasks)
             if (active !== undefined && (await active.state()).status === 'running') {
               throw new Error('orbit: this workspace already has a running task')
@@ -434,6 +442,7 @@ export default class OrbitHost extends Service {
               workspace: workspaceInfo(projectRoot),
               runtime: host.runtimeInfo(),
               ...(host.allowedModels.size === 0 ? {} : { allowedModels: [...host.allowedModels] }),
+              ...(externalRefs === undefined ? {} : { externalRefs }),
             })
             host.modelBindings.set(agent.id, {
               taskDir: service.store.dir,
@@ -574,6 +583,7 @@ export default class OrbitHost extends Service {
           if (action === 'resume') {
             const { from, instruction, messageId } = args as { from?: string; instruction?: string; messageId?: string }
             if (from === undefined || instruction === undefined) throw new Error('orbit: action=resume requires from and instruction')
+            const externalRefs = (args as { externalRefs?: string[] }).externalRefs
             const active = await host.latest(projectRoot, maxTasks)
             if (active !== undefined && (await active.state()).status === 'running') {
               throw new Error('orbit: this workspace already has a running task')
@@ -604,6 +614,7 @@ export default class OrbitHost extends Service {
               messageId?: string
             }
             if (instruction === undefined || reason === undefined) throw new Error('orbit: action=takeover requires instruction and reason')
+            const externalRefs = (args as { externalRefs?: string[] }).externalRefs
             const active = await host.latest(projectRoot, maxTasks)
             if (active !== undefined && (await active.state()).status === 'running') {
               throw new Error('orbit: this workspace already has a running task')

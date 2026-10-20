@@ -144,6 +144,8 @@ export interface TaskState {
   authorization?: {
     allowedModels: string[]
   }
+  /** Opaque caller references, matched exactly by status queries. */
+  externalRefs?: string[]
   /** Runtime ownership recorded at start; a different instance means the host died. */
   runtime?: {
     pid: number
