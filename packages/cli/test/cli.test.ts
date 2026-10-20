@@ -219,3 +219,38 @@ describe('orbit-ts sessions (offline archive)', () => {
     expect(view.root.state).toBe('unavailable')
   })
 })
+
+describe('orbit-ts capabilities and launch', () => {
+  it('reports the draft contract and capabilities', async () => {
+    const sink = capture()
+    expect(await runCli(['capabilities', '--json'], sink.io)).toBe(0)
+    const payload = JSON.parse(sink.out()) as {
+      integration_contract: { version: string; draft: boolean }
+      capabilities: Record<string, unknown>
+    }
+    expect(payload.integration_contract).toMatchObject({ version: '2.0.0-draft', draft: true })
+    expect(Object.keys(payload.capabilities)).toEqual(expect.arrayContaining(['launch', 'status', 'sessions', 'stop']))
+  })
+
+  it('returns a launch spec without starting a process', async () => {
+    const dir = await project()
+    const sink = capture()
+    expect(await runCli(['launch', '--json', '--project', dir, '--profile', 'orbit-node', '--home', '/tmp/orbit-home'], sink.io)).toBe(0)
+    const spec = JSON.parse(sink.out()) as {
+      profile: string
+      cwd: string
+      argv: string[]
+      env: Record<string, string>
+      control_socket: string
+      stdin: string
+    }
+    expect(spec).toMatchObject({
+      profile: 'orbit-node',
+      cwd: dir,
+      argv: ['--profile', 'orbit-node'],
+      env: { DSH_HOME: '/tmp/orbit-home' },
+      control_socket: join(dir, '.orbit', 'orbit.sock'),
+      stdin: 'keep-open',
+    })
+  })
+})

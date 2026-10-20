@@ -5,6 +5,7 @@ import { requestControl } from './client.js'
 import { localEvents, localStatus, type StatusView } from './tasks.js'
 import { exportTask } from './export.js'
 import { localSessions } from './sessions.js'
+import { CAPABILITIES, INTEGRATION_CONTRACT, buildLaunchSpec } from './capabilities.js'
 
 export interface CliIo {
   out: (text: string) => void
@@ -19,13 +20,17 @@ Usage:
   orbit stop   [TASK] [--json] [--project DIR]
   orbit sessions [TASK] [--json] [--project DIR]
   orbit export [TASK] --output FILE [--json] [--project DIR]
+  orbit capabilities [--json]
+  orbit launch [--json] [--profile P] [--home DIR] [--project DIR]
 
 status/events read the live host through the project control socket and fall
 back to the durable task record when no host is running. stop requires the
 live host. export snapshots the task record into a self-contained JSON file.`
 
 interface Parsed {
-  command: 'status' | 'events' | 'stop' | 'export' | 'sessions'
+  command: 'status' | 'events' | 'stop' | 'export' | 'sessions' | 'capabilities' | 'launch'
+  profile?: string
+  home?: string
   task?: string
   project: string
   json: boolean
@@ -38,13 +43,16 @@ function parse(argv: string[]): Parsed | 'help' {
   if (argv.length === 0) throw new UsageError('missing command')
   const command = argv[0]
   if (command === '--help' || command === '-h' || command === 'help') return 'help'
-  if (command !== 'status' && command !== 'events' && command !== 'stop' && command !== 'export' && command !== 'sessions') {
+  const commands = ['status', 'events', 'stop', 'export', 'sessions', 'capabilities', 'launch'] as const
+  if (command === undefined || !(commands as readonly string[]).includes(command)) {
     throw new UsageError(`unknown command: ${String(command)}`)
   }
   let task: string | undefined
   let project = process.cwd()
   let json = false
   let output: string | undefined
+  let profile: string | undefined
+  let home: string | undefined
   for (let index = 1; index < argv.length; index += 1) {
     const arg = argv[index]
     if (arg === '--json') {
@@ -54,6 +62,10 @@ function parse(argv: string[]): Parsed | 'help' {
       if (value === undefined) throw new UsageError('--project requires a directory')
       project = resolve(value)
       index += 1
+    } else if (arg === '--profile') {
+      profile = argv[++index]
+    } else if (arg === '--home') {
+      home = argv[++index]
     } else if (arg === '--output') {
       const value = argv[index + 1]
       if (value === undefined) throw new UsageError('--output requires a file')
@@ -70,7 +82,15 @@ function parse(argv: string[]): Parsed | 'help' {
     }
   }
   if (command === 'export' && output === undefined) throw new UsageError('export requires --output FILE')
-  return { command, project, json, ...(task === undefined ? {} : { task }), ...(output === undefined ? {} : { output }) }
+  return {
+    command: command as Parsed['command'],
+    project,
+    json,
+    ...(task === undefined ? {} : { task }),
+    ...(output === undefined ? {} : { output }),
+    ...(profile === undefined ? {} : { profile }),
+    ...(home === undefined ? {} : { home }),
+  }
 }
 
 async function control(project: string, request: ControlRequest): Promise<ControlResponse | undefined> {
@@ -137,6 +157,22 @@ export async function runCli(argv: string[], io: Partial<CliIo> = {}): Promise<n
   }
 
   try {
+    if (parsed.command === 'capabilities') {
+      const payload = { integration_contract: INTEGRATION_CONTRACT, orbit: { version: '0.0.0' }, capabilities: CAPABILITIES }
+      out(JSON.stringify(payload, null, 2))
+      return 0
+    }
+
+    if (parsed.command === 'launch') {
+      const spec = buildLaunchSpec({
+        projectRoot: parsed.project,
+        ...(parsed.profile === undefined ? {} : { profile: parsed.profile }),
+        ...(parsed.home === undefined ? {} : { home: parsed.home }),
+      })
+      out(parsed.json ? JSON.stringify(spec, null, 2) : `${spec.profile}  cwd ${spec.cwd}  socket ${spec.control_socket}`)
+      return 0
+    }
+
     if (parsed.command === 'status') {
       const response = await control(parsed.project, {
         id: randomUUID(),

@@ -335,3 +335,11 @@ B 阶段开工前只需补一份短设计：JEV 观察输入在 DSH 事件下的
 - 修正按会话找任务的逻辑：同一 Root 在停止旧任务后新建任务时，优先返回 running 的新任务，而不是按目录顺序返回已停止的旧任务；否则新任务的派发会被旧任务围栏误拒（探针已复现并修复）。
 - 验证：DSH 探针中成员已登记后 amend，事件记录 `version=2`、`memberId`、`messageId`；完整链路其余部分无回归；全套 108 个测试通过。
 - 仍未做：修订送达后的成员确认/采用归因、undelivered 的显式重试界面、Loom。
+
+## 实施进展（2026-10-20，capabilities 与 launch 草案命令）
+
+- CLI 新增 `orbit capabilities --json`：返回 `integration_contract=orbit-integration 2.0.0-draft`、`draft=true` 与能力清单（launch/status/events/sessions/stop/export/models）。
+- CLI 新增 `orbit launch --json [--profile orbit-node] [--home DIR] [--project DIR]`：只返回 DSH 启动规格（cwd、argv、DSH_HOME、keep-open stdin、control_socket、socket ready），不启动进程；进程归调用方（Loom）。
+- 合同仍是草案，命令以 `draft` 标记，避免集成方把草案当冻结合同；字段按检查点 4 的反馈再调整。
+- 验证：CLI 单测 2 个（能力清单、launch 规格）；全套 110 个测试通过。
+- 仍未做：权威合同落地、C1 UI、Loom 节点消费、D 阶段。

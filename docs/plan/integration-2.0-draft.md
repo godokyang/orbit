@@ -53,13 +53,13 @@
   "env": { "DSH_HOME": "/abs/isolated-home" },
   "stdin": "keep-open",
   "control_socket": "/abs/project/.orbit/orbit.sock",
-  "ready": { "kind": "event", "name": "orbit/ready", "timeout_ms": 30000 }
+  "ready": { "kind": "socket", "timeout_ms": 30000 }
 }
 ```
 
 - 不包含 Orbit 可执行文件、socket 路径参数以外的启动逻辑。
 - 进程所有权属于调用方（Loom）；stdin EOF 表示有界关闭。
-- `ready` 事件在宿主插件完成 T0 与任务接纳后发出。
+- `ready.kind=socket`：Loom 拉起进程后调用 `orbit start`，再轮询 `control_socket` 出现；socket 在任务接纳后由宿主创建。
 
 ## 5. `status`
 
