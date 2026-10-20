@@ -315,3 +315,9 @@ B 阶段开工前只需补一份短设计：JEV 观察输入在 DSH 事件下的
 - CLI `orbit sessions` 在无活宿主时回退到任务内增量归档：合并 `sessions/<id>/seq-*.json` 的事件，投影可见文本、真实用户消息、工具活动（按 tool/result 判 ok/error/not_observed）、turn 完成送达、归档段数与 gap；无归档时返回 `unavailable`，不伪造在线状态。
 - 验证：CLI 归档投影 2 个单测（可用字段、gap、无归档 unavailable）；用真实验收留下的 `/tmp/orbit-real` 任务离线投影，得到 as_of_seq=39、Root 可见文本 2 条、真实用户消息 1 条、活动与成员投影；全套 107 个测试通过。
 - 仍未做：合同 2.0 字段冻结、问题/送达细分、离线 gap 与 Loom 消费约定。
+
+## 实施进展（2026-10-20，检查者启动期间停止）
+
+- 真实模型场景：在 `check/requested` 后 1.5s / 6s 停止，均得到 `stop_unconfirmed`、`missing=["root_idle","checks_settled"]`、检查仍 `in_flight`；宿主未伪称确认，也未把检查记成通过。
+- 结论：检查者 activation 尚未发布时停止，按失败关闭处理；已发布 activation 的 dispose 路径仍只有单测，缺真实端到端证据。
+- 仍未做：慢检查者/更长时序的真实 dispose 证据、`stop_unconfirmed` 的显式重试验收、Loom。

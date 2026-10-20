@@ -69,3 +69,15 @@
 - 事件：`member/registered → stop/requested → member/settled {stopped} → stop/confirmed`。
 
 边界：宿主用 `agent.cancel + whenIdle + settle` 收束成员，未直接持有并 dispose 子 Agent 的 `SubagentActivation`；本次用进程空闲与无 `sleep` 残留作为证据，不宣称 activation 级 dispose 已验证。
+
+## 追加：检查者执行中停止（失败关闭）
+
+场景：Root 真实模型 start/declare/write 后调用 `orbit check`；驱动在检测到 `check/requested` 后延迟 1.5 秒或 6 秒，用 CLI socket 停止任务。
+
+实际结果（两次一致）：
+
+- stop 请求落围栏后，任务最终为 `stop_unconfirmed`，`stop.confirmation.confirmed=false`，`missing=["root_idle","checks_settled"]`；
+- 检查记录仍为 `in_flight`；宿主没有把停止伪装成已确认，也没有把检查记成通过；
+- 说明：真实检查者进程启动/发布 activation 的窗口长于本次停止时机，宿主拿不到可 dispose 的 activation，因此按合同保持未确认。
+
+结论：检查者启动期间停止会**失败关闭**为 `stop_unconfirmed`，这是预期语义；本次未取得“已发布 activation 被 dispose 后转 paused”的真实证据。后续可用慢速假检查者或更长时序补测。

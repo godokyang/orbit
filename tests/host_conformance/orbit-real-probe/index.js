@@ -189,6 +189,62 @@ async function runMemberStop(ctx) {
   await presetScope?.dispose?.().catch?.(() => undefined)
 }
 
+function waitForEvent(type, timeoutMs) {
+  const start = Date.now()
+  return new Promise((resolve) => {
+    const timer = setInterval(() => {
+      const task = latestTask()
+      if (task !== undefined) {
+        try {
+          const events = readFileSync(join(task.dir, 'events.jsonl'), 'utf8').trim().split('\n').map((line) => JSON.parse(line))
+          if (events.some((event) => event.type === type)) {
+            clearInterval(timer)
+            resolve(events)
+            return
+          }
+        } catch {}
+      }
+      if (Date.now() - start > timeoutMs) {
+        clearInterval(timer)
+        resolve(undefined)
+      }
+    }, 200)
+  })
+}
+
+async function runCheckerStop(ctx) {
+  mkdirSync(WORK, { recursive: true })
+  mkdirSync(join(HOME, 'results'), { recursive: true })
+  const handle = await createRoot(ctx)
+  log({ step: 'root-created', sessionId: handle.agent.id, scenario: 'checker-stop' })
+  handle.agent.followup(msg(`You are running a controlled Orbit checker-stop acceptance. Do exactly this and do not ask questions:
+1. Call orbit with {"action":"start","instruction":"Checker stop acceptance: write a file and check it."}
+2. Call orbit with {"action":"declare","goal":"write hello.txt","acceptance":"hello.txt exists"}.
+3. Call the write tool with {"file_path":"${join(WORK, 'hello.txt')}","content":"hello"}.
+4. Call orbit with {"action":"check"}.
+Do not stop the task yourself and do not ask questions.`))
+  const events = await waitForEvent('check/requested', 60000)
+  log({ step: 'check-requested', found: events !== undefined })
+  await new Promise((resolve) => setTimeout(resolve, Number(process.env.ORBIT_CHECKER_STOP_DELAY ?? 1500)))
+  const response = await stopViaSocket().catch((error) => ({ error: String(error && error.message) }))
+  log({ step: 'socket-stop', response })
+  let task = latestTask()
+  for (let attempt = 0; attempt < 60 && task?.state?.status === 'running'; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    task = latestTask()
+  }
+  const checks = task ? checksOf(task) : []
+  log({
+    step: 'checker-stop-result',
+    status: task?.state?.status,
+    confirmed: task?.state?.stop?.confirmation?.confirmed,
+    missing: task?.state?.stop?.confirmation?.missing,
+    checks: checks.map((check) => ({ number: check.number, status: check.status, failure: check.failure, verdict: check.result?.verdict })),
+  })
+  await handle.dispose().catch(() => undefined)
+  await presetScope?.dispose?.().catch?.(() => undefined)
+}
+
 async function run(ctx) {
   mkdirSync(WORK, { recursive: true })
   mkdirSync(join(HOME, 'results'), { recursive: true })
@@ -198,6 +254,10 @@ async function run(ctx) {
   }
   if (SCENARIO === 'member-stop') {
     await runMemberStop(ctx)
+    return
+  }
+  if (SCENARIO === 'checker-stop') {
+    await runCheckerStop(ctx)
     return
   }
   const handle = await createRoot(ctx)
