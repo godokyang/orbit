@@ -88,4 +88,27 @@ describe('takeover', () => {
     expect(state.takeover).toMatchObject({ reason: 'already implemented before supervision', priorScope: 'partial', messageId: 'msg-1' })
     expect(state.input.versions[0]?.source).toMatchObject({ kind: 'user-message', messageId: 'msg-1', verbatim: true })
   })
+
+  it('appends takeover scope declarations idempotently and rejects other tasks', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'orbit-takeover-'))
+    dirs.push(projectRoot)
+    const { service } = await TaskService.start({
+      projectRoot,
+      rootSessionId: 'root-1',
+      instruction: 'Take over.',
+      takeover: { reason: 'existing work', snapshot: { digest: 'd', files: 0, bytes: 0, at: 't' } },
+    })
+    const first = await service.appendPriorScope('Files under src were already edited.', 'root estimate')
+    expect(first.priorScopeDeclarations).toHaveLength(1)
+    const duplicate = await service.appendPriorScope('Files under src were already edited.')
+    expect(duplicate.priorScopeDeclarations).toHaveLength(1)
+    const second = await service.appendPriorScope('Tests were also run manually.')
+    expect(second.priorScopeDeclarations).toHaveLength(2)
+    expect(second.priorScopeDeclarations?.[0]).toMatchObject({ source: 'root-declaration', reason: 'root estimate' })
+
+    const plain = await TaskService.start({ projectRoot: await mkdtemp(join(tmpdir(), 'orbit-plain-')), rootSessionId: 'r', instruction: 'x' })
+    await expect(plain.service.appendPriorScope('scope')).rejects.toSatisfy(
+      (error) => isOrbitError(error) && error.code === 'invalid_state',
+    )
+  })
 })

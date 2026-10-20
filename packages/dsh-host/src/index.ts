@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 import { readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs'
 import { readdir } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
@@ -307,8 +308,8 @@ export default class OrbitHost extends Service {
           action: {
             type: 'string',
             required: true,
-            enum: ['start', 'status', 'stop', 'declare', 'finish', 'accept', 'reject', 'check', 'complete', 'amend', 'dispute', 'ruling', 'rebind', 'resume', 'takeover'],
-            description: 'start | status | stop | declare | finish | accept | reject | check | complete | amend | dispute | ruling | rebind | resume | takeover',
+            enum: ['start', 'status', 'stop', 'declare', 'finish', 'accept', 'reject', 'check', 'complete', 'amend', 'dispute', 'ruling', 'rebind', 'resume', 'takeover', 'takeover-scope'],
+            description: 'start | status | stop | declare | finish | accept | reject | check | complete | amend | dispute | ruling | rebind | resume | takeover | takeover-scope',
           },
           instruction: { type: 'string', description: 'The user instruction, verbatim. Required for action=start.' },
           amendment: { type: 'string', description: 'The user amendment text, verbatim. Required for action=amend.' },
@@ -327,7 +328,7 @@ export default class OrbitHost extends Service {
           },
           artifactRoot: { type: 'string', description: 'New artifact root. Required for action=rebind.' },
           from: { type: 'string', description: 'Previous task id. Required for action=resume.' },
-          priorScope: { type: 'string', description: 'Root-declared scope before takeover. Optional for action=takeover.' },
+          priorScope: { type: 'string', description: 'Root-declared scope before takeover. Optional for action=takeover; declaration text for action=takeover-scope.' },
           task: { type: 'string', description: 'Optional task id; defaults to the latest task.' },
           goal: { type: 'string', description: 'Work-unit goal. Required for action=declare.' },
           acceptance: { type: 'string', description: 'Work-unit acceptance criteria. Required for action=declare.' },
@@ -407,7 +408,7 @@ export default class OrbitHost extends Service {
             let snapshotDir: string | undefined
             let checkerCwd = state.workspace.artifactRoot
             if (kind === 'artifact') {
-              snapshotDir = join(service.store.dir, 'snapshots', `check-${state.checks.nextNumber}`)
+              snapshotDir = join(service.store.dir, 'snapshots', `check-${state.checks.nextNumber}-${randomUUID().slice(0, 8)}`)
               const snapshot = await snapshotWorkspace(state.workspace.artifactRoot, snapshotDir)
               artifactDigest = snapshot.digest
               checkerCwd = snapshot.dir
@@ -537,6 +538,16 @@ export default class OrbitHost extends Service {
             })
             await host.adopt(service, agent, projectRoot)
             return JSON.stringify({ ok: true, ...summarize(state), taskDir: service.store.dir })
+          }
+
+          if (action === 'takeover-scope') {
+            const { priorScope, reason } = args as { priorScope?: string; reason?: string }
+            if (priorScope === undefined || priorScope.trim().length === 0) {
+              throw new Error('orbit: action=takeover-scope requires priorScope text')
+            }
+            const service = await openTask(projectRoot, maxTasks, (args as { task?: string }).task)
+            const state = await service.appendPriorScope(priorScope, reason)
+            return JSON.stringify({ ok: true, declarations: state.priorScopeDeclarations?.length ?? 0 })
           }
 
           if (action === 'dispute') {

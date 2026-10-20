@@ -152,6 +152,13 @@ export interface TaskState {
     sourceMessageId?: string
     at: string
   }
+  /** Root declarations appended after takeover, in submission order. */
+  priorScopeDeclarations?: Array<{
+    text: string
+    reason?: string
+    at: string
+    source: 'root-declaration'
+  }>
   /** Set when supervision starts on work the Root already executed. */
   takeover?: {
     reason: string

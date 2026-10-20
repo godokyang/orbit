@@ -379,6 +379,18 @@ async function run(ctx) {
     priorScope: task?.state?.takeover?.priorScope,
     snapshot: task?.state?.takeover?.snapshot,
   })
+  scripts.length = 0
+  scripts.push(() => toolChunks('orbit', { action: 'takeover-scope', priorScope: 'Existing edits in src were pre-supervision.' }))
+  scripts.push(() => textChunks('scope declared'))
+  handle.agent.followup(msg('Declare the pre-supervision scope.'))
+  await handle.agent.whenIdle()
+  task = readTask(WORK)
+  log({
+    step: 'takeover-scope',
+    count: task?.state?.priorScopeDeclarations?.length,
+    last: task?.state?.priorScopeDeclarations?.at(-1),
+  })
+
   await cli(['stop', '--json', '--project', WORK])
   await waitFor(async () => (readTask(WORK)?.state?.status !== 'running' ? true : undefined), 12000, 'takeover stop').catch(() => undefined)
 

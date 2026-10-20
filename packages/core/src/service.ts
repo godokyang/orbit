@@ -499,6 +499,33 @@ export class TaskService {
     })
   }
 
+  /**
+   * Append a later Root declaration of the scope that predated supervision.
+   * Only takeover tasks can carry these; identical text is idempotent.
+   */
+  async appendPriorScope(text: string, reason?: string): Promise<TaskState> {
+    nonEmpty(text, 'prior scope declaration')
+    return this.mutex.run(async () => {
+      const state = await this.store.readState()
+      this.assertRunning(state, 'appendPriorScope')
+      if (state.takeover === undefined) {
+        throw new OrbitError('invalid_state', 'prior scope declarations are only valid on a takeover task')
+      }
+      if (state.priorScopeDeclarations?.at(-1)?.text === text) return state
+      const next = await this.store.updateState((draft) => {
+        draft.priorScopeDeclarations ??= []
+        draft.priorScopeDeclarations.push({
+          text,
+          ...(reason === undefined ? {} : { reason }),
+          at: this.store.now(),
+          source: 'root-declaration',
+        })
+      })
+      await this.store.appendEvent('takeover/scope-declared', { text, reason })
+      return next
+    })
+  }
+
   /** Open a Root dispute against one open finding. */
   async openDispute(findingId: string, reason: string): Promise<DisputeRecord> {
     nonEmpty(reason, 'dispute reason')

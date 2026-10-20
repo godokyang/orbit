@@ -208,3 +208,10 @@ B 阶段开工前只需补一份短设计：JEV 观察输入在 DSH 事件下的
 - `check kind=artifact` 现在先落固定快照，再以快照摘要发起检查；`CheckRecord.snapshotDir` 记录路径，检查者子进程的 cwd 指向快照，提示词声明“快照是受检版本、实时工作区可能已变化”。过程检查仍读实时工作区。
 - 验证：快照单测 2 个（摘要一致、权限/链接、排除目录、上限）；DSH 探针 artifact check #3 的 `snapshotDir` 存在且检查完成，完成门仍以实时摘要复核通过。
 - 仍未做：快照保留/回收策略、并发检查的快照目录唯一性、完整 B 层归档（会话日志增量）、Loom。
+
+## 实施进展（2026-10-20，接管范围声明与快照唯一性）
+
+- 新增 `takeover-scope` 动作与 `appendPriorScope`：仅 takeover 任务、仅 running 状态可追加；记录声明文本、可选理由、实际声明时间与来源 `root-declaration`；同内容重复提交幂等，不覆盖创建时的 `priorScope`，也不追认旧执行。
+- 检查快照目录改为 `check-<n>-<random>`，避免并发检查按 nextNumber 命名冲突；快照仍不自动回收（证据保留），导出会带上快照文件。
+- 验证：Core 接管声明 1 个新单测（含幂等、非 takeover 拒绝）；DSH 探针 takeover 后声明落盘 `count=1`，随后 stop 正常；全套 79 个测试通过。
+- 仍未做：快照回收策略、完整 B 层会话归档、JEV 选型/压缩、单一 npm 包、真实模型、Loom。
