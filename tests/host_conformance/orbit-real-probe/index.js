@@ -153,11 +153,51 @@ Do not stop the task yourself and do not ask questions.`))
   await presetScope?.dispose?.().catch?.(() => undefined)
 }
 
+async function runMemberStop(ctx) {
+  mkdirSync(WORK, { recursive: true })
+  mkdirSync(join(HOME, 'results'), { recursive: true })
+  const handle = await createRoot(ctx)
+  log({ step: 'root-created', sessionId: handle.agent.id, scenario: 'member-stop' })
+  handle.agent.followup(msg(`You are running a controlled Orbit member-stop acceptance. Do exactly this and do not ask questions:
+1. Call orbit with {"action":"start","instruction":"Member stop acceptance."}
+2. Call orbit with {"action":"declare","goal":"run a long member command","acceptance":"the member is stopped by Orbit"}.
+3. From the declare result take the work unit id. Call the subagent tool with description "long sleeper" and a prompt that starts with this exact line: orbit-unit: <the unit id>
+   Then tell the member to call the bash tool with {"command":"sleep 120","description":"long member wait"}.
+4. Do not stop the task yourself and do not ask questions. Wait for the member.`))
+  await new Promise((resolve) => setTimeout(resolve, 15000))
+  const response = await stopViaSocket().catch((error) => ({ error: String(error && error.message) }))
+  log({ step: 'socket-stop', response })
+  let task = latestTask()
+  for (let attempt = 0; attempt < 60 && task?.state?.status === 'running'; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    task = latestTask()
+  }
+  const members = task ? JSON.parse(readFileSync(join(task.dir, 'members.json'), 'utf8')).members : []
+  let sleepLeft = ''
+  try {
+    sleepLeft = execSync('ps -axo pid,command | grep -F "sleep 120" | grep -v grep || true', { encoding: 'utf8' }).trim()
+  } catch {}
+  log({
+    step: 'member-stop-result',
+    status: task?.state?.status,
+    confirmed: task?.state?.stop?.confirmation?.confirmed,
+    missing: task?.state?.stop?.confirmation?.missing,
+    members: members.map((member) => ({ id: member.id, status: member.status, settledAt: member.settledAt })),
+    sleepLeft,
+  })
+  await handle.dispose().catch(() => undefined)
+  await presetScope?.dispose?.().catch?.(() => undefined)
+}
+
 async function run(ctx) {
   mkdirSync(WORK, { recursive: true })
   mkdirSync(join(HOME, 'results'), { recursive: true })
   if (SCENARIO === 'stop') {
     await runStop(ctx)
+    return
+  }
+  if (SCENARIO === 'member-stop') {
+    await runMemberStop(ctx)
     return
   }
   const handle = await createRoot(ctx)

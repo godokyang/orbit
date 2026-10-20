@@ -55,3 +55,17 @@
 - 事件：`stop/requested → stop/confirmed {status: paused}`。
 
 结论：真实运行中的停止能在有界时间内确认，后台 bash 动作被实际终止。该次未覆盖成员执行中停止、检查者进程在途或宿主崩溃后的 `stop_unconfirmed` 重试。
+
+## 追加：成员执行中停止
+
+场景：Root 真实模型 start + declare 后，用 subagent 派发一个成员执行 `sleep 120`；外部 CLI/socket 在成员运行约 10 秒后停止任务。
+
+实际结果：
+
+- `member/registered` 记录成员与 work unit，成员会话在 stop 前已开始执行。
+- stop 请求后任务 `paused`，`stop.confirmation.confirmed=true`、`missing=[]`、四项证据全 true。
+- 成员被记为 `stopped`（`member/settled`），Root 与成员会话均产生归档。
+- `ps` 无残留 `sleep 120`。
+- 事件：`member/registered → stop/requested → member/settled {stopped} → stop/confirmed`。
+
+边界：宿主用 `agent.cancel + whenIdle + settle` 收束成员，未直接持有并 dispose 子 Agent 的 `SubagentActivation`；本次用进程空闲与无 `sleep` 残留作为证据，不宣称 activation 级 dispose 已验证。

@@ -289,3 +289,9 @@ B 阶段开工前只需补一份短设计：JEV 观察输入在 DSH 事件下的
 - 检查者结果仍走原有 record/fail 路径；dispose 后的拒绝被限制在本次检查，不污染后续任务。
 - 验证：checker 单测覆盖 activation 暴露与 dispose；DSH 探针完成链路无回归；全套 101 个测试通过。
 - 未覆盖：真实检查者执行中停止的端到端证据（需要慢检查或真实长检查）；成员执行中停止仍只有取消+settle，未验证子进程残留。
+
+## 实施进展（2026-10-20，真实成员执行中停止）
+
+- 真实模型场景：Root 派发成员执行 `sleep 120`，外部 socket 在约 10 秒后停止；任务 `paused`、确认证据齐全，成员 `stopped`，Root/成员会话归档，无残留 sleep。
+- 边界：成员收束使用 `agent.cancel + whenIdle + settle`，未直接 dispose 子 Agent 的 activation；不宣称 activation 级收束已验证。
+- 仍未覆盖：真实检查者在途停止、宿主崩溃后的 unconfirmed 重试、Loom。
