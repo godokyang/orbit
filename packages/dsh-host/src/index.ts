@@ -192,6 +192,13 @@ function latestCheckView(check: import('@orbit/core').CheckRecord | undefined): 
     requestedAt: check.requestedAt,
     ...(check.startedAt === undefined ? {} : { startedAt: check.startedAt }),
     ...(check.finishedAt === undefined ? {} : { finishedAt: check.finishedAt }),
+    ...(check.model === undefined ? {} : { models: [`${check.model.provider}/${check.model.model}`] }),
+    terminal: check.status === 'completed' ? 'complete' : 'failed',
+    inputDigest: check.inputDigest,
+    input_digest: check.inputDigest,
+    artifact_digest: check.artifactDigest,
+    input_current: check.stale === undefined,
+    stale: check.stale === undefined ? false : true,
     ...(check.result === undefined ? {} : { result: check.result }),
     ...(check.failure === undefined ? {} : { failure: check.failure }),
     ...(check.stale === undefined ? {} : { stale: check.stale }),
@@ -207,7 +214,7 @@ async function projectStatus(service: TaskService): Promise<Record<string, unkno
     checks: status.checks.map((check) => ({ number: check.number, status: check.status, verdict: check.result?.verdict })),
     openFindings: status.openFindings.map((finding) => finding.id),
     openDisputes: status.openDisputes.map((dispute) => dispute.id),
-    revision: status.state.updatedAt,
+    revision: Date.parse(status.state.updatedAt),
     attention: {
       phase: status.state.status === 'running'
         ? (status.state.checks.inFlight === null ? 'working' : 'checking')

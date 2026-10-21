@@ -113,6 +113,13 @@ function latestCheckView(check: CheckRecord | undefined): unknown {
     artifactDigest: check.artifactDigest,
     requestedAt: check.requestedAt,
     ...(check.finishedAt === undefined ? {} : { finishedAt: check.finishedAt }),
+    ...(check.model === undefined ? {} : { models: [`${check.model.provider}/${check.model.model}`] }),
+    terminal: check.status === 'completed' ? 'complete' : 'failed',
+    inputDigest: check.inputDigest,
+    input_digest: check.inputDigest,
+    artifact_digest: check.artifactDigest,
+    input_current: check.stale === undefined,
+    stale: check.stale === undefined ? false : true,
     ...(check.result === undefined ? {} : { result: check.result }),
     ...(check.failure === undefined ? {} : { failure: check.failure }),
     ...(check.stale === undefined ? {} : { stale: check.stale }),
@@ -128,7 +135,7 @@ export async function statusOf(service: TaskService): Promise<StatusView> {
     status.checks,
     status.openFindings.map((finding) => finding.id),
     status.openDisputes.map((dispute) => dispute.id),
-    status.state.updatedAt,
+    Date.parse(status.state.updatedAt),
     {
       phase: status.state.status === 'running'
         ? (status.state.checks.inFlight === null ? 'working' : 'checking')
