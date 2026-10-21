@@ -4,7 +4,7 @@
 // workspace:* dependencies outside the workspace) and writes the bundle list.
 // The published single-package installer replaces this in phase D.
 import { execFileSync } from 'node:child_process'
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -16,7 +16,8 @@ function arg(name, fallback) {
 const repo = resolve(arg('repo', fileURLToPath(new URL('../../..', import.meta.url))))
 const home = resolve(arg('home', process.env.DSH_HOME ?? '/tmp/orbit-profile'))
 const profile = arg('profile', 'orbit-app')
-const template = arg('template', 'web')
+const mode = arg('mode', checker ? 'checker' : profile.includes('node') ? 'node' : 'app')
+const template = arg('template', mode === 'app' ? 'web' : 'sdk')
 const checker = process.argv.includes('--checker')
 const dsh = process.env.DSH_BIN ?? '/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh'
 const packageDist = join(repo, 'packages/orbit/dist/host.mjs')
@@ -59,6 +60,11 @@ const role = checker ? 'checker' : profile.includes('node') ? 'node' : 'app'
 const overlayName = checker ? 'orbit-checker.patch.yml' : profile.includes('node') ? 'orbit-node.patch.yml' : 'orbit-app.patch.yml'
 const overlay = join(repo, 'packages/orbit/profiles', overlayName)
 cpSync(overlay, join(profileDir, 'cordis.patch.yml'))
+if (template === 'web' && role !== 'app') {
+  appendFileSync(join(profileDir, 'cordis.patch.yml'),
+    '\n- id: webserver\n  config:\n    host: 127.0.0.1\n    port: 0\n'
+    + '    compression: gzip\n    compressionLevel: 1\n    compressionThresholdBytes: 1024\n')
+}
 
 const dump = execFileSync(dsh, ['--profile', profile, '--dump-config'], {
   env: { ...process.env, DSH_HOME: home },

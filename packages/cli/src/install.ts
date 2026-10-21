@@ -1,4 +1,4 @@
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { execFileSync } from 'node:child_process'
@@ -63,6 +63,15 @@ export function installProfile(options: InstallOptions): InstallReport {
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
   const overlay = OVERLAYS[options.mode]
   cpSync(join(packageRoot, 'profiles', overlay), join(profileDir, 'cordis.patch.yml'))
+  if (options.template === 'web' && options.mode !== 'app') {
+    // A web-template unattended profile still composes the Web host; bind an
+    // ephemeral port so the human DSH Web keeps 127.0.0.1:3080.
+    appendFileSync(
+      join(profileDir, 'cordis.patch.yml'),
+      '\n- id: webserver\n  config:\n    host: 127.0.0.1\n    port: 0\n'
+      + '    compression: gzip\n    compressionLevel: 1\n    compressionThresholdBytes: 1024\n',
+    )
+  }
   let t0: InstallReport['t0'] = null
   if (options.skipT0 !== true) {
     const t0Path = join(target, 'dist', 't0.mjs')

@@ -352,7 +352,9 @@ export async function runCli(argv: string[], io: Partial<CliIo> = {}): Promise<n
       const report = installProfile({
         home,
         profile: parsed.profile,
-        template: parsed.template ?? 'web',
+        template:
+          parsed.template
+          ?? ((parsed.mode ?? 'app') === 'app' ? 'web' : 'sdk'),
         mode: parsed.mode ?? 'app',
         ...(parsed.skipT0 === true ? { skipT0: true } : {}),
         ...(parsed.packageRoot === undefined ? {} : { packageRoot: parsed.packageRoot }),

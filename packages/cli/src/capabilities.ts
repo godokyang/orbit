@@ -62,7 +62,7 @@ export function buildLaunchSpec(input: {
     command: input.dshBin ?? process.env.DSH_BIN ?? 'dsh',
     profile,
     cwd: input.projectRoot,
-    argv: ['--profile', profile],
+    argv: ['--profile', profile, '--no-open'],
     env: { DSH_HOME: home },
     stdin: 'keep-open',
     control_socket: join(input.projectRoot, '.orbit', 'orbit.sock'),

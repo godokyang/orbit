@@ -14,14 +14,3 @@
   disabled: true
 - id: preset-cordis
   disabled: true
-
-# Unattended profiles must never take the default Web UI port. The web host
-# still composes (the SDK app expects it) but binds an ephemeral port so a
-# human DSH Web session can use 127.0.0.1:3080 at the same time.
-- id: webserver
-  config:
-    host: 127.0.0.1
-    port: 0
-    compression: gzip
-    compressionLevel: 1
-    compressionThresholdBytes: 1024
