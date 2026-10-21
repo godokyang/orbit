@@ -78,7 +78,7 @@ category: missing-terminal
 
 - node config 需同时包含执行模型与 checker 模型在 `allowed_models`；
 - 节点 runtime 必须在私有目录（不能直接在 `/tmp` 下）；
-- DSH headless 会占用 3080，需要先释放；
+- node/checker profile 的 web host 使用临时端口（`port: 0`），不再占用 3080；
 - 不要在 run 进行中重启 node worker，否则会进入 `stop_unknown`。
 
 ## 当前现场/清理
@@ -94,3 +94,15 @@ category: missing-terminal
 1. 修 dsh-sdk checker 的 terminal 超时/收束（或换稳定 checker 环境）；
 2. 跑一次不重启 worker 的完整 Loom run，验证 candidate/reviews/gate complete；
 3. 通过后再完成 V2 最终验收，并按需发布 `@zeen/orbit`。
+
+
+## 2026-10-21 追加：headless profile 不再占用 Web 端口
+
+`orbit-node.patch.yml` 与 `orbit-checker.patch.yml` 现在把 `webserver` 绑定到
+`127.0.0.1:0`（临时端口），保留 `host`/压缩等必需配置。效果：
+
+- headless 节点仍能启动 Web host（SDK app 需要），但不会占用 `127.0.0.1:3080`；
+- 人在同一台机器上可以同时打开 DSH Web（3080）；
+- 已在全新 node profile 验证：进程监听 `127.0.0.1:53767`，3080 空闲。
+
+已有 profile 需要重新执行 `orbit install` 或同步 overlay 后重启节点进程才会生效。
