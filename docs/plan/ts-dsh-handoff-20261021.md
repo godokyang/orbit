@@ -106,3 +106,47 @@ category: missing-terminal
 - 已在全新 node profile 验证：进程监听 `127.0.0.1:53767`，3080 空闲。
 
 已有 profile 需要重新执行 `orbit install` 或同步 overlay 后重启节点进程才会生效。
+
+## 2026-10-21 追加：无头 profile 与真实 run 的现状
+
+### 已修
+
+- `orbit install` 的 node/checker 默认改用 `sdk` 模板；显式 `--template web` 的
+  unattended profile 才追加 `webserver.port: 0`，不会占用 3080。
+- `orbit launch` 统一传 `--no-open`，headless 节点不再打开浏览器。
+- checker 使用 `sdk` 模板且不加载 `@zeen/orbit`，避免 `orbit-host` 等待
+  `agentPresets` 并把警告写到 stdout（会让 `dsh-sdk` 报 protocol 初始化失败）。
+- 节点/ checker 的 `dshBin` 指向当前 npx DSH JS 入口，而不是已失效的 App 路径。
+- 后台 `run_candidate` 首次插入也返回 `self_check_origin`，不再 500。
+
+提交：Orbit `4520163`（v2 / feat/ts-core-dsh），Loom `db46aa2`（v2）。
+
+### 真实 run 已经走到的位置
+
+在本地 Loom + Temporal 上真实跑通：
+
+- headless DSH 节点启动、ZenMux/GLM 执行、写入 `answer.txt`；
+- Orbit `declare → check → finish/accept → complete`，`stop_confirmed`；
+- 节点读取 DSH `visible_text` 自检，提交 candidate（DB 有行）；
+- 逐标准 review 已提交（HTTP 200）。
+
+### 仍未完成的一处
+
+gate 的 S1 review 是 `unverified` 且 `checker.basis = null`。
+
+用同一份 observation / candidate / origin 手工调用
+`build_reports(..., allowed_models=[...])` 会得到 `passed` 且 basis 非空；
+因此这是节点在“先发布过一份没有 origin 的报告、后台保留第一份”的竞态，
+不是 evidence 本身不成立。需要让节点在 candidate 回读 origin 之后再首次
+提交 reviews（或在 origin 缺失时拒绝提交），并避免后台按 candidate/code
+保留旧的 unverified 行。
+
+### 模型
+
+按用户要求，后续测试只用智谱 coding plan cn：
+
+- provider：`zai-coding-cn`
+- 模型：`zai-coding-cn/glm-5.3`
+
+`llm-pi-ai` 的 provider 配置需要从用户 Web profile 的 `cordis.patch.yml`
+带过来，凭据用 `ZAI_CODING_CN_API_KEY`。
